@@ -2,6 +2,7 @@ use log::{debug, error};
 use slint::{Image, Rgba8Pixel, SharedPixelBuffer, Weak};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use threadpool::ThreadPool;
@@ -17,6 +18,9 @@ pub struct ImageLoader {
     full_cache: Arc<Mutex<HashMap<usize, SharedPixelBuffer<Rgba8Pixel>>>>,
     paths: Vec<PathBuf>,
     pool: ThreadPool,
+    active_idx: Arc<AtomicUsize>,
+    full_load_generation: Arc<AtomicUsize>,
+    window_size: usize,
 }
 
 impl ImageLoader {
@@ -26,7 +30,22 @@ impl ImageLoader {
             full_cache: Arc::new(Mutex::new(HashMap::new())),
             paths,
             pool: ThreadPool::new(workers),
+            active_idx: Arc::new(AtomicUsize::new(0)),
+            full_load_generation: Arc::new(AtomicUsize::new(0)),
+            window_size: 3,
         }
+    }
+
+    fn is_job_relevant(
+        target_idx: usize,
+        job_idx: usize,
+        total_len: usize,
+        window_size: usize,
+    ) -> bool {
+        let dist = (target_idx as isize - job_idx as isize).abs() as usize;
+        let wrap_dist = total_len - dist;
+        let actual_dist = dist.min(wrap_dist);
+        actual_dist <= window_size
     }
 
     pub fn load_grid_thumb<F>(
@@ -83,10 +102,6 @@ impl ImageLoader {
         None
     }
 
-    /// Load for Full View.
-    /// 1. Return Full Res from Cache (if exists).
-    /// 2. Else Return Thumbnail from Cache (if exists) AND spawn Full Res load.
-    /// 3. Else Return Placeholder AND spawn Full Res load.
     pub fn load_full_progressive<F>(
         &self,
         index: usize,
@@ -96,6 +111,10 @@ impl ImageLoader {
     where
         F: Fn(MainWindow, Image) + Send + 'static,
     {
+        let job_generation = self.full_load_generation.fetch_add(1, Ordering::Relaxed) + 1;
+        self.active_idx.store(index, Ordering::Relaxed);
+
+        // Check Cache
         {
             let full_handle = self.full_cache.lock().unwrap();
             if let Some(buffer) = full_handle.get(&index) {
@@ -104,22 +123,32 @@ impl ImageLoader {
             }
         }
 
+        // Prepare Backup (Thumbnail else Placeholder)
         let backup_image = {
             let thumb_handle = self.thumb_cache.lock().unwrap();
             if let Some(buffer) = thumb_handle.get(&index) {
-                debug!("Full cache miss, using thumb: {}", index);
                 Image::from_rgba8(buffer.clone())
             } else {
-                debug!("Full & Thumb cache miss, using placeholder: {}", index);
                 Image::from_rgba8(get_placeholder())
             }
         };
 
+        // Spawn Job
         if let Some(path) = self.paths.get(index) {
             let path = path.clone();
             let cache_clone = self.full_cache.clone();
+            let full_load_generation = self.full_load_generation.clone();
 
             self.pool.execute(move || {
+                let current_generation = full_load_generation.load(Ordering::Relaxed);
+                if job_generation < current_generation {
+                    debug!(
+                        "Skipping obsolete job: {} (Generation {} < Current {})",
+                        index, job_generation, current_generation
+                    );
+                    return;
+                }
+
                 let start = Instant::now();
                 let buffer = match image::open(&path) {
                     Ok(dyn_img) => {
@@ -149,7 +178,11 @@ impl ImageLoader {
                         let img = Image::from_rgba8(buffer);
                         on_loaded_full(ui, img);
                     } else {
-                        debug!("Diff curr index, not showing");
+                        debug!(
+                            "Obsolete job (index {}), not showing (current index {})",
+                            index,
+                            ui.get_curr_image_index()
+                        );
                     }
                 });
             });
@@ -158,19 +191,16 @@ impl ImageLoader {
         backup_image
     }
 
-    /// Sliding window cache
     pub fn update_sliding_window(&self, center_idx: usize) {
         let len = self.paths.len();
         if len == 0 {
             return;
         }
 
-        let window_radius = 1;
-
         let mut keep_indices = HashSet::new();
         keep_indices.insert(center_idx);
 
-        for i in 1..=window_radius {
+        for i in 1..=self.window_size {
             let prev = (center_idx as isize - i as isize).rem_euclid(len as isize) as usize;
             keep_indices.insert(prev);
             self.preload_background(prev);
@@ -202,9 +232,16 @@ impl ImageLoader {
         if let Some(path) = self.paths.get(index) {
             let path = path.clone();
             let cache_clone = self.full_cache.clone();
+            let active_idx = self.active_idx.clone();
+            let total_len = self.paths.len();
+            let window_size = self.window_size;
 
             self.pool.execute(move || {
-                // Try without checking this
+                let current_focus = active_idx.load(Ordering::Relaxed);
+                if !Self::is_job_relevant(current_focus, index, total_len, window_size) {
+                    return;
+                }
+
                 if cache_clone.lock().unwrap().contains_key(&index) {
                     return;
                 }
@@ -217,7 +254,6 @@ impl ImageLoader {
                         rgba.height(),
                     );
                     cache_clone.lock().unwrap().insert(index, buffer);
-                    debug!("Preloaded: {}", index);
                 }
             });
         }
