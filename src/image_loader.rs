@@ -145,8 +145,12 @@ impl ImageLoader {
                 cache_clone.lock().unwrap().insert(index, buffer.clone());
 
                 let _ = ui_handle.upgrade_in_event_loop(move |ui| {
-                    let img = Image::from_rgba8(buffer);
-                    on_loaded_full(ui, img);
+                    if index == ui.get_curr_image_index() as usize {
+                        let img = Image::from_rgba8(buffer);
+                        on_loaded_full(ui, img);
+                    } else {
+                        debug!("Diff curr index, not showing");
+                    }
                 });
             });
         }

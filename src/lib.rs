@@ -168,7 +168,6 @@ pub fn run(config: &Config) -> Result<(), Box<dyn Error>> {
         let display_img =
             loader_full.load_full_progressive(index, window_weak_cb, move |ui, final_img| {
                 ui.set_full_view_image(final_img);
-                // dbg!("ui.set_full_view_image(final_img);");
             });
 
         ui.set_full_view_image(display_img);
