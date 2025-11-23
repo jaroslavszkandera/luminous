@@ -126,6 +126,10 @@ pub fn run(config: &Config) -> Result<(), Box<dyn Error>> {
     let grid_model = Rc::new(VecModel::from(grid_data));
     main_window.set_grid_model(grid_model.clone().into());
 
+    main_window.on_quit_app(move || {
+        let _ = slint::quit_event_loop();
+    });
+
     // Grid View
     let loader_grid = loader.clone();
     let window_weak = main_window.as_weak();

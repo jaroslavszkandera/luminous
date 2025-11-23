@@ -20,6 +20,7 @@ export component MainWindow inherits Window {
     callback request_next_image();
     callback request_prev_image();
     callback image_selected(int);
+    callback quit_app();
 
     in property <[GridItem]> grid_model;
     in property <image> full_view_image;
@@ -29,6 +30,10 @@ export component MainWindow inherits Window {
     forward-focus: my-key-handler;
     my-key-handler := FocusScope {
         key-pressed(event) => {
+            if (event.text == "q") {
+                root.quit_app();
+                return accept;
+            }
             if (root.view-mode == ViewMode.full) {
                 if (event.text == "h" || event.text == Key.LeftArrow) {
                     debug("LeftArrow or 'h' pressed: prev_image");
@@ -95,15 +100,27 @@ export component MainWindow inherits Window {
 
     full_view := VerticalLayout {
         visible: root.view-mode == ViewMode.full;
-        padding: 0px;
-        spacing: 0px;
         width: 100%;
         height: 100%;
-        Image {
-            source: root.full_view_image;
-            image-fit: contain;
+        TouchArea {
             width: 100%;
             height: 100%;
+
+            scroll-event(event) => {
+                if (event.delta-y > 0) {
+                    root.request_prev_image();
+                } else if (event.delta-y < 0) {
+                    root.request_next_image();
+                }
+                accept
+            }
+
+            Image {
+                source: root.full_view_image;
+                image-fit: contain;
+                width: 100%;
+                height: 100%;
+            }
         }
     }
 }
