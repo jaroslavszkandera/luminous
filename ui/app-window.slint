@@ -24,7 +24,7 @@ export component MainWindow inherits Window {
     in property <[GridItem]> grid_model;
     in property <image> full_view_image;
     in-out property <int> curr_image_index: 0;
-    in-out property <ViewMode> view_mode: ViewMode.full;
+    in-out property <ViewMode> view_mode: ViewMode.grid;
 
     forward-focus: my-key-handler;
     my-key-handler := FocusScope {
@@ -52,14 +52,26 @@ export component MainWindow inherits Window {
 
     grid_view := ScrollView {
         visible: root.view-mode == ViewMode.grid;
-        HorizontalLayout {
-            padding: 0px;
-            spacing: 0px;
-            for item in root.grid_model: Rectangle {
-                width: 100px;
-                height: 100px;
-                clip: true;
+        viewport-height: grid_container.height;
 
+        grid_container := Rectangle {
+            width: parent.width;
+            property <length> item-w: 200px;
+            property <length> item-h: 200px;
+            property <length> gap: 0px;
+
+            property <int> cols: max(1, floor(root.width / (item-w + gap)));
+            property <int> rows: (root.grid_model.length + cols - 1) / cols;
+            height: (rows * (item-h + gap)) + gap;
+
+            for item[i] in root.grid_model: Rectangle {
+                width: parent.item-w;
+                height: parent.item-h;
+                x: Math.mod(i, parent.cols) * (parent.item-w + parent.gap) + parent.gap;
+                y: floor(i / parent.cols) * (parent.item-h + parent.gap) + parent.gap;
+
+                clip: true;
+                border-radius: 0px;
                 Image {
                     source: item.image;
                     image-fit: cover;
@@ -74,7 +86,7 @@ export component MainWindow inherits Window {
                 TouchArea {
                     clicked => {
                         root.image_selected(item.index);
-                        root.view-mode = ViewMode.full;
+                        root.view_mode = ViewMode.full;
                     }
                 }
             }

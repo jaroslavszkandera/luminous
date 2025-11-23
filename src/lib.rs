@@ -114,7 +114,7 @@ pub fn run(config: &Config) -> Result<(), Box<dyn Error>> {
     }
 
     let main_window = MainWindow::new().unwrap();
-    let loader = Rc::new(ImageLoader::new(paths.clone(), 4));
+    let loader = Rc::new(ImageLoader::new(paths.clone(), 8));
 
     let mut grid_data = Vec::new();
     for (i, _) in paths.iter().enumerate() {
@@ -130,6 +130,7 @@ pub fn run(config: &Config) -> Result<(), Box<dyn Error>> {
     let loader_grid = loader.clone();
     let window_weak = main_window.as_weak();
 
+    // FIX: Grid data loading init blocks Full loading
     main_window.on_request_grid_data(move |index| {
         let index = index as usize;
         if let Some(loader) = loader_grid.clone().into() {
@@ -218,7 +219,6 @@ pub fn run(config: &Config) -> Result<(), Box<dyn Error>> {
         debug!("Initializing Full View at index {}", start_idx);
         let handle = main_window.as_weak().upgrade().unwrap();
         update_full_view(handle, start_idx);
-        main_window.set_view_mode(ViewMode::Full);
     }
 
     main_window.run()?;
