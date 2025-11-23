@@ -28,6 +28,7 @@ export component MainWindow inherits Window {
     in-out property <int> curr_image_index: 0;
     in-out property <ViewMode> view_mode: ViewMode.full;
     in-out property <bool> is_fullscreen: false;
+    in-out property <int> grid_cols: 5;
 
     forward-focus: my-key-handler;
     my-key-handler := FocusScope {
@@ -42,18 +43,18 @@ export component MainWindow inherits Window {
             }
             if (root.view-mode == ViewMode.full) {
                 if (event.text == "h" || event.text == Key.LeftArrow) {
-                    debug("LeftArrow or 'h' pressed: prev_image");
+                    // debug("LeftArrow or 'h' pressed: prev_image");
                     root.request_prev_image();
                 } else if (event.text == "l" || event.text == Key.RightArrow) {
-                    debug("RightArrow or 'l' pressed: next_image");
+                    // debug("RightArrow or 'l' pressed: next_image");
                     root.request_next_image();
                 } else if (event.text == Key.Escape) {
-                    debug("Esc key pressed: switching to grid mode");
+                    // debug("Esc key pressed: switching to grid mode");
                     root.view_mode = ViewMode.grid;
                 }
             } else if (root.view-mode == ViewMode.grid) {
                 if (event.text == Key.Escape) {
-                    debug("Esc key pressed: switching to full mode");
+                    // debug("Esc key pressed: switching to full mode");
                     root.view_mode = ViewMode.full;
                 }
             }
@@ -65,39 +66,58 @@ export component MainWindow inherits Window {
         visible: root.view-mode == ViewMode.grid;
         viewport-height: grid_container.height;
 
-        grid_container := Rectangle {
-            width: parent.width;
-            property <length> item-w: 200px;
-            property <length> item-h: 200px;
+        TouchArea {
+            width: 100%;
+            property <int> step: 0;
+            property <int> cols: root.grid_cols;
             property <length> gap: 0px;
-
-            property <int> cols: max(1, floor(root.width / (item-w + gap)));
+            property <length> item-size: (parent.width - (cols + 1) * gap) / cols;
             property <int> rows: (root.grid_model.length + cols - 1) / cols;
-            height: (rows * (item-h + gap)) + gap;
+            height: (rows * item-size) + ((rows + 1) * gap);
 
-            for item[i] in root.grid_model: Rectangle {
-                width: parent.item-w;
-                height: parent.item-h;
-                x: Math.mod(i, parent.cols) * (parent.item-w + parent.gap) + parent.gap;
-                y: floor(i / parent.cols) * (parent.item-h + parent.gap) + parent.gap;
-
-                clip: true;
-                border-radius: 0px;
-                Image {
-                    source: item.image;
-                    image-fit: cover;
-                    width: 100%;
-                    height: 100%;
-
-                    init => {
-                        root.request_grid_data(item.index);
+            scroll-event(event) => {
+                if (event.modifiers.control) {
+                    if event.delta-y > 0 {
+                        step = -1;
+                    } else if event.delta-y < 0 {
+                        step = 1;
                     }
+                    root.grid_cols = clamp(root.grid_cols + step, 1, 20);
+                    accept
                 }
+                reject
+            }
 
-                TouchArea {
-                    clicked => {
-                        root.image_selected(item.index);
-                        root.view_mode = ViewMode.full;
+            grid_container := Rectangle {
+                width: parent.width;
+                height: parent.height;
+                property <length> item-size: parent.item-size;
+                property <length> gap: parent.gap;
+                property <int> cols: parent.cols;
+
+                for item[i] in root.grid_model: Rectangle {
+                    width: parent.item-size;
+                    height: parent.item-size;
+                    x: (Math.mod(i, parent.cols) * (parent.item-size + parent.gap)) + parent.gap;
+                    y: (floor(i / parent.cols) * (parent.item-size + parent.gap)) + parent.gap;
+
+                    clip: true;
+                    Image {
+                        source: item.image;
+                        image-fit: cover;
+                        width: 100%;
+                        height: 100%;
+
+                        init => {
+                            root.request_grid_data(item.index);
+                        }
+                    }
+
+                    TouchArea {
+                        clicked => {
+                            root.image_selected(item.index);
+                            root.view_mode = ViewMode.full;
+                        }
                     }
                 }
             }
