@@ -1,8 +1,8 @@
 import { ScrollView } from "std-widgets.slint";
 
-export struct ImageData {
-    thumbnail: image,
-    source_path: string,
+export struct GridItem {
+  image: image,
+  index: int,
 }
 
 export enum ViewMode {
@@ -11,20 +11,18 @@ export enum ViewMode {
 }
 
 export component MainWindow inherits Window {
-    background: black;
-    // width: 1280px;
-    // height: 720px;
-    title: "Ahoj svete!";
+    title: "Luminous";
+    background: #000000;
 
-    callback request_show_image(int);
+    callback request_grid_data(int);
     callback request_next_image();
     callback request_prev_image();
+    callback image_selected(int);
 
-    in property <[ImageData]> images;
-    in property <image> curr_image;
-
-    in-out property <int> curr_image_index: 0;
+    in property <[GridItem]> grid_model;
+    in property <image> full_view_image;
     private property <ViewMode> view_mode: ViewMode.full;
+    in-out property <int> curr_image_index: 0;
 
     forward-focus: my-key-handler;
     my-key-handler := FocusScope {
@@ -55,30 +53,40 @@ export component MainWindow inherits Window {
         HorizontalLayout {
             padding: 0px;
             spacing: 0px;
-            for data[i] in root.images: TouchArea {
+            for item in root.grid_model: Rectangle {
+                width: 100px;
+                height: 100px;
+                clip: true;
+
                 Image {
-                    source: data.thumbnail;
-                    width: 200px;
-                    height: 200px;
-                    image-fit: contain;
+                    source: item.image;
+                    image-fit: cover;
+                    width: 100%;
+                    height: 100%;
+
+                    init => {
+                        root.request_grid_data(item.index);
+                    }
                 }
 
-                clicked => {
-                    root.request_show_image(i);
-                    root.view-mode = ViewMode.full;
+                TouchArea {
+                    clicked => {
+                        root.image_selected(item.index);
+                        root.view-mode = ViewMode.full;
+                    }
                 }
             }
         }
     }
 
-    full_view := VerticalLayout { // NOTE: full_view := ... added
+    full_view := VerticalLayout {
         visible: root.view-mode == ViewMode.full;
         padding: 0px;
         spacing: 0px;
         width: 100%;
         height: 100%;
         Image {
-            source: root.curr_image;
+            source: root.full_view_image;
             image-fit: contain;
             width: 100%;
             height: 100%;

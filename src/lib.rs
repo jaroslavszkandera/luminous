@@ -1,17 +1,14 @@
 slint::include_modules!();
 
-mod image_ring_cache;
-use image_ring_cache::ImageRingCache;
+mod image_loader;
+use image_loader::ImageLoader;
 
-use image;
 use log::{debug, error, info};
-use slint::{Image, Rgba8Pixel, SharedPixelBuffer};
-use std::cell::RefCell;
+use slint::{Image, Model, VecModel};
 use std::error::Error;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::time::Instant;
 use walkdir::WalkDir;
 
 pub struct Config {
@@ -53,7 +50,7 @@ fn load_img_paths(path_str: &str) -> (Vec<PathBuf>, usize) {
     let main_path = Path::new(&path_str);
     let metadata = fs::metadata(main_path).unwrap();
 
-    let mut img_paths: Vec<PathBuf> = Vec::new();
+    let mut paths: Vec<PathBuf> = Vec::new();
     let mut starting_index: usize = 0;
     let mut start_img_path: Option<PathBuf> = None;
 
@@ -87,11 +84,11 @@ fn load_img_paths(path_str: &str) -> (Vec<PathBuf>, usize) {
         if path.is_file() && is_img_path(&path) {
             if let Some(ref curr) = start_img_path {
                 if path == *curr {
-                    starting_index = img_paths.len();
+                    starting_index = paths.len();
                     info!("Starting image set to index: {}", starting_index);
                 }
             }
-            img_paths.push(path);
+            paths.push(path);
         }
     }
     if metadata.is_dir() {
@@ -101,102 +98,130 @@ fn load_img_paths(path_str: &str) -> (Vec<PathBuf>, usize) {
 
     info!(
         "Found {} images. Starting index: {}",
-        img_paths.len(),
+        paths.len(),
         starting_index
     );
-    (img_paths, starting_index)
-}
-
-fn load_img(path: &Path) -> Result<Image, Box<dyn Error>> {
-    let img_name = path.file_name().unwrap();
-    debug!("Loading full image: {}", img_name.display());
-    let load_start = Instant::now();
-    let dyn_img = image::open(path)?;
-    let rgba_img = dyn_img.to_rgba8();
-    let (width, height) = rgba_img.dimensions();
-    let buffer =
-        SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(rgba_img.as_raw(), width, height);
-    debug!(
-        "Image loaded in {:.2} ms ({})",
-        load_start.elapsed().as_millis(),
-        img_name.display()
-    );
-    Ok(Image::from_rgba8(buffer))
-}
-
-fn create_placeholder_image() -> Image {
-    let buffer = SharedPixelBuffer::<Rgba8Pixel>::new(200, 200);
-    Image::from_rgba8(buffer)
-}
-
-fn setup_callbacks(main_window: &MainWindow, cache: Rc<RefCell<ImageRingCache>>) {
-    let window_weak = main_window.as_weak();
-    let cache_clone = cache.clone();
-
-    main_window.on_request_next_image(move || {
-        if let Some(main_window) = window_weak.upgrade() {
-            match cache_clone.borrow_mut().get_next() {
-                Ok(img) => {
-                    main_window.set_curr_image(img);
-                    // main_window.set_curr_image_index(cache_clone.borrow().paths_index as i32);
-                }
-                Err(e) => {
-                    error!("Error moving to next image: {}", e);
-                    main_window.set_curr_image(create_placeholder_image());
-                }
-            }
-        }
-    });
-
-    let window_weak = main_window.as_weak();
-    let cache_clone = cache.clone();
-
-    main_window.on_request_prev_image(move || {
-        if let Some(main_window) = window_weak.upgrade() {
-            match cache_clone.borrow_mut().get_prev() {
-                Ok(img) => {
-                    main_window.set_curr_image(img);
-                    // main_window.set_curr_image_index(cache_clone.borrow().paths_index as i32);
-                }
-                Err(e) => {
-                    error!("Error moving to previous image: {}", e);
-                    main_window.set_curr_image(create_placeholder_image());
-                }
-            }
-        }
-    });
+    (paths, starting_index)
 }
 
 pub fn run(config: &Config) -> Result<(), Box<dyn Error>> {
     info!("Running with path: {}", &config.path);
-    let (img_paths, start_idx) = load_img_paths(&config.path);
+    let (paths, start_idx) = load_img_paths(&config.path);
 
-    if img_paths.is_empty() {
+    if paths.is_empty() {
         error!("No images found at path: {}", &config.path);
         return Err("No images found".into());
     }
+
     let main_window = MainWindow::new().unwrap();
+    let loader = Rc::new(ImageLoader::new(paths.clone(), 4));
 
-    let initial_image = load_img(&img_paths[start_idx]).unwrap_or_else(|e| {
-        error!(
-            "Failed to load initial image {}: {}",
-            img_paths[start_idx].display(),
-            e
-        );
-        create_placeholder_image()
+    let mut grid_data = Vec::new();
+    for (i, _) in paths.iter().enumerate() {
+        grid_data.push(GridItem {
+            image: slint::Image::default(),
+            index: i as i32,
+        });
+    }
+    let grid_model = Rc::new(VecModel::from(grid_data));
+    main_window.set_grid_model(grid_model.clone().into());
+
+    let loader_grid = loader.clone();
+    let window_weak = main_window.as_weak();
+
+    main_window.on_request_grid_data(move |index| {
+        let index = index as usize;
+        if let Some(loader) = loader_grid.clone().into() {
+            // Standard async completion callback
+            let on_image_loaded = move |ui: MainWindow, idx: usize, img: slint::Image| {
+                let model = ui.get_grid_model();
+                if let Some(mut item) = model.row_data(idx) {
+                    item.image = img;
+                    model.set_row_data(idx, item);
+                }
+            };
+
+            let cached_buffer = loader.load_lazy(index, window_weak.clone(), on_image_loaded);
+
+            if let Some(buffer) = cached_buffer {
+                let window_weak_defer = window_weak.clone();
+
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(ui) = window_weak_defer.upgrade() {
+                        let model = ui.get_grid_model();
+                        if let Some(mut item) = model.row_data(index) {
+                            // Reconstruct Image on the main thread
+                            item.image = Image::from_rgba8(buffer);
+                            model.set_row_data(index, item);
+                        }
+                    }
+                });
+            }
+        }
     });
-    main_window.set_curr_image(initial_image);
-    main_window.set_curr_image_index(start_idx as i32);
 
-    let img_paths = Rc::new(img_paths);
-    let image_ring_cache = Rc::new(std::cell::RefCell::new(ImageRingCache::new(
-        img_paths.clone(),
-        10, // half_cache_size
-        start_idx,
-    )));
-    setup_callbacks(&main_window, image_ring_cache.clone());
+    // Full view
+    let loader_full = loader.clone();
+    let paths_len = paths.len();
 
-    info!("Starting Slint event loop...");
-    main_window.run().unwrap();
+    let update_full_view = move |ui: MainWindow, index: usize| {
+        let img = loader_full.load_full(index);
+        ui.set_full_view_image(img);
+        ui.set_curr_image_index(index as i32);
+
+        // Preloading
+        if index > 0 {
+            loader_full.preload(index - 1);
+        } else {
+            loader_full.preload(paths_len - 1);
+        }
+
+        if index + 1 < paths_len {
+            loader_full.preload(index + 1);
+        } else {
+            loader_full.preload(0);
+        }
+    };
+
+    let update_fn = update_full_view.clone();
+    let window_weak_select = main_window.as_weak();
+    main_window.on_image_selected(move |index| {
+        if let Some(ui) = window_weak_select.upgrade() {
+            update_fn(ui, index as usize);
+        }
+    });
+
+    let update_fn = update_full_view.clone();
+    let window_weak_next = main_window.as_weak();
+    main_window.on_request_next_image(move || {
+        if let Some(ui) = window_weak_next.upgrade() {
+            let mut idx = ui.get_curr_image_index() as usize;
+            idx += 1;
+            if idx >= paths_len {
+                idx = 0;
+            }
+            update_fn(ui, idx);
+        }
+    });
+
+    let update_fn = update_full_view.clone();
+    let window_weak_prev = main_window.as_weak();
+    main_window.on_request_prev_image(move || {
+        if let Some(ui) = window_weak_prev.upgrade() {
+            let mut idx = ui.get_curr_image_index() as isize;
+            idx -= 1;
+            if idx < 0 {
+                idx = (paths_len - 1) as isize;
+            }
+            update_fn(ui, idx as usize);
+        }
+    });
+
+    if !paths.is_empty() {
+        debug!("Initializing full view at index {}", start_idx);
+        update_full_view(main_window.as_weak().upgrade().unwrap(), start_idx);
+    }
+
+    main_window.run()?;
     Ok(())
 }
