@@ -48,6 +48,7 @@ impl ImageLoader {
         actual_dist <= window_size
     }
 
+    // source: https://github.com/slint-ui/slint/discussions/5140
     pub fn load_grid_thumb<F>(
         &self,
         index: usize,
