@@ -13,8 +13,9 @@ export enum ViewMode {
 export component MainWindow inherits Window {
     title: "Luminous";
     background: #000000;
-    width: 1920px;
-    height: 1080px;
+    // width: 1920px;
+    // height: 1080px;
+    full-screen: self.is_fullscreen;
 
     callback request_grid_data(int);
     callback request_next_image();
@@ -25,13 +26,18 @@ export component MainWindow inherits Window {
     in property <[GridItem]> grid_model;
     in property <image> full_view_image;
     in-out property <int> curr_image_index: 0;
-    in-out property <ViewMode> view_mode: ViewMode.grid;
+    in-out property <ViewMode> view_mode: ViewMode.full;
+    in-out property <bool> is_fullscreen: false;
 
     forward-focus: my-key-handler;
     my-key-handler := FocusScope {
         key-pressed(event) => {
             if (event.text == "q") {
                 root.quit_app();
+                return accept;
+            }
+            if (event.text == "f") {
+                root.is_fullscreen = !root.is_fullscreen;
                 return accept;
             }
             if (root.view-mode == ViewMode.full) {
