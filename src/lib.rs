@@ -126,14 +126,14 @@ pub fn run(config: &Config) -> Result<(), Box<dyn Error>> {
     let grid_model = Rc::new(VecModel::from(grid_data));
     main_window.set_grid_model(grid_model.clone().into());
 
+    // Grid View
     let loader_grid = loader.clone();
     let window_weak = main_window.as_weak();
 
     main_window.on_request_grid_data(move |index| {
         let index = index as usize;
         if let Some(loader) = loader_grid.clone().into() {
-            // Standard async completion callback
-            let on_image_loaded = move |ui: MainWindow, idx: usize, img: slint::Image| {
+            let on_loaded = move |ui: MainWindow, idx: usize, img: slint::Image| {
                 let model = ui.get_grid_model();
                 if let Some(mut item) = model.row_data(idx) {
                     item.image = img;
@@ -141,16 +141,14 @@ pub fn run(config: &Config) -> Result<(), Box<dyn Error>> {
                 }
             };
 
-            let cached_buffer = loader.load_lazy(index, window_weak.clone(), on_image_loaded);
+            let cached = loader.load_grid_thumb(index, window_weak.clone(), on_loaded);
 
-            if let Some(buffer) = cached_buffer {
+            if let Some(buffer) = cached {
                 let window_weak_defer = window_weak.clone();
-
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(ui) = window_weak_defer.upgrade() {
                         let model = ui.get_grid_model();
                         if let Some(mut item) = model.row_data(index) {
-                            // Reconstruct Image on the main thread
                             item.image = Image::from_rgba8(buffer);
                             model.set_row_data(index, item);
                         }
@@ -160,29 +158,26 @@ pub fn run(config: &Config) -> Result<(), Box<dyn Error>> {
         }
     });
 
-    // Full view
+    // Full View
     let loader_full = loader.clone();
     let paths_len = paths.len();
 
     let update_full_view = move |ui: MainWindow, index: usize| {
-        let img = loader_full.load_full(index);
-        ui.set_full_view_image(img);
+        let window_weak_cb = ui.as_weak();
+
+        let display_img =
+            loader_full.load_full_progressive(index, window_weak_cb, move |ui, final_img| {
+                ui.set_full_view_image(final_img);
+                // dbg!("ui.set_full_view_image(final_img);");
+            });
+
+        ui.set_full_view_image(display_img);
         ui.set_curr_image_index(index as i32);
 
-        // Preloading
-        if index > 0 {
-            loader_full.preload(index - 1);
-        } else {
-            loader_full.preload(paths_len - 1);
-        }
-
-        if index + 1 < paths_len {
-            loader_full.preload(index + 1);
-        } else {
-            loader_full.preload(0);
-        }
+        loader_full.update_sliding_window(index);
     };
 
+    // Callback: Selection from Grid
     let update_fn = update_full_view.clone();
     let window_weak_select = main_window.as_weak();
     main_window.on_image_selected(move |index| {
@@ -191,6 +186,7 @@ pub fn run(config: &Config) -> Result<(), Box<dyn Error>> {
         }
     });
 
+    // Callback: Next
     let update_fn = update_full_view.clone();
     let window_weak_next = main_window.as_weak();
     main_window.on_request_next_image(move || {
@@ -204,6 +200,7 @@ pub fn run(config: &Config) -> Result<(), Box<dyn Error>> {
         }
     });
 
+    // Callback: Prev
     let update_fn = update_full_view.clone();
     let window_weak_prev = main_window.as_weak();
     main_window.on_request_prev_image(move || {
@@ -217,9 +214,12 @@ pub fn run(config: &Config) -> Result<(), Box<dyn Error>> {
         }
     });
 
+    // Init
     if !paths.is_empty() {
-        debug!("Initializing full view at index {}", start_idx);
-        update_full_view(main_window.as_weak().upgrade().unwrap(), start_idx);
+        debug!("Initializing Full View at index {}", start_idx);
+        let handle = main_window.as_weak().upgrade().unwrap();
+        update_full_view(handle, start_idx);
+        main_window.set_view_mode(ViewMode::Full);
     }
 
     main_window.run()?;
