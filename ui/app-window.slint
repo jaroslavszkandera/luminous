@@ -30,6 +30,9 @@ export component MainWindow inherits Window {
     in-out property <bool> is_fullscreen: false;
     in-out property <int> grid_cols: 5;
 
+    in-out property <length> curr_mouse_x: 0px;
+    in-out property <length> curr_mouse_y: 0px;
+
     forward-focus: my-key-handler;
     my-key-handler := FocusScope {
         key-pressed(event) => {
@@ -124,28 +127,38 @@ export component MainWindow inherits Window {
         }
     }
 
-    full_view := VerticalLayout {
+    full_view := TouchArea {
         visible: root.view-mode == ViewMode.full;
         width: 100%;
         height: 100%;
-        TouchArea {
-            width: 100%;
-            height: 100%;
 
-            scroll-event(event) => {
-                if (event.delta-y > 0) {
-                    root.request_prev_image();
-                } else if (event.delta-y < 0) {
-                    root.request_next_image();
-                }
-                accept
+        scroll-event(event) => {
+            if (event.delta-y > 0) {
+                root.request_prev_image();
+            } else if (event.delta-y < 0) {
+                root.request_next_image();
             }
+            accept
+        }
 
+        rect_img := TouchArea {
             Image {
                 source: root.full_view_image;
                 image-fit: contain;
                 width: 100%;
                 height: 100%;
+                Rectangle {
+                    height: 16px;
+                    y: parent.height - self.height;
+                    width: 100%;
+                    background: #000000a0;
+                    Text {
+                        x: 0px;
+                        font-size: 12px;
+                        text: "[x,y]=[" + rect_img.mouse-x / 1px + "," + rect_img.mouse-y / 1px + "]";
+                        color: white;
+                    }
+                }
             }
         }
     }
