@@ -1,3 +1,4 @@
+use image::Rgba;
 use log::{debug, error};
 use slint::{Image, Rgba8Pixel, SharedPixelBuffer, Weak};
 use std::collections::{HashMap, HashSet};
@@ -258,5 +259,27 @@ impl ImageLoader {
                 }
             });
         }
+    }
+
+    pub fn get_curr_active_image(&self) -> Option<SharedPixelBuffer<Rgba8Pixel>> {
+        let active_idx = self.active_idx.load(Ordering::Relaxed);
+        let full_handle = self.full_cache.lock().unwrap();
+        if let Some(buffer) = full_handle.get(&active_idx) {
+            return Some(buffer.clone());
+        }
+        // NOTE: Failsafe
+        error!("Current image not loaded (index: {})", active_idx);
+        None
+    }
+
+    pub fn set_curr_active_image(&self, new_buffer: SharedPixelBuffer<Rgba8Pixel>) {
+        let active_idx = self.active_idx.load(Ordering::Relaxed);
+
+        let mut full_handle = self.full_cache.lock().unwrap();
+        full_handle.insert(active_idx, new_buffer.clone());
+
+        // TODO: resize to thumbnail
+        let mut thumb_handle = self.thumb_cache.lock().unwrap();
+        thumb_handle.insert(active_idx, new_buffer);
     }
 }

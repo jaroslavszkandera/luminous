@@ -4,7 +4,7 @@ mod image_loader;
 use image_loader::ImageLoader;
 
 use log::{debug, error, info};
-use slint::{Image, Model, VecModel};
+use slint::{Image, Model, Rgba8Pixel, SharedPixelBuffer, VecModel};
 use std::error::Error;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -130,11 +130,11 @@ pub fn run(config: &Config) -> Result<(), Box<dyn Error>> {
         let _ = slint::quit_event_loop();
     });
 
+    // FIX: Grid data loading init blocks Full loading
     // Grid View
     let loader_grid = loader.clone();
     let window_weak = main_window.as_weak();
 
-    // FIX: Grid data loading init blocks Full loading
     main_window.on_request_grid_data(move |index| {
         let index = index as usize;
         if let Some(loader) = loader_grid.clone().into() {
@@ -215,6 +215,84 @@ pub fn run(config: &Config) -> Result<(), Box<dyn Error>> {
                 idx = (paths_len - 1) as isize;
             }
             update_fn(ui, idx as usize);
+        }
+    });
+
+    // Callback: Rotate +90
+    // TODO: Redo it better
+    let update_fn = update_full_view.clone();
+    let window_weak = main_window.as_weak();
+    let loader_full = loader.clone();
+    main_window.on_rotate_plus_90(move || {
+        let loader = loader_full.clone();
+
+        if let Some(curr_buffer) = loader.get_curr_active_image() {
+            let width = curr_buffer.width();
+            let height = curr_buffer.height();
+
+            let raw: Vec<u8> = curr_buffer
+                .as_slice()
+                .iter()
+                .flat_map(|pixel| [pixel.r, pixel.g, pixel.b, pixel.a])
+                .collect();
+
+            if let Some(image_buffer) = image::RgbaImage::from_raw(width, height, raw) {
+                let rot = image::imageops::rotate90(&image_buffer);
+                let new_buf = SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
+                    rot.as_raw(),
+                    rot.width(),
+                    rot.height(),
+                );
+                loader.set_curr_active_image(new_buf.clone());
+
+                if let Some(ui) = window_weak.upgrade() {
+                    let idx = ui.get_curr_image_index() as usize;
+                    update_fn(ui, idx);
+                } else {
+                    error!("Failed to create image buffer for rotation");
+                }
+            }
+        } else {
+            error!("Image probably not loaded");
+        }
+    });
+
+    // Callback: Rotate -90
+    // TODO: Redo it better
+    let update_fn = update_full_view.clone();
+    let window_weak = main_window.as_weak();
+    let loader_full = loader.clone();
+    main_window.on_rotate_minus_90(move || {
+        let loader = loader_full.clone();
+
+        if let Some(curr_buffer) = loader.get_curr_active_image() {
+            let width = curr_buffer.width();
+            let height = curr_buffer.height();
+
+            let raw: Vec<u8> = curr_buffer
+                .as_slice()
+                .iter()
+                .flat_map(|pixel| [pixel.r, pixel.g, pixel.b, pixel.a])
+                .collect();
+
+            if let Some(image_buffer) = image::RgbaImage::from_raw(width, height, raw) {
+                let rot = image::imageops::rotate270(&image_buffer);
+                let new_buf = SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
+                    rot.as_raw(),
+                    rot.width(),
+                    rot.height(),
+                );
+                loader.set_curr_active_image(new_buf);
+
+                if let Some(ui) = window_weak.upgrade() {
+                    let idx = ui.get_curr_image_index() as usize;
+                    update_fn(ui, idx);
+                } else {
+                    error!("Failed to create image buffer for rotation");
+                }
+            }
+        } else {
+            error!("Image probably not loaded");
         }
     });
 
