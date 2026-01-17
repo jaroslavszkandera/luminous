@@ -1,4 +1,3 @@
-use image::Rgba;
 use log::{debug, error};
 use slint::{Image, Rgba8Pixel, SharedPixelBuffer, Weak};
 use std::collections::{HashMap, HashSet};
