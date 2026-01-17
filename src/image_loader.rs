@@ -73,7 +73,7 @@ impl ImageLoader {
                 let start = Instant::now();
                 let buffer = match image::open(&path) {
                     Ok(dyn_img) => {
-                        let dyn_img = dyn_img.thumbnail(200, 200);
+                        let dyn_img = dyn_img.thumbnail(500, 500);
                         let rgba = dyn_img.to_rgba8();
                         SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
                             rgba.as_raw(),
