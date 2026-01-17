@@ -1,12 +1,11 @@
-
 # Luminous
 
-Image viewer/editor.
+Image viewer and editor build with Rust and Slint.
 
 ## Quick Start
 
 ```bash
-cargo run --relese -- ./path/to/your/images
+cargo run --release -- ./path/to/your/images
 ```
 
 # Controls
@@ -20,6 +19,7 @@ cargo run --relese -- ./path/to/your/images
 | Right Arrow/l | Next Image                     |
 | Ctrl + Scroll | Increase/Decrease Grid Columns |
 | Scroll        | Navigate Images                |
+| Right Click   | Context Menu                   |
 
 # Roadmap
 
