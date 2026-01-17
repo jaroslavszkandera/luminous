@@ -1,6 +1,6 @@
 # Luminous
 
-Image viewer and editor build with Rust and Slint.
+Image viewer and editor built with Rust and Slint.
 
 ## Quick Start
 
@@ -8,7 +8,7 @@ Image viewer and editor build with Rust and Slint.
 cargo run --release -- ./path/to/your/images
 ```
 
-# Controls
+## Controls
 
 | Key           | Action                         |
 | ------------- | ------------------------------ |
@@ -21,7 +21,7 @@ cargo run --release -- ./path/to/your/images
 | Scroll        | Navigate Images                |
 | Right Click   | Context Menu                   |
 
-# Roadmap
+## Roadmap
 
 - [ ] Right click context menu
 - [ ] Dynamic grid view
