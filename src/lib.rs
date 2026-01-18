@@ -1,99 +1,23 @@
 slint::include_modules!();
 
 pub mod config;
+pub mod fs_scan;
 mod image_loader;
-use config::Config;
+
+use fs_scan::ScanResult;
 use image_loader::ImageLoader;
 
-use log::{debug, error, info};
+use log::{debug, error};
 use slint::{Image, Model, Rgba8Pixel, SharedPixelBuffer, VecModel};
 use std::error::Error;
-use std::fs;
-use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use walkdir::WalkDir;
 
-fn is_img_path(path: &Path) -> bool {
-    let supported_extensions = &["jpg", "jpeg", "png"];
-    path.extension()
-        .and_then(|ext| ext.to_str())
-        .map_or(false, |ext_str| {
-            supported_extensions.contains(&ext_str.to_lowercase().as_str())
-        })
-}
-
-fn load_img_paths(path_str: &str) -> (Vec<PathBuf>, usize) {
-    let main_path = Path::new(&path_str);
-    let metadata = fs::metadata(main_path).unwrap();
-
-    let mut paths: Vec<PathBuf> = Vec::new();
-    let mut starting_index: usize = 0;
-    let mut start_img_path: Option<PathBuf> = None;
-
-    let scan_dir = if metadata.is_file() {
-        if !is_img_path(main_path) {
-            error!(
-                "File is not a supported image type: {}",
-                main_path.display()
-            );
-            return (Vec::new(), 0);
-        }
-        start_img_path = Some(main_path.to_path_buf());
-        main_path.parent().unwrap_or(main_path)
-    } else if metadata.is_dir() {
-        main_path
-    } else {
-        error!(
-            "Path is neither a file nor a directory: {}",
-            main_path.display()
-        );
-        return (Vec::new(), 0);
-    };
-    debug!("Scanning directory: {}", scan_dir.display());
-
-    for entry in WalkDir::new(scan_dir)
-        .sort_by(|a, b| a.file_name().cmp(b.file_name()))
-        .into_iter()
-        .filter_map(|e| e.ok())
-    {
-        let path = entry.into_path();
-        if path.is_file() && is_img_path(&path) {
-            if let Some(ref curr) = start_img_path {
-                if path == *curr {
-                    starting_index = paths.len();
-                    info!("Starting image set to index: {}", starting_index);
-                }
-            }
-            paths.push(path);
-        }
-    }
-    if metadata.is_dir() {
-        info!("Path was a directory, starting index is 0.");
-        starting_index = 0;
-    }
-
-    info!(
-        "Found {} images. Starting index: {}",
-        paths.len(),
-        starting_index
-    );
-    (paths, starting_index)
-}
-
-pub fn run(config: &Config) -> Result<(), Box<dyn Error>> {
-    info!("Running with path: {}", &config.path);
-    let (paths, start_idx) = load_img_paths(&config.path);
-
-    if paths.is_empty() {
-        error!("No images found at path: {}", &config.path);
-        return Err("No images found".into());
-    }
-
+pub fn run(scan: &ScanResult, worker_count: usize) -> Result<(), Box<dyn Error>> {
     let main_window = MainWindow::new().unwrap();
-    let loader = Rc::new(ImageLoader::new(paths.clone(), config.threads));
+    let loader = Rc::new(ImageLoader::new(scan.paths.clone(), worker_count));
 
     let mut grid_data = Vec::new();
-    for (i, _) in paths.iter().enumerate() {
+    for (i, _) in scan.paths.iter().enumerate() {
         grid_data.push(GridItem {
             image: slint::Image::default(),
             index: i as i32,
@@ -141,7 +65,7 @@ pub fn run(config: &Config) -> Result<(), Box<dyn Error>> {
 
     // Full View
     let loader_full = loader.clone();
-    let paths_len = paths.len();
+    let paths_len = scan.paths.len();
 
     let update_full_view = move |ui: MainWindow, index: usize| {
         let window_weak_cb = ui.as_weak();
@@ -273,10 +197,10 @@ pub fn run(config: &Config) -> Result<(), Box<dyn Error>> {
     });
 
     // Init
-    if !paths.is_empty() {
-        debug!("Initializing Full View at index {}", start_idx);
+    if !scan.paths.is_empty() {
+        debug!("Initializing Full View at index {}", scan.start_index);
         let handle = main_window.as_weak().upgrade().unwrap();
-        update_full_view(handle, start_idx);
+        update_full_view(handle, scan.start_index);
     }
 
     main_window.run()?;
