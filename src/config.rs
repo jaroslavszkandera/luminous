@@ -1,6 +1,7 @@
 use clap::Parser;
 use directories::ProjectDirs;
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
@@ -12,14 +13,19 @@ pub struct Config {
 }
 
 #[derive(Parser, Debug)]
-#[command(author, version, about = "Luminous - Image viewer and editor built with Rust and Slint.", long_about = None)]
+#[command(author, version, about = "Luminous - Image viewer and editor.", long_about = None)]
 struct Cli {
+    /// The path to the image or directory to open
     path: Option<String>,
     /// Logging level (error, warn, info, debug, trace)
+    /// Defaults to "warn"
     #[arg(short, long)]
     log_level: Option<String>,
+    /// Number of worker threads
+    /// Defaults to the number of CPUs available
     #[arg(short, long)]
     threads: Option<usize>,
+    /// Custom path to a config file
     #[arg(long)]
     config_file: Option<PathBuf>,
 }
@@ -29,42 +35,27 @@ struct TomlConfig {
     path: Option<String>,
     log_level: Option<String>,
     threads: Option<usize>,
+    #[serde(flatten)]
+    unknown: HashMap<String, toml::Value>,
 }
 
 impl Config {
     pub fn load() -> Self {
         let cli = Cli::parse();
 
-        let config_path = if let Some(p) = cli.config_file {
-            Some(p)
-        } else if let Some(proj_dirs) = ProjectDirs::from("", "", "luminous") {
-            let config_dir = proj_dirs.config_dir();
-            Some(config_dir.join("luminous.toml"))
-        } else {
-            None
-        };
-
-        let toml_config: TomlConfig = if let Some(path) = &config_path {
-            if path.exists() {
-                match fs::read_to_string(path) {
-                    Ok(content) => match toml::from_str(&content) {
-                        Ok(cfg) => cfg,
-                        Err(e) => {
-                            eprintln!("Warning: Failed to parse config file {:?}: {}", path, e);
-                            TomlConfig::default()
-                        }
-                    },
-                    Err(e) => {
-                        eprintln!("Warning: Failed to read config file {:?}: {}", path, e);
-                        TomlConfig::default()
-                    }
-                }
-            } else {
-                TomlConfig::default()
-            }
+        let config_path = Self::find_config_path(&cli.config_file);
+        let toml_config = if let Some(path) = &config_path {
+            Self::load_toml(path)
         } else {
             TomlConfig::default()
         };
+
+        if !toml_config.unknown.is_empty() {
+            eprintln!(
+                "Warning: Unknown keys found in config file: {:?}",
+                toml_config.unknown.keys().collect::<Vec<_>>()
+            );
+        }
 
         // CLI overrides TOML, TOML overrides Defaults
         let path = cli
@@ -75,7 +66,7 @@ impl Config {
         let log_level = cli
             .log_level
             .or(toml_config.log_level)
-            .unwrap_or_else(|| "info".to_string());
+            .unwrap_or_else(|| "warn".to_string());
 
         let threads = cli
             .threads
@@ -86,6 +77,40 @@ impl Config {
             path,
             log_level,
             threads,
+        }
+    }
+
+    fn find_config_path(cli_path: &Option<PathBuf>) -> Option<PathBuf> {
+        if let Some(p) = cli_path {
+            return Some(p.clone());
+        }
+        if let Some(proj_dirs) = ProjectDirs::from("", "", "luminous") {
+            let config_dir = proj_dirs.config_dir();
+            let default_loc = config_dir.join("luminous.toml");
+            if default_loc.exists() {
+                return Some(default_loc);
+            }
+        }
+        None
+    }
+
+    fn load_toml(path: &PathBuf) -> TomlConfig {
+        if !path.exists() {
+            return TomlConfig::default();
+        }
+
+        match fs::read_to_string(path) {
+            Ok(content) => match toml::from_str(&content) {
+                Ok(cfg) => cfg,
+                Err(e) => {
+                    eprintln!("Warning: Failed to parse config file {:?}: {}", path, e);
+                    TomlConfig::default()
+                }
+            },
+            Err(e) => {
+                eprintln!("Warning: Failed to read config file {:?}: {}", path, e);
+                TomlConfig::default()
+            }
         }
     }
 }
