@@ -1,6 +1,8 @@
 slint::include_modules!();
 
+pub mod config;
 mod image_loader;
+use config::Config;
 use image_loader::ImageLoader;
 
 use log::{debug, error, info};
@@ -10,32 +12,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use walkdir::WalkDir;
-
-pub struct Config {
-    pub path: String,
-    pub log_level: String,
-}
-
-impl Config {
-    pub fn build(mut args: impl Iterator<Item = String>) -> Result<Config, &'static str> {
-        let app_name = args.next().unwrap();
-        let mut path: Option<String> = None;
-        let mut log_level: Option<String> = None;
-
-        while let Some(arg) = args.next() {
-            match arg.as_str() {
-                "-l" | "--log" => log_level = args.next(),
-                _ if path.is_none() => path = Some(arg),
-                _ => return Err("Invalid option or too many arguments"),
-            }
-        }
-
-        let path = path.ok_or("Didn't get a path")?;
-        let log_level = log_level.unwrap_or_else(|| "debug".to_string());
-        info!("Starting {}", app_name);
-        Ok(Config { path, log_level })
-    }
-}
 
 fn is_img_path(path: &Path) -> bool {
     let supported_extensions = &["jpg", "jpeg", "png"];
@@ -114,7 +90,7 @@ pub fn run(config: &Config) -> Result<(), Box<dyn Error>> {
     }
 
     let main_window = MainWindow::new().unwrap();
-    let loader = Rc::new(ImageLoader::new(paths.clone(), 8));
+    let loader = Rc::new(ImageLoader::new(paths.clone(), config.threads));
 
     let mut grid_data = Vec::new();
     for (i, _) in paths.iter().enumerate() {

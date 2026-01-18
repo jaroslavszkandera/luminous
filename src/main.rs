@@ -1,17 +1,14 @@
-use log::error;
-use std::env;
+use log::{error, info};
 use std::process;
 
-use luminous::Config;
+use luminous::config::Config;
 
 fn main() {
-    let config = Config::build(env::args()).unwrap_or_else(|err| {
-        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("error")).init();
-        error!("Problem parsing arguments: {}", err);
-        process::exit(1);
-    });
+    let config = Config::load();
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(&config.log_level))
         .init();
+
+    info!("Starting with {} worker threads", config.threads);
 
     if let Err(e) = luminous::run(&config) {
         error!("Application error: {e}");
