@@ -37,7 +37,6 @@ export component MainWindow inherits Window {
     in-out property <ViewMode> view_mode: ViewMode.grid;
     in-out property <bool> is_fullscreen: false;
     in-out property <int> grid_cols: 5;
-    out property <length> grid_viewport_y;
 
     forward-focus: my-key-handler;
     my-key-handler := FocusScope {
@@ -70,14 +69,13 @@ export component MainWindow inherits Window {
     grid_view := ScrollView {
         visible: root.view-mode == ViewMode.grid;
         viewport-height: grid_container.height;
-        viewport-y <=> grid_viewport_y;
 
         function udpate_visible_rows() {
             let item_h = grid_container.item-size + grid_container.gap;
             let cols = grid_container.cols;
 
             if (item_h > 1px && root.height > 1px) {
-                let start_row = floor(-grid_viewport_y / item_h);
+                let start_row = floor(-self.viewport-y / item_h);
                 let screen_rows = ceil(self.height / item_h);
                 let buffer_rows = 5;
                 let start_index = Math.max(0, (start_row - buffer_rows) * cols);
@@ -88,6 +86,19 @@ export component MainWindow inherits Window {
         }
 
         scrolled => {
+            udpate_visible_rows();
+        }
+        // FIX: Rust does not react init. Does it depend on grid_container?
+        init => {
+            udpate_visible_rows();
+        }
+        // Could be refreshed too much while resizing...
+        changed height => {
+            debug("new height: ", self.height);
+            udpate_visible_rows();
+        }
+        changed width => {
+            debug("new width: ", self.width);
             udpate_visible_rows();
         }
         TouchArea {
@@ -118,8 +129,6 @@ export component MainWindow inherits Window {
                 property <length> item-size: parent.item-size;
                 property <length> gap: parent.gap;
                 property <int> cols: parent.cols;
-                property <int> visible_row_start: floor(-grid_viewport_y / item-size);
-                property <int> visible_row_count: ceil(self.height / item-size);
 
                 for item[i] in root.grid_model: Rectangle {
                     width: parent.item-size;
@@ -143,19 +152,6 @@ export component MainWindow inherits Window {
                     }
                 }
             }
-        }
-
-        init => {
-            udpate_visible_rows();
-        }
-        // Could be refreshed too much while resizing...
-        changed height => {
-            debug("new height: ", self.height);
-            udpate_visible_rows();
-        }
-        changed width => {
-            debug("new width: ", self.width);
-            udpate_visible_rows();
         }
     }
 
