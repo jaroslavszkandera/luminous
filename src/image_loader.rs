@@ -69,7 +69,7 @@ impl ImageLoader {
             let cache_clone = self.thumb_cache.clone();
 
             self.pool.execute(move || {
-                let start = Instant::now();
+                let _start = Instant::now();
                 let buffer = match image::open(&path) {
                     Ok(dyn_img) => {
                         let dyn_img = dyn_img.thumbnail(500, 500);
@@ -85,12 +85,11 @@ impl ImageLoader {
                         get_placeholder()
                     }
                 };
-
-                debug!(
-                    "Thumb loaded: {:?} in {:.2}ms",
-                    path.file_name().unwrap_or_default(),
-                    start.elapsed().as_secs_f64() * 1000.0
-                );
+                // debug!(
+                //     "Thumb loaded: {:?} in {:.2}ms",
+                //     path.file_name().unwrap_or_default(),
+                //     _start.elapsed().as_secs_f64() * 1000.0
+                // );
 
                 cache_clone.lock().unwrap().insert(index, buffer.clone());
 

@@ -13,6 +13,8 @@ export enum ViewMode {
 export component MainWindow inherits Window {
     title: "Luminous";
     background: #000000;
+    preferred-width: 1280px;
+    preferred-height: 720px;
     full-screen: self.is_fullscreen;
 
     // Full view
@@ -20,7 +22,7 @@ export component MainWindow inherits Window {
     callback request_prev_image();
 
     // Grid view
-    callback request_grid_data(int);
+    callback request_grid_data(int, int);
     callback image_selected(int);
 
     // ContextMenuArea
@@ -35,6 +37,7 @@ export component MainWindow inherits Window {
     in-out property <ViewMode> view_mode: ViewMode.grid;
     in-out property <bool> is_fullscreen: false;
     in-out property <int> grid_cols: 5;
+    out property <length> grid_viewport_y;
 
     forward-focus: my-key-handler;
     my-key-handler := FocusScope {
@@ -49,18 +52,14 @@ export component MainWindow inherits Window {
             }
             if (root.view-mode == ViewMode.full) {
                 if (event.text == "h" || event.text == Key.LeftArrow) {
-                    // debug("LeftArrow or 'h' pressed: prev_image");
                     root.request_prev_image();
                 } else if (event.text == "l" || event.text == Key.RightArrow) {
-                    // debug("RightArrow or 'l' pressed: next_image");
                     root.request_next_image();
                 } else if (event.text == Key.Escape) {
-                    // debug("Esc key pressed: switching to grid mode");
                     root.view_mode = ViewMode.grid;
                 }
             } else if (root.view-mode == ViewMode.grid) {
                 if (event.text == Key.Escape) {
-                    // debug("Esc key pressed: switching to full mode");
                     root.view_mode = ViewMode.full;
                 }
             }
@@ -71,7 +70,26 @@ export component MainWindow inherits Window {
     grid_view := ScrollView {
         visible: root.view-mode == ViewMode.grid;
         viewport-height: grid_container.height;
+        viewport-y <=> grid_viewport_y;
 
+        function udpate_visible_rows() {
+            let item_h = grid_container.item-size + grid_container.gap;
+            let cols = grid_container.cols;
+
+            if (item_h > 1px && root.height > 1px) {
+                let start_row = floor(-grid_viewport_y / item_h);
+                let screen_rows = ceil(self.height / item_h);
+                let buffer_rows = 5;
+                let start_index = Math.max(0, (start_row - buffer_rows) * cols);
+                let total_count = (screen_rows + (buffer_rows * 2)) * cols;
+                debug("start_index: ", start_index, " total_count: ", total_count);
+                root.request_grid_data(start_index, total_count);
+            }
+        }
+
+        scrolled => {
+            udpate_visible_rows();
+        }
         TouchArea {
             width: 100%;
             property <int> step: 0;
@@ -100,6 +118,8 @@ export component MainWindow inherits Window {
                 property <length> item-size: parent.item-size;
                 property <length> gap: parent.gap;
                 property <int> cols: parent.cols;
+                property <int> visible_row_start: floor(-grid_viewport_y / item-size);
+                property <int> visible_row_count: ceil(self.height / item-size);
 
                 for item[i] in root.grid_model: Rectangle {
                     width: parent.item-size;
@@ -113,10 +133,6 @@ export component MainWindow inherits Window {
                         image-fit: cover;
                         width: 100%;
                         height: 100%;
-
-                        init => {
-                            root.request_grid_data(item.index);
-                        }
                     }
 
                     TouchArea {
@@ -127,6 +143,19 @@ export component MainWindow inherits Window {
                     }
                 }
             }
+        }
+
+        init => {
+            udpate_visible_rows();
+        }
+        // Could be refreshed too much while resizing...
+        changed height => {
+            debug("new height: ", self.height);
+            udpate_visible_rows();
+        }
+        changed width => {
+            debug("new width: ", self.width);
+            udpate_visible_rows();
         }
     }
 

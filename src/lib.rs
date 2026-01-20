@@ -30,35 +30,44 @@ pub fn run(scan: &ScanResult, worker_count: usize) -> Result<(), Box<dyn Error>>
         let _ = slint::quit_event_loop();
     });
 
-    // FIX: Grid data loading init blocks Full loading
     // Grid View
     let loader_grid = loader.clone();
     let window_weak = main_window.as_weak();
+    let scan_len = scan.paths.len();
 
-    main_window.on_request_grid_data(move |index| {
-        let index = index as usize;
-        if let Some(loader) = loader_grid.clone().into() {
-            let on_loaded = move |ui: MainWindow, idx: usize, img: slint::Image| {
-                let model = ui.get_grid_model();
-                if let Some(mut item) = model.row_data(idx) {
-                    item.image = img;
-                    model.set_row_data(idx, item);
-                }
-            };
+    main_window.on_request_grid_data(move |start_index, count| {
+        let start = start_index as usize;
+        let end = start + count as usize;
+        debug!("on_request_grid_data: start={}, end={}", start, end);
 
-            let cached = loader.load_grid_thumb(index, window_weak.clone(), on_loaded);
+        // TODO: prune images
 
-            if let Some(buffer) = cached {
-                let window_weak_defer = window_weak.clone();
-                let _ = slint::invoke_from_event_loop(move || {
-                    if let Some(ui) = window_weak_defer.upgrade() {
+        for index in start..end {
+            if index < scan_len {
+                if let Some(loader) = loader_grid.clone().into() {
+                    let on_loaded = move |ui: MainWindow, idx: usize, img: slint::Image| {
                         let model = ui.get_grid_model();
-                        if let Some(mut item) = model.row_data(index) {
-                            item.image = Image::from_rgba8(buffer);
-                            model.set_row_data(index, item);
+                        if let Some(mut item) = model.row_data(idx) {
+                            item.image = img;
+                            model.set_row_data(idx, item);
                         }
+                    };
+
+                    let cached = loader.load_grid_thumb(index, window_weak.clone(), on_loaded);
+
+                    if let Some(buffer) = cached {
+                        let window_weak_defer = window_weak.clone();
+                        let _ = slint::invoke_from_event_loop(move || {
+                            if let Some(ui) = window_weak_defer.upgrade() {
+                                let model = ui.get_grid_model();
+                                if let Some(mut item) = model.row_data(index) {
+                                    item.image = Image::from_rgba8(buffer);
+                                    model.set_row_data(index, item);
+                                }
+                            }
+                        });
                     }
-                });
+                }
             }
         }
     });
