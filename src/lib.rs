@@ -9,6 +9,9 @@ use image_loader::ImageLoader;
 
 use log::{debug, error};
 use slint::{Image, Model, Rgba8Pixel, SharedPixelBuffer, VecModel};
+use std::cell::RefCell;
+use std::cmp;
+use std::collections::HashSet;
 use std::error::Error;
 use std::rc::Rc;
 
@@ -34,39 +37,64 @@ pub fn run(scan: &ScanResult, worker_count: usize) -> Result<(), Box<dyn Error>>
     let loader_grid = loader.clone();
     let window_weak = main_window.as_weak();
     let scan_len = scan.paths.len();
+    let active_idxs = Rc::new(RefCell::new(HashSet::<usize>::new()));
 
     main_window.on_request_grid_data(move |start_index, count| {
         let start = start_index as usize;
-        let end = start + count as usize;
+        let end = cmp::min(start + count as usize, scan_len);
         debug!("on_request_grid_data: start={}, end={}", start, end);
 
-        // TODO: prune images
+        let mut active_set = active_idxs.borrow_mut();
+        let ui_weak_prune = window_weak.clone();
+
+        let buffer = 0;
+        let keep_start = start.saturating_sub(buffer);
+        let keep_end = end + buffer;
+
+        active_set.retain(|&idx| {
+            let visible = idx >= keep_start && idx < keep_end;
+            if !visible {
+                let _ = ui_weak_prune.upgrade_in_event_loop(move |ui| {
+                    let model = ui.get_grid_model();
+                    if let Some(mut item) = model.row_data(idx) {
+                        item.image = Image::default();
+                        debug!("Pruning idx; {}", idx);
+                        model.set_row_data(idx, item);
+                    }
+                });
+            }
+            visible
+        });
 
         for index in start..end {
-            if index < scan_len {
-                if let Some(loader) = loader_grid.clone().into() {
-                    let on_loaded = move |ui: MainWindow, idx: usize, img: slint::Image| {
-                        let model = ui.get_grid_model();
-                        if let Some(mut item) = model.row_data(idx) {
-                            item.image = img;
-                            model.set_row_data(idx, item);
-                        }
-                    };
+            if active_set.contains(&index) {
+                continue;
+            }
+            active_set.insert(index);
 
-                    let cached = loader.load_grid_thumb(index, window_weak.clone(), on_loaded);
-
-                    if let Some(buffer) = cached {
-                        let window_weak_defer = window_weak.clone();
-                        let _ = slint::invoke_from_event_loop(move || {
-                            if let Some(ui) = window_weak_defer.upgrade() {
-                                let model = ui.get_grid_model();
-                                if let Some(mut item) = model.row_data(index) {
-                                    item.image = Image::from_rgba8(buffer);
-                                    model.set_row_data(index, item);
-                                }
-                            }
-                        });
+            if let Some(loader) = loader_grid.clone().into() {
+                let on_loaded = move |ui: MainWindow, idx: usize, img: slint::Image| {
+                    // Check on the active_set again?
+                    let model = ui.get_grid_model();
+                    if let Some(mut item) = model.row_data(idx) {
+                        item.image = img;
+                        model.set_row_data(idx, item);
                     }
+                };
+
+                let cached = loader.load_grid_thumb(index, window_weak.clone(), on_loaded);
+
+                if let Some(buffer) = cached {
+                    let window_weak_defer = window_weak.clone();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(ui) = window_weak_defer.upgrade() {
+                            let model = ui.get_grid_model();
+                            if let Some(mut item) = model.row_data(index) {
+                                item.image = Image::from_rgba8(buffer);
+                                model.set_row_data(index, item);
+                            }
+                        }
+                    });
                 }
             }
         }
