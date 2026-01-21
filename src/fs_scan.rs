@@ -3,7 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
-const SUPPORTED_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "bmp", "gif", "webp"];
+const SUPPORTED_EXTENSIONS: &[&str; 6] = &["jpg", "jpeg", "png", "bmp", "gif", "webp"];
 
 pub struct ScanResult {
     pub paths: Vec<PathBuf>,

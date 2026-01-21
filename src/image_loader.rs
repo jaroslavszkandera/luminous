@@ -72,7 +72,7 @@ impl ImageLoader {
                 let _start = Instant::now();
                 let buffer = match image::open(&path) {
                     Ok(dyn_img) => {
-                        let dyn_img = dyn_img.thumbnail(500, 500);
+                        let dyn_img = dyn_img.thumbnail(100, 100);
                         let rgba = dyn_img.to_rgba8();
                         SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
                             rgba.as_raw(),
@@ -100,6 +100,17 @@ impl ImageLoader {
             });
         }
         None
+    }
+
+    pub fn prune_grid_thumbs(&self, indices: &[usize]) {
+        if indices.is_empty() {
+            return;
+        }
+        let mut cache = self.thumb_cache.lock().unwrap();
+        for idx in indices {
+            cache.remove(idx);
+        }
+        debug!("Batch pruned {} images", indices.len());
     }
 
     pub fn load_full_progressive<F>(

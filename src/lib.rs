@@ -7,7 +7,7 @@ mod image_loader;
 use fs_scan::ScanResult;
 use image_loader::ImageLoader;
 
-use log::{debug, error};
+use log::{debug, error, warn};
 use slint::{Image, Model, Rgba8Pixel, SharedPixelBuffer, VecModel};
 use std::cell::RefCell;
 use std::cmp;
@@ -40,31 +40,42 @@ pub fn run(scan: &ScanResult, worker_count: usize) -> Result<(), Box<dyn Error>>
     let active_idxs = Rc::new(RefCell::new(HashSet::<usize>::new()));
 
     main_window.on_request_grid_data(move |start_index, count| {
+        let _timer = std::time::Instant::now();
         let start = start_index as usize;
         let end = cmp::min(start + count as usize, scan_len);
         debug!("on_request_grid_data: start={}, end={}", start, end);
 
-        let mut active_set = active_idxs.borrow_mut();
-        let ui_weak_prune = window_weak.clone();
-
-        let buffer = 0;
+        let buffer = 50; // figure out the right buffer size based on slint or empirically
         let keep_start = start.saturating_sub(buffer);
         let keep_end = end + buffer;
 
-        active_set.retain(|&idx| {
-            let visible = idx >= keep_start && idx < keep_end;
-            if !visible {
-                let _ = ui_weak_prune.upgrade_in_event_loop(move |ui| {
+        let mut active_set = active_idxs.borrow_mut();
+        let to_remove: Vec<usize> = active_set
+            .iter()
+            .cloned()
+            .filter(|&idx| idx < keep_start || idx >= keep_end)
+            .collect();
+        for idx in &to_remove {
+            active_set.remove(idx);
+        }
+        loader_grid.prune_grid_thumbs(&to_remove);
+
+        if !to_remove.is_empty() {
+            let ui_weak = window_weak.clone();
+            let to_remove_clone = to_remove.clone();
+
+            let _ = slint::invoke_from_event_loop(move || {
+                if let Some(ui) = ui_weak.upgrade() {
                     let model = ui.get_grid_model();
-                    if let Some(mut item) = model.row_data(idx) {
-                        item.image = Image::default();
-                        debug!("Pruning idx; {}", idx);
-                        model.set_row_data(idx, item);
+                    for idx in to_remove_clone {
+                        if let Some(mut item) = model.row_data(idx) {
+                            item.image = Image::default();
+                            model.set_row_data(idx, item);
+                        }
                     }
-                });
-            }
-            visible
-        });
+                }
+            });
+        }
 
         for index in start..end {
             if active_set.contains(&index) {
@@ -98,6 +109,7 @@ pub fn run(scan: &ScanResult, worker_count: usize) -> Result<(), Box<dyn Error>>
                 }
             }
         }
+        warn!("Slow frame: {}ms", _timer.elapsed().as_millis())
     });
 
     // Full View
