@@ -41,15 +41,16 @@ pub fn run(scan: &ScanResult, worker_count: usize) -> Result<(), Box<dyn Error>>
 
     main_window.on_request_grid_data(move |start_index, count| {
         let _timer = std::time::Instant::now();
+
         let start = start_index as usize;
         let end = cmp::min(start + count as usize, scan_len);
-        debug!("on_request_grid_data: start={}, end={}", start, end);
 
-        let buffer = 50; // figure out the right buffer size based on slint or empirically
+        let buffer = 50;
         let keep_start = start.saturating_sub(buffer);
         let keep_end = end + buffer;
 
         let mut active_set = active_idxs.borrow_mut();
+
         let to_remove: Vec<usize> = active_set
             .iter()
             .cloned()
@@ -63,19 +64,22 @@ pub fn run(scan: &ScanResult, worker_count: usize) -> Result<(), Box<dyn Error>>
         if !to_remove.is_empty() {
             let ui_weak = window_weak.clone();
             let to_remove_clone = to_remove.clone();
-
             let _ = slint::invoke_from_event_loop(move || {
                 if let Some(ui) = ui_weak.upgrade() {
                     let model = ui.get_grid_model();
                     for idx in to_remove_clone {
                         if let Some(mut item) = model.row_data(idx) {
-                            item.image = Image::default();
-                            model.set_row_data(idx, item);
+                            if item.image.size().width > 0 {
+                                item.image = Image::default();
+                                model.set_row_data(idx, item);
+                            }
                         }
                     }
                 }
             });
         }
+
+        let mut cached_updates = Vec::new();
 
         for index in start..end {
             if active_set.contains(&index) {
@@ -85,7 +89,6 @@ pub fn run(scan: &ScanResult, worker_count: usize) -> Result<(), Box<dyn Error>>
 
             if let Some(loader) = loader_grid.clone().into() {
                 let on_loaded = move |ui: MainWindow, idx: usize, img: slint::Image| {
-                    // Check on the active_set again?
                     let model = ui.get_grid_model();
                     if let Some(mut item) = model.row_data(idx) {
                         item.image = img;
@@ -96,20 +99,35 @@ pub fn run(scan: &ScanResult, worker_count: usize) -> Result<(), Box<dyn Error>>
                 let cached = loader.load_grid_thumb(index, window_weak.clone(), on_loaded);
 
                 if let Some(buffer) = cached {
-                    let window_weak_defer = window_weak.clone();
-                    let _ = slint::invoke_from_event_loop(move || {
-                        if let Some(ui) = window_weak_defer.upgrade() {
-                            let model = ui.get_grid_model();
-                            if let Some(mut item) = model.row_data(index) {
-                                item.image = Image::from_rgba8(buffer);
-                                model.set_row_data(index, item);
-                            }
-                        }
-                    });
+                    cached_updates.push((index, buffer));
                 }
             }
         }
-        warn!("Slow frame: {}ms", _timer.elapsed().as_millis())
+
+        if !cached_updates.is_empty() {
+            let ui_weak = window_weak.clone();
+
+            let task_timer = _timer;
+            let count = cached_updates.len();
+
+            let _ = slint::invoke_from_event_loop(move || {
+                let lag = task_timer.elapsed().as_millis();
+
+                if let Some(ui) = ui_weak.upgrade() {
+                    let model = ui.get_grid_model();
+                    for (idx, buffer) in cached_updates {
+                        if let Some(mut item) = model.row_data(idx) {
+                            item.image = Image::from_rgba8(buffer);
+                            model.set_row_data(idx, item);
+                        }
+                    }
+                }
+
+                if lag > 1 {
+                    warn!("UI Update: {} images. Time since request: {}ms", count, lag);
+                }
+            });
+        }
     });
 
     // Full View
