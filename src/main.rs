@@ -1,19 +1,25 @@
-use log::error;
-use std::env;
+use log::{error, info};
 use std::process;
 
-use luminous::Config;
+use luminous::config::Config;
+use luminous::fs_scan;
 
 fn main() {
-    let config = Config::build(env::args()).unwrap_or_else(|err| {
-        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("error")).init();
-        error!("Problem parsing arguments: {}", err);
-        process::exit(1);
-    });
+    let config = Config::load();
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(&config.log_level))
         .init();
 
-    if let Err(e) = luminous::run(&config) {
+    let scan_result = fs_scan::scan(&config.path);
+
+    if scan_result.paths.is_empty() {
+        error!("No supported images found in {}", config.path);
+        // TODO: File manager pop-up
+        process::exit(1);
+    }
+
+    info!("Starting with {} worker threads", config.threads);
+
+    if let Err(e) = luminous::run(scan_result, config.threads) {
         error!("Application error: {e}");
         process::exit(1);
     };

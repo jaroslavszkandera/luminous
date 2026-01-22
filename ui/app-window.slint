@@ -13,25 +13,50 @@ export enum ViewMode {
 export component MainWindow inherits Window {
     title: "Luminous";
     background: #000000;
-    // width: 1920px;
-    // height: 1080px;
+    preferred-width: 1280px;
+    preferred-height: 720px;
     full-screen: self.is_fullscreen;
 
-    callback request_grid_data(int);
+    // Full view
     callback request_next_image();
     callback request_prev_image();
+
+    // Grid view
+    callback request_grid_data(int, int);
     callback image_selected(int);
+
+    // ContextMenuArea
+    callback rotate_plus_90();
+    callback rotate_minus_90();
+
     callback quit_app();
 
     in property <[GridItem]> grid_model;
     in property <image> full_view_image;
     in-out property <int> curr_image_index: 0;
-    in-out property <ViewMode> view_mode: ViewMode.full;
+    in property <string> curr_image_name;
+    in-out property <ViewMode> view_mode: ViewMode.full; // grid;
     in-out property <bool> is_fullscreen: false;
     in-out property <int> grid_cols: 5;
 
-    in-out property <length> curr_mouse_x: 0px;
-    in-out property <length> curr_mouse_y: 0px;
+    // TODO: pass to Rust
+    // in-out property <length> curr_mouse_x: 0px;
+    // in-out property <length> curr_mouse_y: 0px;
+
+    function udpate_visible_rows() {
+        let item_h = grid_container.item-size + grid_container.gap;
+        let cols = grid_container.cols;
+
+        if (item_h > 1px && root.height > 1px) {
+            let start_row = floor(-grid_view.viewport-y / item_h);
+            let screen_rows = ceil(grid_view.height / item_h);
+            let buffer_rows = 5;
+            let start_index = Math.max(0, (start_row - buffer_rows) * cols);
+            let total_count = (screen_rows + (buffer_rows * 2)) * cols;
+            debug("start_index: ", start_index, " total_count: ", total_count);
+            root.request_grid_data(start_index, total_count);
+        }
+    }
 
     forward-focus: my-key-handler;
     my-key-handler := FocusScope {
@@ -46,19 +71,29 @@ export component MainWindow inherits Window {
             }
             if (root.view-mode == ViewMode.full) {
                 if (event.text == "h" || event.text == Key.LeftArrow) {
-                    // debug("LeftArrow or 'h' pressed: prev_image");
                     root.request_prev_image();
                 } else if (event.text == "l" || event.text == Key.RightArrow) {
-                    // debug("RightArrow or 'l' pressed: next_image");
                     root.request_next_image();
                 } else if (event.text == Key.Escape) {
-                    // debug("Esc key pressed: switching to grid mode");
                     root.view_mode = ViewMode.grid;
                 }
             } else if (root.view-mode == ViewMode.grid) {
                 if (event.text == Key.Escape) {
-                    // debug("Esc key pressed: switching to full mode");
                     root.view_mode = ViewMode.full;
+                }
+                if (event.text == Key.PageDown) {
+                    grid_view.viewport-y = Math.max(
+                        grid_view.viewport-y - grid_view.height,
+                        grid_view.height - grid_view.viewport-height);
+                    udpate_visible_rows();
+                    return accept;
+                }
+                if (event.text == Key.PageUp) {
+                    grid_view.viewport-y = Math.min(
+                        grid_view.viewport-y + grid_view.height,
+                        0px);
+                    udpate_visible_rows();
+                    return accept;
                 }
             }
             accept
@@ -69,6 +104,22 @@ export component MainWindow inherits Window {
         visible: root.view-mode == ViewMode.grid;
         viewport-height: grid_container.height;
 
+        scrolled => {
+            udpate_visible_rows();
+        }
+        // FIX: Rust does not react init. Does it depend on grid_container?
+        init => {
+            udpate_visible_rows();
+        }
+        // Could be refreshed too much while resizing...
+        changed height => {
+            debug("new height: ", self.height);
+            udpate_visible_rows();
+        }
+        changed width => {
+            debug("new width: ", self.width);
+            udpate_visible_rows();
+        }
         TouchArea {
             width: 100%;
             property <int> step: 0;
@@ -110,10 +161,6 @@ export component MainWindow inherits Window {
                         image-fit: cover;
                         width: 100%;
                         height: 100%;
-
-                        init => {
-                            root.request_grid_data(item.index);
-                        }
                     }
 
                     TouchArea {
@@ -152,11 +199,43 @@ export component MainWindow inherits Window {
                     y: parent.height - self.height;
                     width: 100%;
                     background: #000000a0;
-                    Text {
-                        x: 0px;
-                        font-size: 12px;
-                        text: "[x,y]=[" + rect_img.mouse-x / 1px + "," + rect_img.mouse-y / 1px + "]";
-                        color: white;
+                    HorizontalLayout {
+                        Text {
+                            color: white;
+                            font-size: 12px;
+                            text: (curr_image_index + 1) + "/" + grid_model.length;
+                        }
+
+                        Text {
+                            color: white;
+                            font-size: 12px;
+                            text: curr_image_name;
+                        }
+
+                        // Text {
+                        //     // FIX: Needs rate limitting
+                        //     text: "[x,y]=[" + rect_img.mouse-x / 1px + "," + rect_img.mouse-y / 1px + "]";
+                        // }
+                    }
+                }
+            }
+
+            ContextMenuArea {
+                Menu {
+                    MenuItem {
+                        title: @tr("Rotate +90");
+                        activated => {
+                            debug("Rotate +90");
+                            rotate_plus_90();
+                        }
+                    }
+
+                    MenuItem {
+                        title: @tr("Rotate -90");
+                        activated => {
+                            debug("Rotate -90");
+                            rotate_minus_90();
+                        }
                     }
                 }
             }

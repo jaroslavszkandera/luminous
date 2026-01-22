@@ -16,9 +16,9 @@ fn get_placeholder() -> SharedPixelBuffer<Rgba8Pixel> {
 pub struct ImageLoader {
     thumb_cache: Arc<Mutex<HashMap<usize, SharedPixelBuffer<Rgba8Pixel>>>>,
     full_cache: Arc<Mutex<HashMap<usize, SharedPixelBuffer<Rgba8Pixel>>>>,
-    paths: Vec<PathBuf>,
-    pool: ThreadPool,
-    active_idx: Arc<AtomicUsize>,
+    pub paths: Vec<PathBuf>,
+    pub pool: ThreadPool,
+    pub active_idx: Arc<AtomicUsize>,
     full_load_generation: Arc<AtomicUsize>,
     window_size: usize,
 }
@@ -69,10 +69,10 @@ impl ImageLoader {
             let cache_clone = self.thumb_cache.clone();
 
             self.pool.execute(move || {
-                let start = Instant::now();
+                let _start = Instant::now();
                 let buffer = match image::open(&path) {
                     Ok(dyn_img) => {
-                        let dyn_img = dyn_img.thumbnail(200, 200);
+                        let dyn_img = dyn_img.thumbnail(500, 500);
                         let rgba = dyn_img.to_rgba8();
                         SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
                             rgba.as_raw(),
@@ -85,12 +85,11 @@ impl ImageLoader {
                         get_placeholder()
                     }
                 };
-
-                debug!(
-                    "Thumb loaded: {:?} in {:.2}ms",
-                    path.file_name().unwrap_or_default(),
-                    start.elapsed().as_secs_f64() * 1000.0
-                );
+                // debug!(
+                //     "Thumb loaded: {:?} in {:.2}ms",
+                //     path.file_name().unwrap_or_default(),
+                //     _start.elapsed().as_secs_f64() * 1000.0
+                // );
 
                 cache_clone.lock().unwrap().insert(index, buffer.clone());
 
@@ -101,6 +100,17 @@ impl ImageLoader {
             });
         }
         None
+    }
+
+    pub fn prune_grid_thumbs(&self, indices: &[usize]) {
+        if indices.is_empty() {
+            return;
+        }
+        let mut cache = self.thumb_cache.lock().unwrap();
+        for idx in indices {
+            cache.remove(idx);
+        }
+        debug!("Batch pruned {} images", indices.len());
     }
 
     pub fn load_full_progressive<F>(
@@ -258,5 +268,31 @@ impl ImageLoader {
                 }
             });
         }
+    }
+
+    pub fn get_curr_active_buffer(&self) -> Option<SharedPixelBuffer<Rgba8Pixel>> {
+        let active_idx = self.active_idx.load(Ordering::Relaxed);
+        let full_handle = self.full_cache.lock().unwrap();
+        if let Some(buffer) = full_handle.get(&active_idx) {
+            return Some(buffer.clone());
+        }
+        // NOTE: Failsafe
+        error!("Current image not loaded (index: {})", active_idx);
+        None
+    }
+
+    pub fn cache_buffer(&self, idx: usize, buf: SharedPixelBuffer<Rgba8Pixel>) {
+        self.full_cache.lock().unwrap().insert(idx, buf.clone());
+        // TODO: resize to thumbnail
+        self.thumb_cache.lock().unwrap().insert(idx, buf);
+    }
+
+    // TODO: Handle long image file names based on window width
+    pub fn get_curr_image_file_name(&self, idx: usize) -> &str {
+        self.paths[idx]
+            .file_name()
+            .unwrap()
+            .to_str()
+            .expect("Image file name should be present")
     }
 }

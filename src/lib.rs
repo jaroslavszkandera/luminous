@@ -1,144 +1,85 @@
 slint::include_modules!();
 
+pub mod config;
+pub mod fs_scan;
 mod image_loader;
+
+use fs_scan::ScanResult;
 use image_loader::ImageLoader;
 
-use log::{debug, error, info};
-use slint::{Image, Model, VecModel};
+// use log::{debug, error, warn};
+use slint::{Image, Model, Rgba8Pixel, SharedPixelBuffer, VecModel};
+use std::cell::RefCell;
+use std::cmp;
+use std::collections::HashSet;
 use std::error::Error;
-use std::fs;
-use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use walkdir::WalkDir;
+use std::sync::Arc;
 
-pub struct Config {
-    pub path: String,
-    pub log_level: String,
+struct AppController {
+    loader: Arc<ImageLoader>,
+    scan: Rc<ScanResult>,
+    active_grid_indices: HashSet<usize>,
+    window_weak: slint::Weak<MainWindow>,
 }
 
-impl Config {
-    pub fn build(mut args: impl Iterator<Item = String>) -> Result<Config, &'static str> {
-        let app_name = args.next().unwrap();
-        let mut path: Option<String> = None;
-        let mut log_level: Option<String> = None;
-
-        while let Some(arg) = args.next() {
-            match arg.as_str() {
-                "-l" | "--log" => log_level = args.next(),
-                _ if path.is_none() => path = Some(arg),
-                _ => return Err("Invalid option or too many arguments"),
-            }
+impl AppController {
+    fn new(scan: Rc<ScanResult>, worker_count: usize, window: &MainWindow) -> Self {
+        Self {
+            loader: Arc::new(ImageLoader::new(scan.paths.clone(), worker_count)),
+            scan,
+            active_grid_indices: HashSet::new(),
+            window_weak: window.as_weak(),
         }
-
-        let path = path.ok_or("Didn't get a path")?;
-        let log_level = log_level.unwrap_or_else(|| "debug".to_string());
-        info!("Starting {}", app_name);
-        Ok(Config { path, log_level })
     }
-}
 
-fn is_img_path(path: &Path) -> bool {
-    let supported_extensions = &["jpg", "jpeg", "png"];
-    path.extension()
-        .and_then(|ext| ext.to_str())
-        .map_or(false, |ext_str| {
-            supported_extensions.contains(&ext_str.to_lowercase().as_str())
-        })
-}
+    fn handle_grid_request(&mut self, start: usize, count: usize) {
+        let _timer = std::time::Instant::now();
+        let total = self.scan.paths.len();
+        let end = cmp::min(start + count, total);
 
-fn load_img_paths(path_str: &str) -> (Vec<PathBuf>, usize) {
-    let main_path = Path::new(&path_str);
-    let metadata = fs::metadata(main_path).unwrap();
+        let buffer = 50;
+        let keep_start = start.saturating_sub(buffer);
+        let keep_end = end + buffer;
 
-    let mut paths: Vec<PathBuf> = Vec::new();
-    let mut starting_index: usize = 0;
-    let mut start_img_path: Option<PathBuf> = None;
+        let to_remove: Vec<usize> = self
+            .active_grid_indices
+            .iter()
+            .cloned()
+            .filter(|&idx| idx < keep_start || idx >= keep_end)
+            .collect();
 
-    let scan_dir = if metadata.is_file() {
-        if !is_img_path(main_path) {
-            error!(
-                "File is not a supported image type: {}",
-                main_path.display()
-            );
-            return (Vec::new(), 0);
+        for idx in &to_remove {
+            self.active_grid_indices.remove(idx);
         }
-        start_img_path = Some(main_path.to_path_buf());
-        main_path.parent().unwrap_or(main_path)
-    } else if metadata.is_dir() {
-        main_path
-    } else {
-        error!(
-            "Path is neither a file nor a directory: {}",
-            main_path.display()
-        );
-        return (Vec::new(), 0);
-    };
-    debug!("Scanning directory: {}", scan_dir.display());
+        self.loader.prune_grid_thumbs(&to_remove);
 
-    for entry in WalkDir::new(scan_dir)
-        .sort_by(|a, b| a.file_name().cmp(b.file_name()))
-        .into_iter()
-        .filter_map(|e| e.ok())
-    {
-        let path = entry.into_path();
-        if path.is_file() && is_img_path(&path) {
-            if let Some(ref curr) = start_img_path {
-                if path == *curr {
-                    starting_index = paths.len();
-                    info!("Starting image set to index: {}", starting_index);
+        if !to_remove.is_empty() {
+            let weak = self.window_weak.clone();
+            let _ = slint::invoke_from_event_loop(move || {
+                if let Some(ui) = weak.upgrade() {
+                    let model = ui.get_grid_model();
+                    for idx in to_remove {
+                        if let Some(mut item) = model.row_data(idx) {
+                            if item.image.size().width > 0 {
+                                item.image = Image::default();
+                                model.set_row_data(idx, item);
+                            }
+                        }
+                    }
                 }
-            }
-            paths.push(path);
+            });
         }
-    }
-    if metadata.is_dir() {
-        info!("Path was a directory, starting index is 0.");
-        starting_index = 0;
-    }
 
-    info!(
-        "Found {} images. Starting index: {}",
-        paths.len(),
-        starting_index
-    );
-    (paths, starting_index)
-}
+        let mut cached_updates = Vec::new();
+        for index in start..end {
+            if self.active_grid_indices.contains(&index) {
+                continue;
+            }
+            self.active_grid_indices.insert(index);
 
-pub fn run(config: &Config) -> Result<(), Box<dyn Error>> {
-    info!("Running with path: {}", &config.path);
-    let (paths, start_idx) = load_img_paths(&config.path);
-
-    if paths.is_empty() {
-        error!("No images found at path: {}", &config.path);
-        return Err("No images found".into());
-    }
-
-    let main_window = MainWindow::new().unwrap();
-    let loader = Rc::new(ImageLoader::new(paths.clone(), 8));
-
-    let mut grid_data = Vec::new();
-    for (i, _) in paths.iter().enumerate() {
-        grid_data.push(GridItem {
-            image: slint::Image::default(),
-            index: i as i32,
-        });
-    }
-    let grid_model = Rc::new(VecModel::from(grid_data));
-    main_window.set_grid_model(grid_model.clone().into());
-
-    main_window.on_quit_app(move || {
-        let _ = slint::quit_event_loop();
-    });
-
-    // Grid View
-    let loader_grid = loader.clone();
-    let window_weak = main_window.as_weak();
-
-    // FIX: Grid data loading init blocks Full loading
-    main_window.on_request_grid_data(move |index| {
-        let index = index as usize;
-        if let Some(loader) = loader_grid.clone().into() {
-            let on_loaded = move |ui: MainWindow, idx: usize, img: slint::Image| {
+            let weak = self.window_weak.clone();
+            let on_loaded = move |ui: MainWindow, idx: usize, img: Image| {
                 let model = ui.get_grid_model();
                 if let Some(mut item) = model.row_data(idx) {
                     item.image = img;
@@ -146,83 +87,150 @@ pub fn run(config: &Config) -> Result<(), Box<dyn Error>> {
                 }
             };
 
-            let cached = loader.load_grid_thumb(index, window_weak.clone(), on_loaded);
+            if let Some(buffer) = self.loader.load_grid_thumb(index, weak, on_loaded) {
+                cached_updates.push((index, buffer));
+            }
+        }
 
-            if let Some(buffer) = cached {
-                let window_weak_defer = window_weak.clone();
-                let _ = slint::invoke_from_event_loop(move || {
-                    if let Some(ui) = window_weak_defer.upgrade() {
-                        let model = ui.get_grid_model();
-                        if let Some(mut item) = model.row_data(index) {
-                            item.image = Image::from_rgba8(buffer);
-                            model.set_row_data(index, item);
+        if !cached_updates.is_empty() {
+            let weak = self.window_weak.clone();
+            let _ = slint::invoke_from_event_loop(move || {
+                if let Some(ui) = weak.upgrade() {
+                    let model = ui.get_grid_model();
+                    for (idx, buf) in cached_updates {
+                        if let Some(mut item) = model.row_data(idx) {
+                            item.image = Image::from_rgba8(buf);
+                            model.set_row_data(idx, item);
                         }
                     }
-                });
-            }
-        }
-    });
-
-    // Full View
-    let loader_full = loader.clone();
-    let paths_len = paths.len();
-
-    let update_full_view = move |ui: MainWindow, index: usize| {
-        let window_weak_cb = ui.as_weak();
-
-        let display_img =
-            loader_full.load_full_progressive(index, window_weak_cb, move |ui, final_img| {
-                ui.set_full_view_image(final_img);
+                }
             });
+        }
+    }
 
-        ui.set_full_view_image(display_img);
-        ui.set_curr_image_index(index as i32);
+    fn handle_full_view_load(&self, index: usize) {
+        let weak = self.window_weak.clone();
+        let loader = self.loader.clone();
 
-        loader_full.update_sliding_window(index);
-    };
+        let on_loaded = move |ui: MainWindow, img: Image| {
+            ui.set_full_view_image(img);
+        };
 
-    // Callback: Selection from Grid
-    let update_fn = update_full_view.clone();
-    let window_weak_select = main_window.as_weak();
+        let display_img = loader.load_full_progressive(index, weak.clone(), on_loaded);
+
+        if let Some(ui) = weak.upgrade() {
+            ui.set_full_view_image(display_img);
+            ui.set_curr_image_index(index as i32);
+            ui.set_curr_image_name(loader.get_curr_image_file_name(index).into());
+        }
+
+        self.loader.update_sliding_window(index);
+    }
+
+    fn handle_navigate(&self, delta: isize) {
+        if let Some(ui) = self.window_weak.upgrade() {
+            let len = self.scan.paths.len() as isize;
+            let current = ui.get_curr_image_index() as isize;
+            let next = (current + delta).rem_euclid(len) as usize;
+            self.handle_full_view_load(next);
+        }
+    }
+
+    fn handle_rotate(&self, degrees: i32) {
+        if let Some(buffer) = self.loader.get_curr_active_buffer() {
+            let loader = self.loader.clone();
+            let weak = self.window_weak.clone();
+
+            self.loader.pool.execute(move || {
+                let width = buffer.width();
+                let height = buffer.height();
+                let raw: Vec<u8> = buffer
+                    .as_slice()
+                    .iter()
+                    .flat_map(|p| [p.r, p.g, p.b, p.a])
+                    .collect();
+
+                if let Some(img_buf) = image::RgbaImage::from_raw(width, height, raw) {
+                    let rotated = match degrees {
+                        90 => image::imageops::rotate90(&img_buf),
+                        -90 | 270 => image::imageops::rotate270(&img_buf),
+                        180 => image::imageops::rotate180(&img_buf),
+                        _ => img_buf,
+                    };
+
+                    let new_buf = SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
+                        rotated.as_raw(),
+                        rotated.width(),
+                        rotated.height(),
+                    );
+
+                    loader.cache_buffer(
+                        loader.active_idx.load(std::sync::atomic::Ordering::Relaxed),
+                        new_buf.clone(),
+                    );
+
+                    let _ = weak.upgrade_in_event_loop(move |ui| {
+                        ui.set_full_view_image(Image::from_rgba8(new_buf));
+                    });
+                }
+            });
+        }
+    }
+}
+
+pub fn run(scan: ScanResult, worker_count: usize) -> Result<(), Box<dyn Error>> {
+    let main_window = MainWindow::new()?;
+
+    let grid_data: Vec<GridItem> = scan
+        .paths
+        .iter()
+        .enumerate()
+        .map(|(i, _)| GridItem {
+            image: Image::default(),
+            index: i as i32,
+        })
+        .collect();
+    main_window.set_grid_model(Rc::new(VecModel::from(grid_data)).into());
+
+    let scan_rc = Rc::new(scan);
+    let controller = Rc::new(RefCell::new(AppController::new(
+        scan_rc.clone(),
+        worker_count,
+        &main_window,
+    )));
+
+    // Callbacks
+
+    let c = controller.clone();
+    main_window.on_request_grid_data(move |start, count| {
+        c.borrow_mut()
+            .handle_grid_request(start as usize, count as usize);
+    });
+
+    let c = controller.clone();
     main_window.on_image_selected(move |index| {
-        if let Some(ui) = window_weak_select.upgrade() {
-            update_fn(ui, index as usize);
-        }
+        c.borrow().handle_full_view_load(index as usize);
     });
 
-    // Callback: Next
-    let update_fn = update_full_view.clone();
-    let window_weak_next = main_window.as_weak();
-    main_window.on_request_next_image(move || {
-        if let Some(ui) = window_weak_next.upgrade() {
-            let mut idx = ui.get_curr_image_index() as usize;
-            idx += 1;
-            if idx >= paths_len {
-                idx = 0;
-            }
-            update_fn(ui, idx);
-        }
+    let c = controller.clone();
+    main_window.on_request_next_image(move || c.borrow().handle_navigate(1));
+    let c = controller.clone();
+    main_window.on_request_prev_image(move || c.borrow().handle_navigate(-1));
+
+    let c = controller.clone();
+    main_window.on_rotate_plus_90(move || c.borrow().handle_rotate(90));
+    let c = controller.clone();
+    main_window.on_rotate_minus_90(move || c.borrow().handle_rotate(-90));
+
+    main_window.on_quit_app(move || {
+        let _ = slint::quit_event_loop();
     });
 
-    // Callback: Prev
-    let update_fn = update_full_view.clone();
-    let window_weak_prev = main_window.as_weak();
-    main_window.on_request_prev_image(move || {
-        if let Some(ui) = window_weak_prev.upgrade() {
-            let mut idx = ui.get_curr_image_index() as isize;
-            idx -= 1;
-            if idx < 0 {
-                idx = (paths_len - 1) as isize;
-            }
-            update_fn(ui, idx as usize);
-        }
-    });
-
-    // Init
-    if !paths.is_empty() {
-        debug!("Initializing Full View at index {}", start_idx);
-        let handle = main_window.as_weak().upgrade().unwrap();
-        update_full_view(handle, start_idx);
+    // Initial Load
+    if !scan_rc.paths.is_empty() {
+        controller
+            .borrow()
+            .handle_full_view_load(scan_rc.start_index);
     }
 
     main_window.run()?;
