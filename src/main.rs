@@ -19,7 +19,7 @@ fn main() {
 
     info!("Starting with {} worker threads", config.threads);
 
-    if let Err(e) = luminous::run(scan_result, config.threads) {
+    if let Err(e) = luminous::run(scan_result, config) {
         error!("Application error: {e}");
         process::exit(1);
     };

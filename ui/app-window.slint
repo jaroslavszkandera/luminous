@@ -12,7 +12,7 @@ export enum ViewMode {
 
 export component MainWindow inherits Window {
     title: "Luminous";
-    background: #000000;
+    background: app_background;
     preferred-width: 1280px;
     preferred-height: 720px;
     full-screen: self.is_fullscreen;
@@ -31,6 +31,7 @@ export component MainWindow inherits Window {
 
     callback quit_app();
 
+    in property <color> app_background: #000000;
     in property <[GridItem]> grid_model;
     in property <image> full_view_image;
     in-out property <int> curr_image_index: 0;

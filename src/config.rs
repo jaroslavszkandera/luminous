@@ -10,6 +10,8 @@ pub struct Config {
     pub path: String,
     pub log_level: String,
     pub threads: usize,
+    pub window_size: usize,
+    pub background: String,
 }
 
 #[derive(Parser, Debug)]
@@ -28,6 +30,12 @@ struct Cli {
     /// Custom path to a config file
     #[arg(long)]
     config_file: Option<PathBuf>,
+    #[arg(long)]
+    // Cache size in full view
+    window_size: Option<usize>,
+    #[arg(long)]
+    // Background window color
+    background: Option<String>,
 }
 
 #[derive(Deserialize, Default)]
@@ -35,6 +43,8 @@ struct TomlConfig {
     path: Option<String>,
     log_level: Option<String>,
     threads: Option<usize>,
+    window_size: Option<usize>,
+    background: Option<String>,
     #[serde(flatten)]
     unknown: HashMap<String, toml::Value>,
 }
@@ -73,10 +83,19 @@ impl Config {
             .or(toml_config.threads)
             .unwrap_or_else(num_cpus::get);
 
+        let window_size = cli
+            .window_size
+            .or(toml_config.window_size)
+            .unwrap_or_else(|| 3);
+
+        let background = cli.background.or(toml_config.background).unwrap();
+
         Config {
             path,
             log_level,
             threads,
+            window_size,
+            background,
         }
     }
 

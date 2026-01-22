@@ -4,6 +4,7 @@ pub mod config;
 pub mod fs_scan;
 mod image_loader;
 
+use config::Config;
 use fs_scan::ScanResult;
 use image_loader::ImageLoader;
 
@@ -24,9 +25,13 @@ struct AppController {
 }
 
 impl AppController {
-    fn new(scan: Rc<ScanResult>, worker_count: usize, window: &MainWindow) -> Self {
+    fn new(scan: Rc<ScanResult>, config: Config, window: &MainWindow) -> Self {
         Self {
-            loader: Arc::new(ImageLoader::new(scan.paths.clone(), worker_count)),
+            loader: Arc::new(ImageLoader::new(
+                scan.paths.clone(),
+                config.threads,
+                config.window_size,
+            )),
             scan,
             active_grid_indices: HashSet::new(),
             window_weak: window.as_weak(),
@@ -178,7 +183,7 @@ impl AppController {
     }
 }
 
-pub fn run(scan: ScanResult, worker_count: usize) -> Result<(), Box<dyn Error>> {
+pub fn run(scan: ScanResult, config: Config) -> Result<(), Box<dyn Error>> {
     let main_window = MainWindow::new()?;
 
     let grid_data: Vec<GridItem> = scan
@@ -195,7 +200,7 @@ pub fn run(scan: ScanResult, worker_count: usize) -> Result<(), Box<dyn Error>> 
     let scan_rc = Rc::new(scan);
     let controller = Rc::new(RefCell::new(AppController::new(
         scan_rc.clone(),
-        worker_count,
+        config,
         &main_window,
     )));
 
@@ -232,6 +237,9 @@ pub fn run(scan: ScanResult, worker_count: usize) -> Result<(), Box<dyn Error>> 
             .borrow()
             .handle_full_view_load(scan_rc.start_index);
     }
+
+    // TODO: Parse string to color
+    // main_window.set_app_background(config.background);
 
     main_window.run()?;
     Ok(())

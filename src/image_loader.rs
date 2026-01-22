@@ -24,7 +24,7 @@ pub struct ImageLoader {
 }
 
 impl ImageLoader {
-    pub fn new(paths: Vec<PathBuf>, workers: usize) -> Self {
+    pub fn new(paths: Vec<PathBuf>, workers: usize, window_size: usize) -> Self {
         ImageLoader {
             thumb_cache: Arc::new(Mutex::new(HashMap::new())),
             full_cache: Arc::new(Mutex::new(HashMap::new())),
@@ -32,7 +32,7 @@ impl ImageLoader {
             pool: ThreadPool::new(workers),
             active_idx: Arc::new(AtomicUsize::new(0)),
             full_load_generation: Arc::new(AtomicUsize::new(0)),
-            window_size: 3,
+            window_size: window_size,
         }
     }
 
