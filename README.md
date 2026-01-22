@@ -19,6 +19,7 @@ cargo run --release -- ./path/to/your/images
 | Right Arrow/l | Next Image                     |
 | Ctrl + Scroll | Increase/Decrease Grid Columns |
 | Scroll        | Navigate Images                |
+| PgUp/PgDn     | Scroll Grid Up/Down            |
 | Right Click   | Context Menu                   |
 
 ## Configuration

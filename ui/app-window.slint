@@ -38,6 +38,21 @@ export component MainWindow inherits Window {
     in-out property <bool> is_fullscreen: false;
     in-out property <int> grid_cols: 5;
 
+    function udpate_visible_rows() {
+        let item_h = grid_container.item-size + grid_container.gap;
+        let cols = grid_container.cols;
+
+        if (item_h > 1px && root.height > 1px) {
+            let start_row = floor(-grid_view.viewport-y / item_h);
+            let screen_rows = ceil(grid_view.height / item_h);
+            let buffer_rows = 5;
+            let start_index = Math.max(0, (start_row - buffer_rows) * cols);
+            let total_count = (screen_rows + (buffer_rows * 2)) * cols;
+            debug("start_index: ", start_index, " total_count: ", total_count);
+            root.request_grid_data(start_index, total_count);
+        }
+    }
+
     forward-focus: my-key-handler;
     my-key-handler := FocusScope {
         key-pressed(event) => {
@@ -61,6 +76,20 @@ export component MainWindow inherits Window {
                 if (event.text == Key.Escape) {
                     root.view_mode = ViewMode.full;
                 }
+                if (event.text == Key.PageDown) {
+                    grid_view.viewport-y = Math.max(
+                        grid_view.viewport-y - grid_view.height,
+                        grid_view.height - grid_view.viewport-height);
+                    udpate_visible_rows();
+                    return accept;
+                }
+                if (event.text == Key.PageUp) {
+                    grid_view.viewport-y = Math.min(
+                        grid_view.viewport-y + grid_view.height,
+                        0px);
+                    udpate_visible_rows();
+                    return accept;
+                }
             }
             accept
         }
@@ -69,21 +98,6 @@ export component MainWindow inherits Window {
     grid_view := ScrollView {
         visible: root.view-mode == ViewMode.grid;
         viewport-height: grid_container.height;
-
-        function udpate_visible_rows() {
-            let item_h = grid_container.item-size + grid_container.gap;
-            let cols = grid_container.cols;
-
-            if (item_h > 1px && root.height > 1px) {
-                let start_row = floor(-self.viewport-y / item_h);
-                let screen_rows = ceil(self.height / item_h);
-                let buffer_rows = 5;
-                let start_index = Math.max(0, (start_row - buffer_rows) * cols);
-                let total_count = (screen_rows + (buffer_rows * 2)) * cols;
-                debug("start_index: ", start_index, " total_count: ", total_count);
-                root.request_grid_data(start_index, total_count);
-            }
-        }
 
         scrolled => {
             udpate_visible_rows();
