@@ -17,8 +17,8 @@ pub struct ImageLoader {
     thumb_cache: Arc<Mutex<HashMap<usize, SharedPixelBuffer<Rgba8Pixel>>>>,
     full_cache: Arc<Mutex<HashMap<usize, SharedPixelBuffer<Rgba8Pixel>>>>,
     paths: Vec<PathBuf>,
-    pool: ThreadPool,
-    active_idx: Arc<AtomicUsize>,
+    pub pool: ThreadPool,
+    pub active_idx: Arc<AtomicUsize>,
     full_load_generation: Arc<AtomicUsize>,
     window_size: usize,
 }
@@ -270,7 +270,7 @@ impl ImageLoader {
         }
     }
 
-    pub fn get_curr_active_image(&self) -> Option<SharedPixelBuffer<Rgba8Pixel>> {
+    pub fn get_curr_active_buffer(&self) -> Option<SharedPixelBuffer<Rgba8Pixel>> {
         let active_idx = self.active_idx.load(Ordering::Relaxed);
         let full_handle = self.full_cache.lock().unwrap();
         if let Some(buffer) = full_handle.get(&active_idx) {
@@ -281,14 +281,9 @@ impl ImageLoader {
         None
     }
 
-    pub fn set_curr_active_image(&self, new_buffer: SharedPixelBuffer<Rgba8Pixel>) {
-        let active_idx = self.active_idx.load(Ordering::Relaxed);
-
-        let mut full_handle = self.full_cache.lock().unwrap();
-        full_handle.insert(active_idx, new_buffer.clone());
-
+    pub fn cache_buffer(&self, idx: usize, buf: SharedPixelBuffer<Rgba8Pixel>) {
+        self.full_cache.lock().unwrap().insert(idx, buf.clone());
         // TODO: resize to thumbnail
-        let mut thumb_handle = self.thumb_cache.lock().unwrap();
-        thumb_handle.insert(active_idx, new_buffer);
+        self.thumb_cache.lock().unwrap().insert(idx, buf);
     }
 }
