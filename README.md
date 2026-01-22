@@ -27,9 +27,9 @@ cargo run --release -- ./path/to/your/images
 Luminous supports configuration via command-line arguments or a TOML configuration file.
 The application automatically looks for a configuration file at the standard location for your OS:
 
-Linux/Unix: `~/.config/luminous/luminous.toml`
-Windows: `C:\Users\Username\AppData\Roaming\luminous\luminous.toml`
-macOS: `~/Library/Application Support/luminous/luminous.toml`
+* Linux/Unix: `~/.config/luminous/luminous.toml`
+* Windows: `C:\Users\Username\AppData\Roaming\luminous\luminous.toml`
+* macOS: `~/Library/Application Support/luminous/luminous.toml`
 
 _TODO: Make an example config file..._
 
