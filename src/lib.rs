@@ -25,7 +25,7 @@ struct AppController {
 }
 
 impl AppController {
-    fn new(scan: Rc<ScanResult>, config: Config, window: &MainWindow) -> Self {
+    fn new(scan: Rc<ScanResult>, config: &Config, window: &MainWindow) -> Self {
         Self {
             loader: Arc::new(ImageLoader::new(
                 scan.paths.clone(),
@@ -200,7 +200,7 @@ pub fn run(scan: ScanResult, config: Config) -> Result<(), Box<dyn Error>> {
     let scan_rc = Rc::new(scan);
     let controller = Rc::new(RefCell::new(AppController::new(
         scan_rc.clone(),
-        config,
+        &config,
         &main_window,
     )));
 
@@ -239,7 +239,7 @@ pub fn run(scan: ScanResult, config: Config) -> Result<(), Box<dyn Error>> {
     }
 
     // TODO: Parse string to color
-    // main_window.set_app_background(config.background);
+    main_window.set_app_background(config.background);
 
     main_window.run()?;
     Ok(())

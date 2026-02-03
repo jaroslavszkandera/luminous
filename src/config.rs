@@ -1,6 +1,7 @@
 use clap::Parser;
 use directories::ProjectDirs;
 use serde::Deserialize;
+use slint::Color;
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
@@ -11,7 +12,7 @@ pub struct Config {
     pub log_level: String,
     pub threads: usize,
     pub window_size: usize,
-    pub background: String,
+    pub background: Color,
 }
 
 #[derive(Parser, Debug)]
@@ -88,7 +89,12 @@ impl Config {
             .or(toml_config.window_size)
             .unwrap_or_else(|| 3);
 
-        let background = cli.background.or(toml_config.background).unwrap();
+        let background_str = cli
+            .background
+            .or(toml_config.background)
+            .unwrap_or_else(|| "#000000".to_string());
+
+        let background = Self::parse_color(&background_str);
 
         Config {
             path,
@@ -131,5 +137,24 @@ impl Config {
                 TomlConfig::default()
             }
         }
+    }
+
+    fn parse_color(color_str: &str) -> slint::Color {
+        csscolorparser::parse(color_str)
+            .map(|c| {
+                slint::Color::from_argb_u8(
+                    (c.a * 255.0) as u8,
+                    (c.r * 255.0) as u8,
+                    (c.g * 255.0) as u8,
+                    (c.b * 255.0) as u8,
+                )
+            })
+            .unwrap_or_else(|_| {
+                eprintln!(
+                    "Warning: Invalid color '{}', defaulting to black",
+                    color_str
+                );
+                slint::Color::from_rgb_u8(0, 0, 0)
+            })
     }
 }
