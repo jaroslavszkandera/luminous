@@ -1,7 +1,10 @@
-use log::{debug, error};
+use directories::ProjectDirs;
+use log::{debug, error, warn};
+use sha2::{Digest, Sha256};
 use slint::{Image, Rgba8Pixel, SharedPixelBuffer, Weak};
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -21,10 +24,22 @@ pub struct ImageLoader {
     pub active_idx: Arc<AtomicUsize>,
     full_load_generation: Arc<AtomicUsize>,
     window_size: usize,
+    cache_dir: Option<PathBuf>,
 }
 
 impl ImageLoader {
     pub fn new(paths: Vec<PathBuf>, workers: usize, window_size: usize) -> Self {
+        let cache_dir = if let Some(proj_dirs) = ProjectDirs::from("", "", "luminous") {
+            let dir = proj_dirs.cache_dir().join("thumbnails");
+            if let Err(e) = fs::create_dir_all(&dir) {
+                warn!("Failed to create cache directory: {}", e);
+                None
+            } else {
+                Some(dir)
+            }
+        } else {
+            None
+        };
         ImageLoader {
             thumb_cache: Arc::new(Mutex::new(HashMap::new())),
             full_cache: Arc::new(Mutex::new(HashMap::new())),
@@ -33,6 +48,7 @@ impl ImageLoader {
             active_idx: Arc::new(AtomicUsize::new(0)),
             full_load_generation: Arc::new(AtomicUsize::new(0)),
             window_size: window_size,
+            cache_dir,
         }
     }
 
@@ -48,6 +64,42 @@ impl ImageLoader {
         actual_dist <= window_size
     }
 
+    fn get_bucked_res(target_size: u32) -> u32 {
+        if target_size <= 256 {
+            256
+        } else if target_size <= 512 {
+            512
+        } else {
+            1024
+        }
+    }
+
+    fn get_cache_path(
+        cache_dir: Option<&PathBuf>,
+        original_path: &Path,
+        resolution: u32,
+    ) -> Option<PathBuf> {
+        let metadata = fs::metadata(original_path).ok()?;
+        let modified = metadata
+            .modified()
+            .ok()?
+            .duration_since(std::time::UNIX_EPOCH)
+            .ok()?
+            .as_secs();
+
+        let mut hasher = Sha256::new();
+        hasher.update(original_path.to_string_lossy().as_bytes());
+        hasher.update(modified.to_be_bytes());
+        let hash = hasher.finalize();
+
+        Some(cache_dir?.join(format!(
+            "{}_{}.{}",
+            hex::encode(hash),
+            resolution,
+            original_path.extension()?.to_str()?
+        )))
+    }
+
     // source: https://github.com/slint-ui/slint/discussions/5140
     pub fn load_grid_thumb<F>(
         &self,
@@ -58,43 +110,71 @@ impl ImageLoader {
     where
         F: Fn(MainWindow, usize, Image) + Send + 'static,
     {
-        let cache_handle = self.thumb_cache.lock().unwrap();
-        if let Some(buffer) = cache_handle.get(&index) {
-            return Some(buffer.clone());
+        {
+            let cache_handle = self.thumb_cache.lock().unwrap();
+            if let Some(buffer) = cache_handle.get(&index) {
+                return Some(buffer.clone());
+            }
         }
-        drop(cache_handle);
+
+        let res = Self::get_bucked_res(500);
 
         if let Some(path) = self.paths.get(index) {
             let path = path.clone();
             let cache_clone = self.thumb_cache.clone();
+            let cache_dir = self.cache_dir.clone();
+            let cache_path = Self::get_cache_path(cache_dir.as_ref(), &path, res);
 
             self.pool.execute(move || {
                 let _start = Instant::now();
-                let buffer = match image::open(&path) {
-                    Ok(dyn_img) => {
-                        let dyn_img = dyn_img.thumbnail(500, 500);
-                        let rgba = dyn_img.to_rgba8();
-                        SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
-                            rgba.as_raw(),
-                            rgba.width(),
-                            rgba.height(),
-                        )
+
+                let buffer: Result<image::RgbaImage, image::ImageError> = (|| {
+                    if let Some(ref cp) = cache_path {
+                        if cp.exists() {
+                            if let Ok(cached_img) = image::open(cp) {
+                                debug!("Cache hit for {}", path.display());
+                                return Ok(cached_img.to_rgba8());
+                            }
+                        }
                     }
+
+                    let dyn_img = image::open(&path)?;
+                    let resized = dyn_img.thumbnail(res, res);
+                    let rgba = resized.to_rgba8();
+
+                    if let Some(ref cp) = cache_path {
+                        if let Err(e) = resized.save(cp) {
+                            warn!("Failed to save cache file {}: {}", cp.display(), e);
+                        }
+                    }
+
+                    Ok(rgba)
+                })();
+
+                let final_buffer = match buffer {
+                    Ok(rgba) => SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
+                        rgba.as_raw(),
+                        rgba.width(),
+                        rgba.height(),
+                    ),
                     Err(e) => {
-                        error!("Thumb load fail {}: {}", path.display(), e);
+                        error!("Failed to load/process image {}: {}", path.display(), e);
                         get_placeholder()
                     }
                 };
-                // debug!(
-                //     "Thumb loaded: {:?} in {:.2}ms",
-                //     path.file_name().unwrap_or_default(),
-                //     _start.elapsed().as_secs_f64() * 1000.0
-                // );
+                debug!(
+                    "Thumb loaded: {:?} in {:.2}ms",
+                    path.file_name().unwrap_or_default(),
+                    _start.elapsed().as_secs_f64() * 1000.0
+                );
 
-                cache_clone.lock().unwrap().insert(index, buffer.clone());
+                cache_clone
+                    .lock()
+                    .unwrap()
+                    .insert(index, final_buffer.clone());
 
                 let _ = ui_handle.upgrade_in_event_loop(move |ui| {
-                    let img = Image::from_rgba8(buffer);
+                    let img = Image::from_rgba8(final_buffer);
                     on_loaded(ui, index, img);
                 });
             });

@@ -8,7 +8,6 @@ use config::Config;
 use fs_scan::ScanResult;
 use image_loader::ImageLoader;
 
-// use log::{debug, error, warn};
 use slint::{Image, Model, Rgba8Pixel, SharedPixelBuffer, VecModel};
 use std::cell::RefCell;
 use std::cmp;
@@ -238,7 +237,6 @@ pub fn run(scan: ScanResult, config: Config) -> Result<(), Box<dyn Error>> {
             .handle_full_view_load(scan_rc.start_index);
     }
 
-    // TODO: Parse string to color
     main_window.set_app_background(config.background);
 
     main_window.run()?;
