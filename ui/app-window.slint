@@ -255,11 +255,20 @@ export component MainWindow inherits Window {
             debug("Zoom: " + Math.round(zoom_scale * 100) + "%");
         }
 
+        function reset_zoom() {
+            zoom_scale = 1;
+            img.width = root.width;
+            img.height = root.height;
+            img.x = 0;
+            img.y = 0;
+        }
+
         scroll-event(event) => {
             let delta_up = event.delta-y > 0;
             if (event.modifiers.control) {
                 zoom(delta_up ? 1.1 : 0.9, rect_img.mouse-x, rect_img.mouse-y);
             } else {
+                reset_zoom();
                 if (delta_up) {
                     root.request_prev_image();
                 } else {
@@ -319,6 +328,14 @@ export component MainWindow inherits Window {
                         activated => {
                             debug("Rotate -90");
                             rotate_minus_90();
+                        }
+                    }
+
+                    MenuItem {
+                        title: @tr("Reset zoom");
+                        activated => {
+                            debug("Reset zoom");
+                            reset_zoom();
                         }
                     }
                 }
