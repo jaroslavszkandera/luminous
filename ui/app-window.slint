@@ -198,12 +198,30 @@ export component MainWindow inherits Window {
     }
 
     full_view := TouchArea {
+        property <length> last_coords_x: -1px;
+        property <length> last_coords_y: -1px;
         property <string> display_coords: "0, 0";
         coords_timer := Timer {
             interval: 60ms;
             running: root.view-mode == ViewMode.full;
             triggered => {
-                display_coords = rect_img.mouse-x / 1px + "," + rect_img.mouse-y / 1px;
+                if (rect_img.mouse-x != last_coords_x || rect_img.mouse-y != last_coords_y) {
+                    last_coords_x = rect_img.mouse-x;
+                    last_coords_y = rect_img.mouse-y;
+                    let win_w = full_view.width;
+                    let win_h = full_view.height;
+                    let img_w = root.full_view_image.width;
+                    let img_h = root.full_view_image.height;
+
+                    let scale = Math.min(win_w / img_w, win_h / img_h);
+                    let off_x = (win_w - img_w * scale) / 2;
+                    let off_y = (win_h - img_h * scale) / 2;
+                    let x = clamp(Math.round((last_coords_x - off_x) / scale), 0, img_w);
+                    let y = clamp(Math.round((last_coords_y - off_y) / scale), 0, img_h);
+
+                    display_coords = x + "," + y;
+                    // debug("[win_w,win_h]=[" + win_w / 1px + "," + win_h / 1px + "] [img_w,img_h]=[" + img_w + "," + img_h + "]", "scale:", scale);
+                }
             }
         }
 
