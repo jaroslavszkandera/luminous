@@ -37,13 +37,9 @@ export component MainWindow inherits Window {
     in property <image> full_view_image;
     in-out property <int> curr_image_index: 0;
     in property <string> curr_image_name;
-    in-out property <ViewMode> view_mode: ViewMode.grid; // TODO: cache last view mode
+    in-out property <ViewMode> view_mode: ViewMode.full; // TODO: cache last view mode
     in-out property <bool> is_fullscreen: false;
     in-out property <int> grid_cols: 5;
-
-    // TODO: pass to Rust
-    // in-out property <length> curr_mouse_x: 0px;
-    // in-out property <length> curr_mouse_y: 0px;
 
     function udpate_visible_rows() {
         let item_h = grid_container.item_size + grid_container.gap;
@@ -202,6 +198,15 @@ export component MainWindow inherits Window {
     }
 
     full_view := TouchArea {
+        property <string> display_coords: "0, 0";
+        coords_timer := Timer {
+            interval: 60ms;
+            running: root.view-mode == ViewMode.full;
+            triggered => {
+                display_coords = rect_img.mouse-x / 1px + "," + rect_img.mouse-y / 1px;
+            }
+        }
+
         visible: root.view-mode == ViewMode.full;
         width: 100%;
         height: 100%;
@@ -226,23 +231,23 @@ export component MainWindow inherits Window {
                     y: parent.height - self.height;
                     width: 100%;
                     background: #000000a0;
-                    HorizontalLayout {
-                        Text {
-                            color: white;
-                            font-size: 12px;
-                            text: (curr_image_index + 1) + "/" + grid_model.length;
-                        }
+                    Text {
+                        x: 0px;
+                        color: white;
+                        text: (curr_image_index + 1) + "/" + grid_model.length;
+                    }
 
-                        Text {
-                            color: white;
-                            font-size: 12px;
-                            text: curr_image_name;
-                        }
+                    Text {
+                        color: white;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                        text: curr_image_name;
+                    }
 
-                        // Text {
-                        //     // FIX: Needs rate limitting
-                        //     text: "[x,y]=[" + rect_img.mouse-x / 1px + "," + rect_img.mouse-y / 1px + "]";
-                        // }
+                    Text {
+                        x: parent.width - self.width;
+                        color: white;
+                        text: "[x,y]=[" + display_coords + "]";
                     }
                 }
             }
