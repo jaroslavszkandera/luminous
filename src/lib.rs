@@ -180,6 +180,11 @@ impl AppController {
             });
         }
     }
+
+    fn handle_bucket_resolution(&mut self, resolution: u32) {
+        self.loader.set_bucket_resolution(resolution);
+        self.active_grid_indices.clear();
+    }
 }
 
 pub fn run(scan: ScanResult, config: Config) -> Result<(), Box<dyn Error>> {
@@ -209,6 +214,13 @@ pub fn run(scan: ScanResult, config: Config) -> Result<(), Box<dyn Error>> {
     main_window.on_request_grid_data(move |start, count| {
         c.borrow_mut()
             .handle_grid_request(start as usize, count as usize);
+    });
+
+    let c = controller.clone();
+    main_window.on_bucket_resolution_changed(move |bucket_resolution| {
+        dbg!(bucket_resolution);
+        c.borrow_mut()
+            .handle_bucket_resolution(bucket_resolution as u32);
     });
 
     let c = controller.clone();

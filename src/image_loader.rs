@@ -5,7 +5,7 @@ use slint::{Image, Rgba8Pixel, SharedPixelBuffer, Weak};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use threadpool::ThreadPool;
@@ -25,6 +25,7 @@ pub struct ImageLoader {
     full_load_generation: Arc<AtomicUsize>,
     window_size: usize,
     cache_dir: Option<PathBuf>,
+    bucket_resolution: AtomicU32,
 }
 
 impl ImageLoader {
@@ -49,6 +50,7 @@ impl ImageLoader {
             full_load_generation: Arc::new(AtomicUsize::new(0)),
             window_size: window_size,
             cache_dir,
+            bucket_resolution: AtomicU32::new(0),
         }
     }
 
@@ -64,14 +66,9 @@ impl ImageLoader {
         actual_dist <= window_size
     }
 
-    fn get_bucked_res(target_size: u32) -> u32 {
-        if target_size <= 256 {
-            256
-        } else if target_size <= 512 {
-            512
-        } else {
-            1024
-        }
+    pub fn set_bucket_resolution(&self, resolution: u32) {
+        self.bucket_resolution.store(resolution, Ordering::Relaxed);
+        self.thumb_cache.lock().unwrap().clear();
     }
 
     fn get_cache_path(
@@ -117,12 +114,11 @@ impl ImageLoader {
             }
         }
 
-        let res = Self::get_bucked_res(500);
-
         if let Some(path) = self.paths.get(index) {
             let path = path.clone();
             let cache_clone = self.thumb_cache.clone();
             let cache_dir = self.cache_dir.clone();
+            let res = self.bucket_resolution.load(Ordering::Relaxed);
             let cache_path = Self::get_cache_path(cache_dir.as_ref(), &path, res);
 
             self.pool.execute(move || {

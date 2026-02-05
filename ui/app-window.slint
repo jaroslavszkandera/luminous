@@ -24,6 +24,7 @@ export component MainWindow inherits Window {
     // Grid view
     callback request_grid_data(int, int);
     callback image_selected(int);
+    callback bucket_resolution_changed(int);
 
     // ContextMenuArea
     callback rotate_plus_90();
@@ -45,7 +46,7 @@ export component MainWindow inherits Window {
     // in-out property <length> curr_mouse_y: 0px;
 
     function udpate_visible_rows() {
-        let item_h = grid_container.item-size + grid_container.gap;
+        let item_h = grid_container.item_size + grid_container.gap;
         let cols = grid_container.cols;
 
         if (item_h > 1px && root.height > 1px) {
@@ -54,7 +55,7 @@ export component MainWindow inherits Window {
             let buffer_rows = 5;
             let start_index = Math.max(0, (start_row - buffer_rows) * cols);
             let total_count = (screen_rows + (buffer_rows * 2)) * cols;
-            debug("start_index: ", start_index, " total_count: ", total_count);
+            debug("udpate_visible_rows: start_index: ", start_index, " total_count: ", total_count);
             root.request_grid_data(start_index, total_count);
         }
     }
@@ -104,11 +105,32 @@ export component MainWindow inherits Window {
     grid_view := ScrollView {
         visible: root.view-mode == ViewMode.grid;
         viewport-height: grid_container.height;
+        property <[length]> resolutions: [256 * 1px, 512 * 1px, 1024 * 1px]; // sync with Rust get_bucked_res()
+
+        function bucket_resolution(size: length) -> int {
+            if size < resolutions[0] {
+                return resolutions[0] / 1px;
+            }
+            if size < resolutions[1] {
+                return resolutions[1] / 1px;
+            }
+            return resolutions[2] / 1px;
+        }
+        function sync_bucket_resolution() {
+            let new_bucket_res = bucket_resolution(grid_container.item_size);
+            debug("new_bucket_res: ", new_bucket_res, " item_size: ", grid_container.item_size);
+            if (new_bucket_res != grid_container.curr_bucket_res) {
+                let old_bucket_res = grid_container.curr_bucket_res;
+                grid_container.curr_bucket_res = new_bucket_res;
+                root.bucket_resolution_changed(new_bucket_res);
+                debug("Bucket resolution change:", old_bucket_res, "=>", grid_container.curr_bucket_res);
+            }
+        }
 
         scrolled => {
             udpate_visible_rows();
         }
-        // FIX: Rust does not react init. Does it depend on grid_container?
+        // FIX: Rust does not react on init. Does it depend on grid_container?
         init => {
             udpate_visible_rows();
         }
@@ -119,6 +141,7 @@ export component MainWindow inherits Window {
         }
         changed width => {
             debug("new width: ", self.width);
+            sync_bucket_resolution();
             udpate_visible_rows();
         }
         TouchArea {
@@ -126,9 +149,9 @@ export component MainWindow inherits Window {
             property <int> step: 0;
             property <int> cols: root.grid_cols;
             property <length> gap: 0px;
-            property <length> item-size: (parent.width - (cols + 1) * gap) / cols;
+            property <length> item_size: (parent.width - (cols + 1) * gap) / cols;
             property <int> rows: (root.grid_model.length + cols - 1) / cols;
-            height: (rows * item-size) + ((rows + 1) * gap);
+            height: (rows * item_size) + ((rows + 1) * gap);
 
             scroll-event(event) => {
                 if (event.modifiers.control) {
@@ -137,7 +160,8 @@ export component MainWindow inherits Window {
                     } else if event.delta-y < 0 {
                         step = 1;
                     }
-                    root.grid_cols = clamp(root.grid_cols + step, 1, 20);
+                    sync_bucket_resolution();
+                    root.grid_cols = clamp(root.grid_cols + step, 2, 20);
                     accept
                 }
                 reject
@@ -146,15 +170,16 @@ export component MainWindow inherits Window {
             grid_container := Rectangle {
                 width: parent.width;
                 height: parent.height;
-                property <length> item-size: parent.item-size;
+                property <length> item_size: parent.item_size;
                 property <length> gap: parent.gap;
                 property <int> cols: parent.cols;
+                property <int> curr_bucket_res: 0;
 
                 for item[i] in root.grid_model: Rectangle {
-                    width: parent.item-size;
-                    height: parent.item-size;
-                    x: (Math.mod(i, parent.cols) * (parent.item-size + parent.gap)) + parent.gap;
-                    y: (floor(i / parent.cols) * (parent.item-size + parent.gap)) + parent.gap;
+                    width: parent.item_size;
+                    height: parent.item_size;
+                    x: (Math.mod(i, parent.cols) * (parent.item_size + parent.gap)) + parent.gap;
+                    y: (floor(i / parent.cols) * (parent.item_size + parent.gap)) + parent.gap;
 
                     clip: true;
                     Image {
