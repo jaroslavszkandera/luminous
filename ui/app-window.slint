@@ -201,6 +201,12 @@ export component MainWindow inherits Window {
         property <length> last_coords_x: -1px;
         property <length> last_coords_y: -1px;
         property <string> display_coords: "0, 0";
+        property <float> zoom_scale: 1.0;
+
+        visible: root.view-mode == ViewMode.full;
+        width: 100%;
+        height: 100%;
+
         coords_timer := Timer {
             interval: 60ms;
             running: root.view-mode == ViewMode.full;
@@ -220,53 +226,81 @@ export component MainWindow inherits Window {
                     let y = clamp(Math.round((last_coords_y - off_y) / scale), 0, img_h);
 
                     display_coords = x + "," + y;
-                    // debug("[win_w,win_h]=[" + win_w / 1px + "," + win_h / 1px + "] [img_w,img_h]=[" + img_w + "," + img_h + "]", "scale:", scale);
                 }
             }
         }
 
-        visible: root.view-mode == ViewMode.full;
-        width: 100%;
-        height: 100%;
+        function zoom(scale_delta: float, center_x: length, center_y: length) {
+            let old_scale = zoom_scale;
+            let new_scale = clamp(zoom_scale * scale_delta, 1, 10.0);
+
+            if (old_scale == new_scale) {
+                return;
+            }
+            zoom_scale = new_scale;
+            let ratio = new_scale / old_scale;
+
+            if (img.width == 0px || img.width == parent.width) {
+                img.width = rect_img.width;
+                img.height = rect_img.height;
+                img.x = 0px;
+                img.y = 0px;
+            }
+            img.width = img.width * ratio;
+            img.height = img.height * ratio;
+
+            img.x = center_x - (center_x - img.x) * ratio;
+            img.y = center_y - (center_y - img.y) * ratio;
+
+            debug("Zoom: " + Math.round(zoom_scale * 100) + "%");
+        }
 
         scroll-event(event) => {
-            if (event.delta-y > 0) {
-                root.request_prev_image();
-            } else if (event.delta-y < 0) {
-                root.request_next_image();
+            let delta_up = event.delta-y > 0;
+            if (event.modifiers.control) {
+                zoom(delta_up ? 1.1 : 0.9, rect_img.mouse-x, rect_img.mouse-y);
+            } else {
+                if (delta_up) {
+                    root.request_prev_image();
+                } else {
+                    root.request_next_image();
+                }
             }
             accept
         }
 
         rect_img := TouchArea {
-            Image {
+            img := Image {
                 source: root.full_view_image;
                 image-fit: contain;
                 width: 100%;
                 height: 100%;
-                Rectangle {
-                    height: 16px;
-                    y: parent.height - self.height;
-                    width: 100%;
-                    background: #000000a0;
-                    Text {
-                        x: 0px;
-                        color: white;
-                        text: (curr_image_index + 1) + "/" + grid_model.length;
-                    }
+                x: 0px;
+                y: 0px;
+            }
 
-                    Text {
-                        color: white;
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
-                        text: curr_image_name;
-                    }
+            Rectangle {
+                height: 16px;
+                y: parent.height - self.height;
+                width: 100%;
+                background: #000000a0;
+                Text {
+                    x: 0px;
+                    color: white;
+                    text: (curr_image_index + 1) + "/" + grid_model.length;
+                }
 
-                    Text {
-                        x: parent.width - self.width;
-                        color: white;
-                        text: "[x,y]=[" + display_coords + "]";
-                    }
+                Text {
+                    color: white;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                    text: curr_image_name;
+                }
+
+                Text {
+                    x: parent.width - self.width;
+                    color: white;
+                    text: "[x,y]=[" + display_coords + "]";
                 }
             }
 
