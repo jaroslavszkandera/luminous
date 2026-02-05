@@ -128,7 +128,11 @@ impl ImageLoader {
                     if let Some(ref cp) = cache_path {
                         if cp.exists() {
                             if let Ok(cached_img) = image::open(cp) {
-                                debug!("Cache hit for {}", path.display());
+                                debug!(
+                                    "Cache hit ({} px) for {:?}",
+                                    res,
+                                    path.file_name().unwrap_or_default(),
+                                );
                                 return Ok(cached_img.to_rgba8());
                             }
                         }
@@ -140,7 +144,12 @@ impl ImageLoader {
 
                     if let Some(ref cp) = cache_path {
                         if let Err(e) = resized.save(cp) {
-                            warn!("Failed to save cache file {}: {}", cp.display(), e);
+                            warn!(
+                                "Failed to save cache file {}, res {}: {}",
+                                cp.display(),
+                                res,
+                                e
+                            );
                         }
                     }
 
@@ -159,7 +168,8 @@ impl ImageLoader {
                     }
                 };
                 debug!(
-                    "Thumb loaded: {:?} in {:.2}ms",
+                    "Thumb loaded ({} px): {:?} in {:.2}ms",
+                    res,
                     path.file_name().unwrap_or_default(),
                     _start.elapsed().as_secs_f64() * 1000.0
                 );

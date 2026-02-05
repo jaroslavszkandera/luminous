@@ -160,8 +160,9 @@ export component MainWindow inherits Window {
                     } else if event.delta-y < 0 {
                         step = 1;
                     }
-                    sync_bucket_resolution();
                     root.grid_cols = clamp(root.grid_cols + step, 2, 20);
+                    sync_bucket_resolution();
+                    udpate_visible_rows();
                     accept
                 }
                 reject
