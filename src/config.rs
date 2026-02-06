@@ -56,18 +56,12 @@ impl Config {
     pub fn load() -> Self {
         let cli = Cli::parse();
 
-        let config_path = Self::find_config_path(&cli.config_file);
-        let toml_config = if let Some(path) = &config_path {
-            Self::load_toml(path)
-        } else {
-            TomlConfig::default()
-        };
+        let toml_config = Self::find_config_path(&cli.config_file)
+            .map(|p| Self::load_toml(&p))
+            .unwrap_or_default();
 
         if !toml_config.unknown.is_empty() {
-            eprintln!(
-                "Warning: Unknown keys found in config file: {:?}",
-                toml_config.unknown.keys().collect::<Vec<_>>()
-            );
+            log::warn!("Unknown config keys: {:?}", toml_config.unknown.keys());
         }
 
         let path = Self::resolve(cli.path, toml_config.path, ".".to_string());
@@ -83,9 +77,7 @@ impl Config {
 
         let mut bindings = Self::default_bindings();
         if let Some(user_bindings) = toml_config.bindings {
-            for (action, key) in user_bindings {
-                bindings.insert(action, key);
-            }
+            bindings.extend(user_bindings);
         }
 
         Config {
@@ -167,22 +159,23 @@ impl Config {
     }
 
     pub fn get_slint_key_string(key_name: &str) -> slint::SharedString {
+        use slint::platform::Key;
         match key_name {
-            "Right" => slint::platform::Key::RightArrow.into(),
-            "Left" => slint::platform::Key::LeftArrow.into(),
-            "Up" => slint::platform::Key::UpArrow.into(),
-            "Down" => slint::platform::Key::DownArrow.into(),
-            "Escape" | "Esc" => slint::platform::Key::Escape.into(),
-            "Return" | "Enter" => slint::platform::Key::Return.into(),
-            "Tab" => slint::platform::Key::Tab.into(),
-            "Backspace" => slint::platform::Key::Backspace.into(),
-            "PageUp" => slint::platform::Key::PageUp.into(),
-            "PageDown" => slint::platform::Key::PageDown.into(),
-            "Home" => slint::platform::Key::Home.into(),
-            "End" => slint::platform::Key::End.into(),
-            "Delete" => slint::platform::Key::Delete.into(),
+            "Right" => Key::RightArrow.into(),
+            "Left" => Key::LeftArrow.into(),
+            "Up" => Key::UpArrow.into(),
+            "Down" => Key::DownArrow.into(),
+            "Escape" | "Esc" => Key::Escape.into(),
+            "Return" | "Enter" => Key::Return.into(),
+            "Tab" => Key::Tab.into(),
+            "Backspace" => Key::Backspace.into(),
+            "PageUp" => Key::PageUp.into(),
+            "PageDown" => Key::PageDown.into(),
+            "Home" => Key::Home.into(),
+            "End" => Key::End.into(),
+            "Delete" => Key::Delete.into(),
             // For single characters, return as is
-            other => other.into(),
+            other => slint::SharedString::from(other),
         }
     }
 }
