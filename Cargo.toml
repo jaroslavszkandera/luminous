@@ -4,12 +4,24 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-clap = { version = "4.5.57", default-features = false, features = ["std", "derive", "help", "usage", "error-context"] }
+clap = { version = "4.5.57", default-features = false, features = [
+  "std",
+  "derive",
+  "help",
+  "usage",
+  "error-context",
+] }
 csscolorparser = "0.8.2"
 directories = "6.0.0"
 env_logger = "0.11.8"
 hex = "0.4.3"
-image = { version = "0.25.9", default-features = false, features = ["jpeg", "png", "bmp", "gif", "webp"] }
+image = { version = "0.25.9", default-features = false, features = [
+  "jpeg",
+  "png",
+  "bmp",
+  "gif",
+  "webp",
+] }
 log = "0.4.29"
 num_cpus = "1.17.0"
 serde = { version = "1.0.228", features = ["derive"] }
@@ -24,10 +36,14 @@ default-features = false
 features = ["std", "compat-1-2", "log", "renderer-skia-opengl"]
 
 [target.'cfg(target_os = "linux")'.dependencies]
-slint = { version = "1.15.0", default-features = false, features = ["backend-winit"] }
+slint = { version = "1.15.0", default-features = false, features = [
+  "backend-winit",
+] }
 
 [target.'cfg(not(target_os = "linux"))'.dependencies]
-slint = { version = "1.15.0", default-features = false, features = ["backend-default"] }
+slint = { version = "1.15.0", default-features = false, features = [
+  "backend-default",
+] }
 
 [build-dependencies]
 slint-build = "1.15.0"
