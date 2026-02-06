@@ -4,20 +4,34 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-clap = { version = "4.5.54", features = ["derive"] }
+clap = { version = "4.5.57", features = ["derive"] }
 csscolorparser = "0.8.2"
 directories = "6.0.0"
 env_logger = "0.11.8"
 hex = "0.4.3"
-image = "0.25.9"
-log = "0.4.28"
+image = { version = "0.25.9", default-features = false, features = ["jpeg", "png", "bmp", "gif", "webp"] }
+log = "0.4.29"
 num_cpus = "1.17.0"
 serde = "1.0.228"
 sha2 = "0.10.9"
-slint = "1.14.1"
+slint = "1.15.0"
 threadpool = "1.8.1"
 toml = "0.9.11"
 walkdir = "2.5.0"
 
 [build-dependencies]
-slint-build = "1.14.1"
+slint-build = "1.15.0"
+
+[profile.dev]
+split-debuginfo = "unpacked"
+codegen-units = 256
+
+[profile.quick-release]
+inherits = "release"
+opt-level = 2
+lto = false
+codegen-units = 128
+
+[profile.release]
+opt-level = 3
+lto = "thin"
