@@ -70,32 +70,15 @@ impl Config {
             );
         }
 
-        // CLI overrides TOML, TOML overrides Defaults
-        let path = cli
-            .path
-            .or(toml_config.path)
-            .unwrap_or_else(|| ".".to_string());
-
-        let log_level = cli
-            .log_level
-            .or(toml_config.log_level)
-            .unwrap_or_else(|| "warn".to_string());
-
-        let threads = cli
-            .threads
-            .or(toml_config.threads)
-            .unwrap_or_else(num_cpus::get);
-
-        let window_size = cli
-            .window_size
-            .or(toml_config.window_size)
-            .unwrap_or_else(|| 3);
-
-        let background_str = cli
-            .background
-            .or(toml_config.background)
-            .unwrap_or_else(|| "#000000".to_string());
-
+        let path = Self::resolve(cli.path, toml_config.path, ".".to_string());
+        let log_level = Self::resolve(cli.log_level, toml_config.log_level, "warn".to_string());
+        let threads = Self::resolve(cli.threads, toml_config.threads, num_cpus::get());
+        let window_size = Self::resolve(cli.window_size, toml_config.window_size, 3);
+        let background_str = Self::resolve(
+            cli.background,
+            toml_config.background,
+            "#000000".to_string(),
+        );
         let background = Self::parse_color(&background_str);
 
         let mut bindings = Self::default_bindings();
@@ -113,6 +96,10 @@ impl Config {
             background,
             bindings,
         }
+    }
+
+    fn resolve<T>(cli: Option<T>, toml: Option<T>, default: T) -> T {
+        cli.or(toml).unwrap_or(default)
     }
 
     fn find_config_path(cli_path: &Option<PathBuf>) -> Option<PathBuf> {
