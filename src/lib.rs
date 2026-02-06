@@ -251,6 +251,23 @@ pub fn run(scan: ScanResult, config: Config) -> Result<(), Box<dyn Error>> {
 
     main_window.set_app_background(config.background);
 
+    setup_bindings(&main_window, &config);
+
     main_window.run()?;
     Ok(())
+}
+
+fn setup_bindings(main_window: &MainWindow, config: &Config) {
+    let get_key = |action: &str| {
+        Config::get_slint_key_string(config.bindings.get(action).unwrap_or_else(|| {
+            panic!("Binding '{}' should already be populated by config", action)
+        }))
+    };
+
+    main_window.set_bind_quit(get_key("quit"));
+    main_window.set_bind_fullscreen(get_key("toggle_fullscreen"));
+    main_window.set_bind_switch_mode(get_key("switch_mode"));
+    main_window.set_bind_reset_zoom(get_key("reset_zoom"));
+    main_window.set_bind_grid_pg_dn(get_key("grid_page_down"));
+    main_window.set_bind_grid_pg_up(get_key("grid_page_up"));
 }

@@ -17,6 +17,14 @@ export component MainWindow inherits Window {
     preferred-height: 720px;
     full-screen: self.is_fullscreen;
 
+    // Bindings
+    in property <string> bind_quit;
+    in property <string> bind_fullscreen;
+    in property <string> bind_switch_mode;
+    in property <string> bind_reset_zoom;
+    in property <string> bind_grid_pg_dn;
+    in property <string> bind_grid_pg_up;
+
     // Full view
     callback request_next_image();
     callback request_prev_image();
@@ -56,45 +64,51 @@ export component MainWindow inherits Window {
         }
     }
 
-    forward-focus: my-key-handler;
-    my-key-handler := FocusScope {
+    forward-focus: key-handler;
+    key-handler := FocusScope {
         key-pressed(event) => {
-            if (event.text == "q") {
+            if (event.text == root.bind_quit) {
                 root.quit_app();
                 return accept;
             }
-            if (event.text == "f") {
+            if (event.text == root.bind_fullscreen) {
                 root.is_fullscreen = !root.is_fullscreen;
+                return accept;
+            }
+            if (event.text == root.bind_switch_mode) {
+                root.view_mode = root.view_mode == ViewMode.full ? ViewMode.grid : ViewMode.full;
                 return accept;
             }
             if (root.view-mode == ViewMode.full) {
                 if (event.text == "h" || event.text == Key.LeftArrow) {
                     root.request_prev_image();
-                } else if (event.text == "l" || event.text == Key.RightArrow) {
+                    return accept;
+                }
+                if (event.text == "l" || event.text == Key.RightArrow) {
                     root.request_next_image();
-                } else if (event.text == Key.Escape) {
-                    root.view_mode = ViewMode.grid;
+                    return accept;
+                }
+                if (event.text == root.bind_reset_zoom) {
+                    full_view.reset_zoom();
+                    return accept;
                 }
             } else if (root.view-mode == ViewMode.grid) {
-                if (event.text == Key.Escape) {
-                    root.view_mode = ViewMode.full;
-                }
-                if (event.text == Key.PageDown) {
+                if (event.text == root.bind_grid_pg_dn) {
                     grid_view.viewport-y = Math.max(
                         grid_view.viewport-y - grid_view.height,
                         grid_view.height - grid_view.viewport-height);
-                    udpate_visible_rows();
+                    root.udpate_visible_rows();
                     return accept;
                 }
-                if (event.text == Key.PageUp) {
+                if (event.text == bind_grid_pg_up) {
                     grid_view.viewport-y = Math.min(
                         grid_view.viewport-y + grid_view.height,
                         0px);
-                    udpate_visible_rows();
+                    root.udpate_visible_rows();
                     return accept;
                 }
             }
-            accept
+            reject
         }
     }
 

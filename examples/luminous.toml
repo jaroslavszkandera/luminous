@@ -10,9 +10,10 @@ threads = 0
 # Background color in Hex
 background = "#000000"
 
-# [keyboard]
-# TODO: Keybindings configuration
-# bindings = [
-#     { key = "Right", action = "next_image" },
-#     { key = "Left", action = "prev_image" }
-# ]
+[bindings]
+quit = "q"
+toggle_fullscreen = "f"
+switch_mode = "Escape"
+grid_page_down = "PageDown"
+grid_page_up = "PageUp"
+reset_zoom = "z"

@@ -13,6 +13,7 @@ pub struct Config {
     pub threads: usize,
     pub window_size: usize,
     pub background: Color,
+    pub bindings: HashMap<String, String>,
 }
 
 #[derive(Parser, Debug)]
@@ -46,6 +47,7 @@ struct TomlConfig {
     threads: Option<usize>,
     window_size: Option<usize>,
     background: Option<String>,
+    bindings: Option<HashMap<String, String>>,
     #[serde(flatten)]
     unknown: HashMap<String, toml::Value>,
 }
@@ -96,12 +98,20 @@ impl Config {
 
         let background = Self::parse_color(&background_str);
 
+        let mut bindings = Self::default_bindings();
+        if let Some(user_bindings) = toml_config.bindings {
+            for (action, key) in user_bindings {
+                bindings.insert(action, key);
+            }
+        }
+
         Config {
             path,
             log_level,
             threads,
             window_size,
             background,
+            bindings,
         }
     }
 
@@ -156,5 +166,36 @@ impl Config {
                 );
                 slint::Color::from_rgb_u8(0, 0, 0)
             })
+    }
+
+    fn default_bindings() -> HashMap<String, String> {
+        let mut map = HashMap::new();
+        map.insert("quit".into(), "q".into());
+        map.insert("toggle_fullscreen".into(), "f".into());
+        map.insert("switch_mode".into(), "Escape".into());
+        map.insert("grid_page_down".into(), "PageDown".into());
+        map.insert("grid_page_up".into(), "PageUp".into());
+        map.insert("reset_zoom".into(), "z".into());
+        map
+    }
+
+    pub fn get_slint_key_string(key_name: &str) -> slint::SharedString {
+        match key_name {
+            "Right" => slint::platform::Key::RightArrow.into(),
+            "Left" => slint::platform::Key::LeftArrow.into(),
+            "Up" => slint::platform::Key::UpArrow.into(),
+            "Down" => slint::platform::Key::DownArrow.into(),
+            "Escape" | "Esc" => slint::platform::Key::Escape.into(),
+            "Return" | "Enter" => slint::platform::Key::Return.into(),
+            "Tab" => slint::platform::Key::Tab.into(),
+            "Backspace" => slint::platform::Key::Backspace.into(),
+            "PageUp" => slint::platform::Key::PageUp.into(),
+            "PageDown" => slint::platform::Key::PageDown.into(),
+            "Home" => slint::platform::Key::Home.into(),
+            "End" => slint::platform::Key::End.into(),
+            "Delete" => slint::platform::Key::Delete.into(),
+            // For single characters, return as is
+            other => other.into(),
+        }
     }
 }
