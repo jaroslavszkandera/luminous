@@ -1,0 +1,18 @@
+# Logging level: trace, debug, info, warn, error
+log_level = "info"
+
+# Number of images to pre-cache in full view
+window_size = 3
+
+# Number of worker threads (0 = auto-detect CPUs)
+threads = 0
+
+# Background color in Hex
+background = "#000000"
+
+# [keyboard]
+# TODO: Keybindings configuration
+# bindings = [
+#     { key = "Right", action = "next_image" },
+#     { key = "Left", action = "prev_image" }
+# ]
