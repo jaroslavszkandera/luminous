@@ -37,7 +37,7 @@ export component MainWindow inherits Window {
     in property <image> full_view_image;
     in-out property <int> curr_image_index: 0;
     in property <string> curr_image_name;
-    in-out property <ViewMode> view_mode: ViewMode.grid; // TODO: cache last view mode
+    in-out property <ViewMode> view_mode: ViewMode.full; // TODO: cache last view mode
     in-out property <bool> is_fullscreen: false;
     in-out property <int> grid_cols: 5;
 
