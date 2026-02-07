@@ -10,6 +10,11 @@ export enum ViewMode {
     grid,
 }
 
+export enum MouseMode {
+    select,
+    drag,
+}
+
 export component MainWindow inherits Window {
     title: "Luminous";
     background: app_background;
@@ -90,6 +95,10 @@ export component MainWindow inherits Window {
                 }
                 if (event.text == root.bind_reset_zoom) {
                     full_view.reset_zoom();
+                    return accept;
+                }
+                if (event.text == "m") {
+                    full_view.mouse_mode = full_view.mouse_mode == MouseMode.drag ? MouseMode.select : MouseMode.drag;
                     return accept;
                 }
             } else if (root.view-mode == ViewMode.grid) {
@@ -215,17 +224,24 @@ export component MainWindow inherits Window {
         visible: root.view-mode == ViewMode.full;
         width: 100%;
         height: 100%;
-        mouse-cursor: self.pressed && zoom_scale > 1.0 ? grabbing : zoom_scale > 1.0 ? grab : default;
+        mouse-cursor: (mouse_mode == MouseMode.select) ? crosshair : (mouse_mode == MouseMode.drag && self.pressed && zoom_scale > 1.0) ? grabbing : (mouse_mode == MouseMode.drag && zoom_scale > 1.0) ? grab : default;
 
         property <length> last_coords_x: -1px;
         property <length> last_coords_y: -1px;
         property <string> display_coords: "0, 0";
         property <float> zoom_scale: 1.0;
 
+        property <MouseMode> mouse_mode: MouseMode.select;
         property <length> start_drag_x;
         property <length> start_drag_y;
         property <length> start_img_x;
         property <length> start_img_y;
+
+        property <bool> is_selecting: mouse_mode == MouseMode.select && self.pressed;
+        property <length> selection_x;
+        property <length> selection_y;
+        property <length> selection_width;
+        property <length> selection_height;
 
         pointer-event(event) => {
             if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
@@ -234,12 +250,22 @@ export component MainWindow inherits Window {
                 self.start_img_x = img.x;
                 self.start_img_y = img.y;
             }
+            if (mouse_mode == MouseMode.select) {
+                selection_width = 0px;
+                selection_height = 0px;
+            }
         }
 
         moved => {
-            if (self.pressed && zoom_scale > 1.0) {
+            if (mouse_mode == MouseMode.drag && self.pressed && zoom_scale > 1.0) {
                 img.x = self.start_img_x + (self.mouse-x - self.start_drag_x);
                 img.y = self.start_img_y + (self.mouse-y - self.start_drag_y);
+            }
+            if (is_selecting) {
+                selection_x = Math.min(self.mouse-x, self.start_drag_x);
+                selection_y = Math.min(self.mouse-y, self.start_drag_y);
+                selection_width = Math.abs(self.mouse-x - self.start_drag_x);
+                selection_height = Math.abs(self.mouse-y - self.start_drag_y);
             }
         }
 
@@ -352,6 +378,17 @@ export component MainWindow inherits Window {
                     color: white;
                     text: "[x,y]=[" + display_coords + "]";
                 }
+            }
+
+            Rectangle {
+                x: full_view.selection_x;
+                y: full_view.selection_y;
+                width: full_view.selection_width;
+                height: full_view.selection_height;
+                visible: full_view.is_selecting || (full_view.selection_width > 0px && mouse_mode == MouseMode.select);
+                background: #3498db33;
+                border-color: #3498db;
+                border-width: 1px;
             }
 
             ContextMenuArea {
