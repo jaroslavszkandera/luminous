@@ -212,14 +212,55 @@ export component MainWindow inherits Window {
     }
 
     full_view := TouchArea {
+        visible: root.view-mode == ViewMode.full;
+        width: 100%;
+        height: 100%;
+
         property <length> last_coords_x: -1px;
         property <length> last_coords_y: -1px;
         property <string> display_coords: "0, 0";
         property <float> zoom_scale: 1.0;
 
-        visible: root.view-mode == ViewMode.full;
-        width: 100%;
-        height: 100%;
+        property <length> start_drag_x;
+        property <length> start_drag_y;
+        property <length> start_img_x;
+        property <length> start_img_y;
+
+        pointer-event(event) => {
+            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                self.start_drag_x = self.mouse-x;
+                self.start_drag_y = self.mouse-y;
+                self.start_img_x = img.x;
+                self.start_img_y = img.y;
+            }
+        }
+
+        moved => {
+            if (self.pressed && zoom_scale > 1.0) {
+                img.x = self.start_img_x + (self.mouse-x - self.start_drag_x);
+                img.y = self.start_img_y + (self.mouse-y - self.start_drag_y);
+            }
+        }
+
+        scroll-event(event) => {
+            let delta_up = event.delta-y > 0;
+            if (event.modifiers.control) {
+                zoom(delta_up ? 1.1 : 0.9, full_view.mouse-x, full_view.mouse-y);
+            } else {
+                reset_zoom();
+                if (delta_up) {
+                    root.request_prev_image();
+                } else {
+                    root.request_next_image();
+                }
+            }
+            accept
+        }
+
+        double-clicked => {
+            root.view_mode = ViewMode.grid;
+            reset_zoom();
+        }
 
         coords_timer := Timer {
             interval: 60ms;
@@ -275,25 +316,6 @@ export component MainWindow inherits Window {
             img.height = root.height;
             img.x = 0;
             img.y = 0;
-        }
-
-        scroll-event(event) => {
-            let delta_up = event.delta-y > 0;
-            if (event.modifiers.control) {
-                zoom(delta_up ? 1.1 : 0.9, full_view.mouse-x, full_view.mouse-y);
-            } else {
-                reset_zoom();
-                if (delta_up) {
-                    root.request_prev_image();
-                } else {
-                    root.request_next_image();
-                }
-            }
-            accept
-        }
-
-        double-clicked => {
-            root.view_mode = ViewMode.grid;
         }
 
         rect_img := Rectangle {
