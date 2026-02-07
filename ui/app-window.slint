@@ -115,7 +115,7 @@ export component MainWindow inherits Window {
     grid_view := ScrollView {
         visible: root.view-mode == ViewMode.grid;
         viewport-height: grid_container.height;
-        property <[length]> resolutions: [256 * 1px, 512 * 1px, 1024 * 1px]; // sync with Rust get_bucked_res()
+        property <[length]> resolutions: [256 * 1px, 512 * 1px, 1024 * 1px]; // TODO: sync with Rust get_bucked_res()
 
         function bucket_resolution(size: length) -> int {
             if size < resolutions[0] {
@@ -225,9 +225,9 @@ export component MainWindow inherits Window {
             interval: 60ms;
             running: root.view-mode == ViewMode.full;
             triggered => {
-                if (rect_img.mouse-x != last_coords_x || rect_img.mouse-y != last_coords_y) {
-                    last_coords_x = rect_img.mouse-x;
-                    last_coords_y = rect_img.mouse-y;
+                if (full_view.mouse-x != last_coords_x || full_view.mouse-y != last_coords_y) {
+                    last_coords_x = full_view.mouse-x;
+                    last_coords_y = full_view.mouse-y;
                     let win_w = full_view.width;
                     let win_h = full_view.height;
                     let img_w = root.full_view_image.width;
@@ -280,7 +280,7 @@ export component MainWindow inherits Window {
         scroll-event(event) => {
             let delta_up = event.delta-y > 0;
             if (event.modifiers.control) {
-                zoom(delta_up ? 1.1 : 0.9, rect_img.mouse-x, rect_img.mouse-y);
+                zoom(delta_up ? 1.1 : 0.9, full_view.mouse-x, full_view.mouse-y);
             } else {
                 reset_zoom();
                 if (delta_up) {
@@ -292,7 +292,11 @@ export component MainWindow inherits Window {
             accept
         }
 
-        rect_img := TouchArea {
+        double-clicked => {
+            root.view_mode = ViewMode.grid;
+        }
+
+        rect_img := Rectangle {
             img := Image {
                 source: root.full_view_image;
                 image-fit: contain;
