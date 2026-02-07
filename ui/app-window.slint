@@ -82,6 +82,7 @@ export component MainWindow inherits Window {
             }
             if (event.text == root.bind_switch_mode) {
                 root.view_mode = root.view_mode == ViewMode.full ? ViewMode.grid : ViewMode.full;
+                full_view.reset_zoom();
                 return accept;
             }
             if (root.view-mode == ViewMode.full) {
@@ -244,15 +245,21 @@ export component MainWindow inherits Window {
         property <length> selection_height;
 
         pointer-event(event) => {
-            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
-                self.start_drag_x = self.mouse-x;
-                self.start_drag_y = self.mouse-y;
-                self.start_img_x = img.x;
-                self.start_img_y = img.y;
-            }
-            if (mouse_mode == MouseMode.select) {
-                selection_width = 0px;
-                selection_height = 0px;
+            if (event.button == PointerEventButton.left) {
+                if (event.kind == PointerEventKind.down) {
+                    self.start_drag_x = self.mouse-x;
+                    self.start_drag_y = self.mouse-y;
+                    self.start_img_x = img.x;
+                    self.start_img_y = img.y;
+                    if (mouse_mode == MouseMode.select) {
+                        selection_width = 0px;
+                        selection_height = 0px;
+                    }
+                } else if (event.kind == PointerEventKind.up && mouse_mode == MouseMode.select) {
+                    if (selection_width > 5px && selection_height > 5px) {
+                        zoom_to_selection();
+                    }
+                }
             }
         }
 
@@ -335,6 +342,20 @@ export component MainWindow inherits Window {
             img.y = center_y - (center_y - img.y) * ratio;
 
             debug("Zoom: " + Math.round(zoom_scale * 100) + "%");
+        }
+
+        function zoom_to_selection() {
+            let scale_x = self.width / selection_width;
+            let scale_y = self.height / selection_height;
+            let zoom_factor = Math.min(scale_x, scale_y);
+
+            let center_x = selection_x + selection_width / 2;
+            let center_y = selection_y + selection_height / 2;
+
+            zoom(zoom_factor, center_x, center_y);
+
+            selection_width = 0px;
+            selection_height = 0px;
         }
 
         function reset_zoom() {
