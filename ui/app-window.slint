@@ -215,6 +215,7 @@ export component MainWindow inherits Window {
         visible: root.view-mode == ViewMode.full;
         width: 100%;
         height: 100%;
+        mouse-cursor: self.pressed && zoom_scale > 1.0 ? grabbing : zoom_scale > 1.0 ? grab : default;
 
         property <length> last_coords_x: -1px;
         property <length> last_coords_y: -1px;
