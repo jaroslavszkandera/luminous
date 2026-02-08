@@ -93,10 +93,12 @@ export component MainWindow inherits Window {
             }
             if (root.view-mode == ViewMode.full) {
                 if (event.text == "h" || event.text == Key.LeftArrow) {
+                    full_view.reset_zoom();
                     root.request_prev_image();
                     return accept;
                 }
                 if (event.text == "l" || event.text == Key.RightArrow) {
+                    full_view.reset_zoom();
                     root.request_next_image();
                     return accept;
                 }
