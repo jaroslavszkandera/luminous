@@ -461,5 +461,15 @@ export component MainWindow inherits Window {
                 }
             }
         }
+
+        // TODO: recalculate the zoom when height or width changes
+        changed height => {
+            debug("new height: ", self.height);
+            reset_zoom();
+        }
+        changed width => {
+            debug("new width: ", self.width);
+            reset_zoom();
+        }
     }
 }
