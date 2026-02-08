@@ -197,6 +197,7 @@ pub fn run(scan: ScanResult, config: Config) -> Result<(), Box<dyn Error>> {
         .map(|(i, _)| GridItem {
             image: Image::default(),
             index: i as i32,
+            selected: false,
         })
         .collect();
     main_window.set_grid_model(Rc::new(VecModel::from(grid_data)).into());

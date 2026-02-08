@@ -3,6 +3,7 @@ import { ScrollView } from "std-widgets.slint";
 export struct GridItem {
   image: image,
   index: int,
+  selected: bool,
 }
 
 export enum ViewMode {
@@ -10,9 +11,14 @@ export enum ViewMode {
     grid,
 }
 
-export enum MouseMode {
+export enum MouseModeFull {
     select,
     drag,
+}
+
+export enum MouseModeGrid {
+    select,
+    switch_to_full,
 }
 
 export component MainWindow inherits Window {
@@ -99,7 +105,7 @@ export component MainWindow inherits Window {
                     return accept;
                 }
                 if (event.text == "m") {
-                    full_view.mouse_mode = full_view.mouse_mode == MouseMode.drag ? MouseMode.select : MouseMode.drag;
+                    full_view.mouse_mode_full = full_view.mouse_mode_full == MouseModeFull.drag ? MouseModeFull.select : MouseModeFull.drag;
                     return accept;
                 }
             } else if (root.view-mode == ViewMode.grid) {
@@ -116,6 +122,9 @@ export component MainWindow inherits Window {
                         0px);
                     root.udpate_visible_rows();
                     return accept;
+                }
+                if (event.text == "m") {
+                    grid_container.mouse_mode_grid = grid_container.mouse_mode_grid == MouseModeGrid.switch-to-full ? MouseModeGrid.select : MouseModeGrid.switch-to-full;
                 }
             }
             reject
@@ -195,6 +204,7 @@ export component MainWindow inherits Window {
                 property <length> gap: parent.gap;
                 property <int> cols: parent.cols;
                 property <int> curr_bucket_res: 0;
+                property <MouseModeGrid> mouse_mode_grid: MouseModeGrid.switch-to-full;
 
                 for item[i] in root.grid_model: Rectangle {
                     width: parent.item_size;
@@ -203,6 +213,10 @@ export component MainWindow inherits Window {
                     y: (floor(i / parent.cols) * (parent.item_size + parent.gap)) + parent.gap;
 
                     clip: true;
+                    border-width: item.selected ? 3px : 0px;
+                    border-color: #3498db;
+                    opacity: item.selected ? 0.7 : 1.0;
+
                     Image {
                         source: item.image;
                         image-fit: cover;
@@ -212,8 +226,13 @@ export component MainWindow inherits Window {
 
                     TouchArea {
                         clicked => {
-                            root.image_selected(item.index);
-                            root.view_mode = ViewMode.full;
+                            if (mouse_mode_grid == MouseModeGrid.switch-to-full) {
+                                root.image_selected(item.index);
+                                root.view_mode = ViewMode.full;
+                            } else if (mouse_mode_grid == MouseModeGrid.select) {
+                                // TODO: Add Ctrl/Shift selection support
+                                item.selected = item.selected ? false : true;
+                            }
                         }
                     }
                 }
@@ -225,20 +244,20 @@ export component MainWindow inherits Window {
         visible: root.view-mode == ViewMode.full;
         width: 100%;
         height: 100%;
-        mouse-cursor: (mouse_mode == MouseMode.select) ? crosshair : (mouse_mode == MouseMode.drag && self.pressed && zoom_scale > 1.0) ? grabbing : (mouse_mode == MouseMode.drag && zoom_scale > 1.0) ? grab : default;
+        mouse-cursor: (mouse_mode_full == MouseModeFull.select) ? crosshair : (mouse_mode_full == MouseModeFull.drag && self.pressed && zoom_scale > 1.0) ? grabbing : (mouse_mode_full == MouseModeFull.drag && zoom_scale > 1.0) ? grab : default;
 
         property <length> last_coords_x: -1px;
         property <length> last_coords_y: -1px;
         property <string> display_coords: "0, 0";
         property <float> zoom_scale: 1.0;
 
-        property <MouseMode> mouse_mode: MouseMode.select;
+        property <MouseModeFull> mouse_mode_full: MouseModeFull.select;
         property <length> start_drag_x;
         property <length> start_drag_y;
         property <length> start_img_x;
         property <length> start_img_y;
 
-        property <bool> is_selecting: mouse_mode == MouseMode.select && self.pressed;
+        property <bool> is_selecting: mouse_mode_full == MouseModeFull.select && self.pressed;
         property <length> selection_x;
         property <length> selection_y;
         property <length> selection_width;
@@ -251,11 +270,11 @@ export component MainWindow inherits Window {
                     self.start_drag_y = self.mouse-y;
                     self.start_img_x = img.x;
                     self.start_img_y = img.y;
-                    if (mouse_mode == MouseMode.select) {
+                    if (mouse_mode_full == MouseModeFull.select) {
                         selection_width = 0px;
                         selection_height = 0px;
                     }
-                } else if (event.kind == PointerEventKind.up && mouse_mode == MouseMode.select) {
+                } else if (event.kind == PointerEventKind.up && mouse_mode_full == MouseModeFull.select) {
                     if (selection_width > 5px && selection_height > 5px) {
                         zoom_to_selection();
                     }
@@ -264,7 +283,7 @@ export component MainWindow inherits Window {
         }
 
         moved => {
-            if (mouse_mode == MouseMode.drag && self.pressed && zoom_scale > 1.0) {
+            if (mouse_mode_full == MouseModeFull.drag && self.pressed && zoom_scale > 1.0) {
                 img.x = self.start_img_x + (self.mouse-x - self.start_drag_x);
                 img.y = self.start_img_y + (self.mouse-y - self.start_drag_y);
             }
@@ -406,7 +425,7 @@ export component MainWindow inherits Window {
                 y: full_view.selection_y;
                 width: full_view.selection_width;
                 height: full_view.selection_height;
-                visible: full_view.is_selecting || (full_view.selection_width > 0px && mouse_mode == MouseMode.select);
+                visible: full_view.is_selecting || (full_view.selection_width > 0px && mouse_mode_full == MouseModeFull.select);
                 background: #3498db33;
                 border-color: #3498db;
                 border-width: 1px;
