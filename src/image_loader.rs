@@ -11,6 +11,7 @@ use std::time::Instant;
 use threadpool::ThreadPool;
 
 use crate::MainWindow;
+use crate::PluginManager;
 
 fn get_placeholder() -> SharedPixelBuffer<Rgba8Pixel> {
     SharedPixelBuffer::<Rgba8Pixel>::new(1, 1)
@@ -26,10 +27,16 @@ pub struct ImageLoader {
     window_size: usize,
     cache_dir: Option<PathBuf>,
     bucket_resolution: AtomicU32,
+    plugin_manager: Arc<PluginManager>,
 }
 
 impl ImageLoader {
-    pub fn new(paths: Vec<PathBuf>, workers: usize, window_size: usize) -> Self {
+    pub fn new(
+        paths: Vec<PathBuf>,
+        workers: usize,
+        window_size: usize,
+        plugin_manager: Arc<PluginManager>,
+    ) -> Self {
         let cache_dir = if let Some(proj_dirs) = ProjectDirs::from("", "", "luminous") {
             let dir = proj_dirs.cache_dir().join("thumbnails");
             if let Err(e) = fs::create_dir_all(&dir) {
@@ -51,6 +58,7 @@ impl ImageLoader {
             window_size: window_size,
             cache_dir,
             bucket_resolution: AtomicU32::new(0),
+            plugin_manager,
         }
     }
 
@@ -235,6 +243,7 @@ impl ImageLoader {
             let path = path.clone();
             let cache_clone = self.full_cache.clone();
             let full_load_generation = self.full_load_generation.clone();
+            let plugin_manager = self.plugin_manager.clone();
 
             self.pool.execute(move || {
                 let current_generation = full_load_generation.load(Ordering::Relaxed);
@@ -247,18 +256,25 @@ impl ImageLoader {
                 }
 
                 let start = Instant::now();
-                let buffer = match image::open(&path) {
-                    Ok(dyn_img) => {
-                        let rgba = dyn_img.to_rgba8();
-                        SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
-                            rgba.as_raw(),
-                            rgba.width(),
-                            rgba.height(),
-                        )
+                let buffer = if plugin_manager.has_plugin(&path) {
+                    match plugin_manager.load_via_plugin(&path) {
+                        Some(buf) => buf,
+                        _ => get_placeholder(),
                     }
-                    Err(e) => {
-                        error!("Full load fail {}: {}", path.display(), e);
-                        get_placeholder()
+                } else {
+                    match image::open(&path) {
+                        Ok(dyn_img) => {
+                            let rgba = dyn_img.to_rgba8();
+                            SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
+                                rgba.as_raw(),
+                                rgba.width(),
+                                rgba.height(),
+                            )
+                        }
+                        Err(e) => {
+                            error!("Full load fail {}: {}", path.display(), e);
+                            get_placeholder()
+                        }
                     }
                 };
 

@@ -8,6 +8,9 @@ use config::Config;
 use fs_scan::ScanResult;
 use image_loader::ImageLoader;
 
+mod plugins;
+use plugins::PluginManager;
+
 use slint::{Image, Model, Rgba8Pixel, SharedPixelBuffer, VecModel};
 use std::cell::RefCell;
 use std::cmp;
@@ -24,12 +27,18 @@ struct AppController {
 }
 
 impl AppController {
-    fn new(scan: Rc<ScanResult>, config: &Config, window: &MainWindow) -> Self {
+    fn new(
+        scan: Rc<ScanResult>,
+        config: &Config,
+        window: &MainWindow,
+        plugin_manager: Arc<PluginManager>,
+    ) -> Self {
         Self {
             loader: Arc::new(ImageLoader::new(
                 scan.paths.clone(),
                 config.threads,
                 config.window_size,
+                plugin_manager,
             )),
             scan,
             active_grid_indices: HashSet::new(),
@@ -187,7 +196,19 @@ impl AppController {
     }
 }
 
-pub fn run(scan: ScanResult, config: Config) -> Result<(), Box<dyn Error>> {
+pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
+    let mut plugin_manager = PluginManager::new();
+    // TODO: Move to config/luminous/plugins/py_plugin.py
+    let extra_ext = String::from("special");
+    plugin_manager.register(&extra_ext, "python3 plugins/special.py");
+
+    let scan = fs_scan::scan(&config.path, &vec![extra_ext]);
+
+    if scan.paths.is_empty() {
+        // TODO: File manager pop-up
+        return Err(format!("No supported images found in {}", config.path).into());
+    }
+
     let main_window = MainWindow::new()?;
 
     let grid_data: Vec<GridItem> = scan
@@ -207,6 +228,7 @@ pub fn run(scan: ScanResult, config: Config) -> Result<(), Box<dyn Error>> {
         scan_rc.clone(),
         &config,
         &main_window,
+        Arc::new(plugin_manager),
     )));
 
     // Callbacks

@@ -3,21 +3,19 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
-const SUPPORTED_EXTENSIONS: &[&str; 6] = &["jpg", "jpeg", "png", "bmp", "gif", "webp"];
-
 pub struct ScanResult {
     pub paths: Vec<PathBuf>,
     pub start_index: usize,
 }
 
-fn is_image(path: &Path) -> bool {
+fn is_image(path: &Path, extensions: &[String]) -> bool {
     path.extension()
         .and_then(|ext| ext.to_str())
-        .map(|ext_str| SUPPORTED_EXTENSIONS.contains(&ext_str.to_lowercase().as_str()))
+        .map(|ext_str| extensions.contains(&ext_str.to_lowercase()))
         .unwrap_or(false)
 }
 
-pub fn scan(path_str: &str) -> ScanResult {
+pub fn scan(path_str: &str, extra_exts: &[String]) -> ScanResult {
     let main_path = Path::new(&path_str);
     let metadata = fs::metadata(main_path).unwrap();
 
@@ -25,8 +23,18 @@ pub fn scan(path_str: &str) -> ScanResult {
     let mut starting_index: usize = 0;
     let mut start_img_path: Option<PathBuf> = None;
 
+    let mut extensions = vec![
+        "jpg".into(),
+        "jpeg".into(),
+        "png".into(),
+        "bmp".into(),
+        "webp".into(),
+    ];
+    extensions.extend_from_slice(extra_exts);
+    info!("Supported extensions: {:?}", extensions);
+
     let scan_dir = if metadata.is_file() {
-        if !is_image(main_path) {
+        if !is_image(main_path, &extensions) {
             error!(
                 "File is not a supported image type: {}",
                 main_path.display()
@@ -58,7 +66,7 @@ pub fn scan(path_str: &str) -> ScanResult {
         .filter_map(|e| e.ok())
     {
         let path = entry.into_path();
-        if path.is_file() && is_image(&path) {
+        if path.is_file() && is_image(&path, &extensions) {
             if let Some(ref curr) = start_img_path {
                 if path == *curr {
                     starting_index = paths.len();
