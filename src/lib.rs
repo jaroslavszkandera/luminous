@@ -11,11 +11,13 @@ use image_loader::ImageLoader;
 mod plugins;
 use plugins::PluginManager;
 
+use log::info;
 use slint::{Image, Model, Rgba8Pixel, SharedPixelBuffer, VecModel};
 use std::cell::RefCell;
 use std::cmp;
 use std::collections::HashSet;
 use std::error::Error;
+use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -198,11 +200,12 @@ impl AppController {
 
 pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
     let mut plugin_manager = PluginManager::new();
-    // TODO: Move to config/luminous/plugins/py_plugin.py
-    let extra_ext = String::from("special");
-    plugin_manager.register(&extra_ext, "python3 plugins/special.py");
+    plugin_manager.discover(Path::new("./plugins"));
 
-    let scan = fs_scan::scan(&config.path, &vec![extra_ext]);
+    let extra_ext = plugin_manager.get_supported_extensions();
+    info!("Plugin extensions active: {:?}", extra_ext);
+
+    let scan = fs_scan::scan(&config.path, &extra_ext);
 
     if scan.paths.is_empty() {
         // TODO: File manager pop-up

@@ -1,0 +1,7 @@
+{
+  "name": "Python Special",
+  "version": "0.1",
+  "executable": "special.py",
+  "extensions": ["special"],
+  "plugin_type": "python"
+}

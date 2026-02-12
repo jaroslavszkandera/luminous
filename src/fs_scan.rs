@@ -1,4 +1,5 @@
 use log::{debug, error, info};
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
@@ -8,10 +9,13 @@ pub struct ScanResult {
     pub start_index: usize,
 }
 
-fn is_image(path: &Path, extensions: &[String]) -> bool {
+fn is_image(path: &Path, extensions: &HashMap<String, Option<String>>) -> bool {
     path.extension()
         .and_then(|ext| ext.to_str())
-        .map(|ext_str| extensions.contains(&ext_str.to_lowercase()))
+        .map(|ext_str| {
+            let lower = ext_str.to_lowercase();
+            extensions.contains_key(&lower)
+        })
         .unwrap_or(false)
 }
 
@@ -23,14 +27,29 @@ pub fn scan(path_str: &str, extra_exts: &[String]) -> ScanResult {
     let mut starting_index: usize = 0;
     let mut start_img_path: Option<PathBuf> = None;
 
-    let mut extensions = vec![
-        "jpg".into(),
-        "jpeg".into(),
-        "png".into(),
-        "bmp".into(),
-        "webp".into(),
-    ];
-    extensions.extend_from_slice(extra_exts);
+    // All supported formats from the image crate
+    let mut extensions = HashMap::from([
+        ("avif".into(), None),
+        ("bmp".into(), None),
+        ("dds".into(), None),
+        ("exr".into(), None),
+        ("ff".into(), None),
+        ("gif".into(), None),
+        ("hdr".into(), None),
+        ("ico".into(), None),
+        ("jpeg".into(), None),
+        ("jpg".into(), None),
+        ("png".into(), None),
+        ("pnm".into(), None),
+        ("qoi".into(), None),
+        ("tga".into(), None),
+        ("tif".into(), None),
+        ("tiff".into(), None),
+        ("webp".into(), None),
+    ]);
+    for ext in extra_exts {
+        extensions.insert(ext.to_lowercase(), None); // Option to plugin cmd
+    }
     info!("Supported extensions: {:?}", extensions);
 
     let scan_dir = if metadata.is_file() {
