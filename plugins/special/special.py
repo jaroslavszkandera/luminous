@@ -5,48 +5,49 @@ import struct
 import sys
 
 
-def main():
-    if len(sys.argv) < 2:
-        sys.stderr.write("Usage: plugin.py <image_path>\n")
-        sys.exit(1)
+def get_shm(size):
+    shm_id = sys.stdin.readline().strip()
+    path = shm_id if os.path.exists(shm_id) else f"/dev/shm/{shm_id.lstrip('/')}"
+    f = open(path, "r+b")
+    return mmap.mmap(f.fileno(), size)
 
-    width = 800
-    height = 600
-    channels = 4  # RGBA
-    required_bytes = width * height * channels
 
-    response = {
-        "status": "ready",
-        "width": width,
-        "height": height,
-        "required_bytes": required_bytes,
-    }
-    print(json.dumps(response))
+def handle_decode(path):
+    w, h = 500, 500
+    size = w * h * 4
+    print(
+        json.dumps({"status": "ready", "width": w, "height": h, "required_bytes": size})
+    )
     sys.stdout.flush()
 
-    try:
-        shmem_id = sys.stdin.readline().strip()
-    except Exception as e:
-        sys.stderr.write(f"Error reading stdin: {e}\n")
-        sys.exit(1)
+    mm = get_shm(size)
+    mm.write(struct.pack("BBBB", 255, 0, 0, 255) * (w * h))
+    mm.close()
 
-    if not shmem_id:
-        sys.stderr.write("Received empty shmem ID\n")
-        sys.exit(1)
 
-    try:
-        shm_path = shmem_id
-        if not os.path.exists(shm_path):
-            shm_path = os.path.join("/dev/shm", shmem_id.lstrip("/"))
+def handle_encode(path):
+    meta = json.loads(sys.stdin.readline())
+    mm = get_shm(meta["required_bytes"])
+    with open(path, "wb") as f:
+        f.write(mm[:])
+    mm.close()
 
-        with open(shm_path, "r+b") as f:
-            with mmap.mmap(f.fileno(), required_bytes) as mm:
-                red_pixel = struct.pack("BBBB", 255, 0, 0, 255)
-                mm.write(red_pixel * (width * height))
 
-    except Exception as e:
-        sys.stderr.write(f"Python Error: {e}\n")
-        sys.exit(1)
+def handle_filter():
+    meta = json.loads(sys.stdin.readline())
+    mm = get_shm(meta["required_bytes"])
+    mm.close()
+    raise NotImplementedError
+
+
+def main():
+    cmd = sys.argv[1]
+    if cmd == "decode":
+        handle_decode(sys.argv[2])
+    elif cmd == "encode":
+        handle_encode(sys.argv[2])
+    elif cmd == "filter":
+        handle_filter()
 
 
 if __name__ == "__main__":

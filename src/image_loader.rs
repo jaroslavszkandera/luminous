@@ -14,7 +14,8 @@ use crate::MainWindow;
 use crate::PluginManager;
 
 fn get_placeholder() -> SharedPixelBuffer<Rgba8Pixel> {
-    SharedPixelBuffer::<Rgba8Pixel>::new(1, 1)
+    let pixel = [127, 127, 127, 255];
+    SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(&pixel, 1, 1)
 }
 
 pub struct ImageLoader {
@@ -257,7 +258,11 @@ impl ImageLoader {
 
                 let start = Instant::now();
                 let buffer = if plugin_manager.has_plugin(&path) {
-                    match plugin_manager.load_via_plugin(&path) {
+                    match plugin_manager
+                        .get_decoder(&path)
+                        .expect("Should have been safe with has_plugin")
+                        .decode(&path)
+                    {
                         Some(buf) => buf,
                         _ => get_placeholder(),
                     }

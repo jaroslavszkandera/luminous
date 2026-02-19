@@ -1,7 +1,8 @@
 {
   "name": "Python Special",
   "version": "0.1",
+  "interpreter": "python",
   "executable": "special.py",
   "extensions": ["special"],
-  "plugin_type": "python"
+  "capabilities": ["decoder"]
 }

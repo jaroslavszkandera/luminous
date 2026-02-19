@@ -1,4 +1,4 @@
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use serde::Deserialize;
 use shared_memory::ShmemConf;
 use slint::{Rgba8Pixel, SharedPixelBuffer};
@@ -7,34 +7,83 @@ use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::Instant;
+use std::sync::Arc;
+
+pub trait ImageDecoder: Send + Sync {
+    fn decode(&self, image_path: &Path) -> Option<SharedPixelBuffer<Rgba8Pixel>>;
+}
+
+// pub trait ImageEncoder: Send + Sync {
+//     fn encoder(&self, image_path: &Path, buffer: &SharedPixelBuffer<Rgba8Pixel>) -> bool;
+// }
+
+// pub trait ImageModifier: Send + Sync {
+//     fn modify(&self, buffer: SharedPixelBuffer<Rgba8Pixel>) -> Option<SharedPixelBuffer<Rgba8Pixel>>;
+// }
+
+#[derive(Deserialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum PluginCapability {
+    Decoder,
+    // Encoder,
+    // Filter,
+    // Metadata,
+    // Export
+    Unknown,
+}
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct PluginManifest {
     pub name: String,
     pub version: String,
     pub executable: String,
+    pub interpreter: Option<String>,
     pub extensions: Vec<String>,
-    pub plugin_type: String,
+    pub capabilities: Vec<PluginCapability>,
 }
 
 #[derive(Deserialize, Debug)]
-struct HandshakeRequest {
+struct PluginHandshake {
     status: String,
     width: u32,
     height: u32,
     required_bytes: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<String>,
 }
 
+pub struct Plugin {
+    manifest: PluginManifest,
+    path: PathBuf,
+}
+
+impl Plugin {
+    pub fn new(manifest: PluginManifest, path: PathBuf) -> Self {
+        Self { manifest, path }
+    }
+
+    fn exec(&self, arg: &str) -> Command {
+        let exec_path = &self.path.join(&self.manifest.executable);
+        let mut cmd = if let Some(ref interp) = self.manifest.interpreter {
+            let mut c = Command::new(interp);
+            c.arg(exec_path);
+            c
+        } else {
+            Command::new(exec_path)
+        };
+        cmd.arg(arg);
+        cmd
+    }
+}
+
 pub struct PluginManager {
-    registry: HashMap<String, (PathBuf, String)>, // (Path, Type)
+    decoders: HashMap<String, Arc<dyn ImageDecoder>>,
 }
 
 impl PluginManager {
     pub fn new() -> Self {
         Self {
-            registry: HashMap::new(),
+            decoders: HashMap::new(),
         }
     }
 
@@ -44,7 +93,7 @@ impl PluginManager {
             return;
         }
 
-        let entries = match fs::read_dir(plugins_dir) {
+        let plugin_entries = match fs::read_dir(plugins_dir) {
             Ok(e) => e,
             Err(e) => {
                 error!("Failed to read plugins dir: {}", e);
@@ -52,136 +101,129 @@ impl PluginManager {
             }
         };
 
-        for entry in entries.filter_map(|e| e.ok()) {
+        for entry in plugin_entries.filter_map(|e| e.ok()) {
             let path = entry.path();
+            debug!("path: {:?}", path.to_str());
             if path.is_dir() {
                 let manifest_path = path.join("plugin.json");
                 if manifest_path.exists() {
-                    self.load_manifest(&path, &manifest_path);
+                    let m = self.load_manifest(&manifest_path);
+                    self.register(m, path);
                 }
             }
         }
     }
 
-    fn load_manifest(&mut self, plugin_dir: &Path, manifest_path: &Path) {
-        let content = match fs::read_to_string(manifest_path) {
+    fn register(&mut self, manifest: Option<PluginManifest>, path: PathBuf) {
+        let manifest = if let Some(m) = manifest {
+            info!("Manifest ok");
+            m
+        } else {
+            error!("Manifest not ok");
+            return;
+        };
+        let plugin = Arc::new(Plugin::new(manifest.clone(), path));
+        for cap in &manifest.capabilities {
+            match cap {
+                PluginCapability::Decoder => {
+                    for ext in &manifest.extensions {
+                        self.decoders.insert(ext.to_lowercase(), plugin.clone());
+                        debug!("Added decoding support for \"{}\" extension", ext);
+                    }
+                }
+                PluginCapability::Unknown => {
+                    error!("Unknown plugin capability: {:?}", cap);
+                }
+            }
+        }
+    }
+
+    fn load_manifest(&mut self, path: &Path) -> Option<PluginManifest> {
+        info!("Loading plugin manifest: {:?}", path.to_str());
+        let content = match fs::read_to_string(path) {
             Ok(c) => c,
             Err(e) => {
-                error!("Error reading manifest {:?}: {}", manifest_path, e);
-                return;
+                error!("Failed to read manifest {:?}: {}", path, e);
+                return None;
             }
         };
 
-        match serde_json::from_str::<PluginManifest>(&content) {
-            Ok(manifest) => {
-                let exec_path = plugin_dir.join(&manifest.executable);
-
-                if !exec_path.exists() {
-                    error!("Plugin executable not found: {:?}", exec_path);
-                    return;
-                }
-
-                info!(
-                    "Loaded Plugin: {} v{} ({})",
-                    manifest.name, manifest.version, manifest.plugin_type
-                );
-
-                for ext in &manifest.extensions {
-                    self.registry.insert(
-                        ext.to_string(),
-                        (exec_path.clone(), manifest.plugin_type.clone()),
-                    );
-                    debug!("Registered extension .{} to {:?}", ext, exec_path);
-                }
+        let manifest: PluginManifest = match serde_json::from_str(&content) {
+            Ok(m) => m,
+            Err(e) => {
+                error!("Invalid manifest {:?}: {}", path, e);
+                return None;
             }
-            Err(e) => error!("Failed to parse JSON {:?}: {}", manifest_path, e),
+        };
+
+        let plugin_dir = path.parent().unwrap();
+        let exec_path = plugin_dir.join(&manifest.executable);
+
+        if !exec_path.exists() {
+            error!(
+                "Plugin executable not found: {:?} for manifest {}",
+                exec_path, manifest.name
+            );
+            return None;
+        }
+
+        info!("Loaded plugin manifest {}: {:#?}", manifest.name, manifest);
+        Some(manifest)
+    }
+
+    pub fn get_decoder(&self, path: &Path) -> Option<Arc<dyn ImageDecoder>> {
+        if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
+            self.decoders.get(&ext.to_lowercase()).cloned()
+        } else {
+            None
         }
     }
 
     pub fn get_supported_extensions(&self) -> Vec<String> {
-        self.registry.keys().cloned().collect()
+        self.decoders.keys().cloned().collect()
     }
 
     pub fn has_plugin(&self, path: &Path) -> bool {
         if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
-            return self.registry.contains_key(&ext.to_lowercase());
+            return self.decoders.contains_key(&ext.to_lowercase());
         }
         false
     }
+}
 
-    pub fn load_via_plugin(&self, path: &Path) -> Option<SharedPixelBuffer<Rgba8Pixel>> {
-        let ext = path.extension()?.to_str()?.to_lowercase();
-        let (exec_path, plugin_type) = self.registry.get(&ext)?;
-
-        let start_time = Instant::now();
-
-        let mut cmd = if plugin_type == "python" {
-            let mut c = Command::new("python3");
-            c.arg(exec_path);
-            c
-        } else {
-            Command::new(exec_path)
-        };
-
-        let mut child = cmd
-            .arg(path.to_str()?)
+impl ImageDecoder for Plugin {
+    fn decode(&self, image_path: &Path) -> Option<SharedPixelBuffer<Rgba8Pixel>> {
+        let mut child = self
+            .exec("decode")
+            .arg(image_path)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
             .spawn()
+            .map_err(|e| error!("Spawn failed: {}", e))
             .ok()?;
 
-        let mut reader = BufReader::new(child.stdout.as_mut()?);
+        let mut reader = BufReader::new(child.stdout.take().expect("Failed to take stdout"));
         let mut json_line = String::new();
-        reader.read_line(&mut json_line).ok()?;
 
-        let meta: HandshakeRequest = match serde_json::from_str(&json_line) {
-            Ok(m) => m,
-            Err(e) => {
-                error!("Handshake failed. Invalid JSON: {}", e);
-                return None;
-            }
-        };
-
-        if meta.status != "ready" {
-            error!("Plugin error: {:?}", meta.error);
+        if let Err(e) = reader.read_line(&mut json_line) {
+            error!("Failed to read JSON line from plugin: {}", e);
             return None;
         }
 
-        debug!(
-            "Plugin requested {} bytes for {}x{}",
-            meta.required_bytes, meta.width, meta.height
-        );
+        debug!("Raw JSON from plugin: {:?}", json_line);
 
-        let shmem = match ShmemConf::new().size(meta.required_bytes).create() {
-            Ok(m) => m,
-            Err(e) => {
-                error!("Host failed to allocate shmem: {}", e);
-                return None;
-            }
-        };
-        let os_id = shmem.get_os_id();
+        let meta: PluginHandshake = serde_json::from_str(&json_line).ok()?;
+        debug!("meta: {:#?}", meta);
+        let shmem = ShmemConf::new().size(meta.required_bytes).create().ok()?;
 
         if let Some(mut stdin) = child.stdin.take() {
-            writeln!(stdin, "{}", os_id).ok()?;
+            let _ = writeln!(stdin, "{}", shmem.get_os_id());
         }
 
-        let output = child.wait_with_output().ok()?;
-        if !output.status.success() {
-            error!("Plugin crashed during rendering");
-            return None;
-        }
-
-        let raw_slice = unsafe {
-            std::slice::from_raw_parts(shmem.as_ptr(), (meta.width * meta.height * 4) as usize)
-        };
-
-        let buffer =
-            SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(raw_slice, meta.width, meta.height);
-
-        let duration = start_time.elapsed();
-        info!("Plugin execution time: {:.2?}", duration);
-
-        Some(buffer)
+        child.wait().ok()?.success().then(|| {
+            let raw = unsafe { std::slice::from_raw_parts(shmem.as_ptr(), meta.required_bytes) };
+            SharedPixelBuffer::clone_from_slice(raw, meta.width, meta.height)
+        })
     }
 }
