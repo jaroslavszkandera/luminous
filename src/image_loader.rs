@@ -129,52 +129,48 @@ impl ImageLoader {
             let cache_dir = self.cache_dir.clone();
             let res = self.bucket_resolution.load(Ordering::Relaxed);
             let cache_path = Self::get_cache_path(cache_dir.as_ref(), &path, res);
+            let plugin_manager = self.plugin_manager.clone();
 
             self.pool.execute(move || {
                 let _start = Instant::now();
-
-                let buffer: Result<image::RgbaImage, image::ImageError> = (|| {
-                    if let Some(ref cp) = cache_path {
-                        if cp.exists() {
-                            if let Ok(cached_img) = image::open(cp) {
-                                debug!(
-                                    "Cache hit ({} px) for {:?}",
-                                    res,
-                                    path.file_name().unwrap_or_default(),
-                                );
-                                return Ok(cached_img.to_rgba8());
-                            }
+                let final_buffer = if let Some(ref cp) = cache_path.as_ref().filter(|p| p.exists())
+                {
+                    match image::open(cp) {
+                        Ok(cached_img) => {
+                            debug!("Cache hit ({}px) for {:?}", res, path.file_name());
+                            let rgba = cached_img.to_rgba8();
+                            SharedPixelBuffer::clone_from_slice(
+                                rgba.as_raw(),
+                                rgba.width(),
+                                rgba.height(),
+                            )
                         }
+                        Err(_) => Self::fetch_buffer(&path, &plugin_manager),
                     }
+                } else {
+                    let full_buffer = Self::fetch_buffer(&path, &plugin_manager);
 
-                    let dyn_img = image::open(&path)?;
-                    let resized = dyn_img.thumbnail(res, res);
-                    let rgba = resized.to_rgba8();
+                    let (w, h) = (full_buffer.width(), full_buffer.height());
+                    let img_view = image::RgbaImage::from_raw(
+                        w,
+                        h,
+                        full_buffer
+                            .as_slice()
+                            .iter()
+                            .flat_map(|p| [p.r, p.g, p.b, p.a])
+                            .collect(),
+                    )
+                    .unwrap();
+                    let resized = image::DynamicImage::ImageRgba8(img_view).thumbnail(res, res);
 
                     if let Some(ref cp) = cache_path {
                         if let Err(e) = resized.save(cp) {
-                            warn!(
-                                "Failed to save cache file {}, res {}: {}",
-                                cp.display(),
-                                res,
-                                e
-                            );
+                            error!("Failed to save thumbnail cache to {:?}: {}", cp, e);
                         }
                     }
 
-                    Ok(rgba)
-                })();
-
-                let final_buffer = match buffer {
-                    Ok(rgba) => SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
-                        rgba.as_raw(),
-                        rgba.width(),
-                        rgba.height(),
-                    ),
-                    Err(e) => {
-                        error!("Failed to load/process image {}: {}", path.display(), e);
-                        get_placeholder()
-                    }
+                    let rgba = resized.to_rgba8();
+                    SharedPixelBuffer::clone_from_slice(rgba.as_raw(), rgba.width(), rgba.height())
                 };
                 debug!(
                     "Thumb loaded ({} px): {:?} in {:.2}ms",
@@ -257,28 +253,7 @@ impl ImageLoader {
                 }
 
                 let start = Instant::now();
-                let buffer = if plugin_manager.has_plugin(&path) {
-                    match plugin_manager.decode(&path) {
-                        Some(buf) => buf,
-                        _ => get_placeholder(),
-                    }
-                } else {
-                    match image::open(&path) {
-                        Ok(dyn_img) => {
-                            let rgba = dyn_img.to_rgba8();
-                            SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
-                                rgba.as_raw(),
-                                rgba.width(),
-                                rgba.height(),
-                            )
-                        }
-                        Err(e) => {
-                            error!("Full load fail {}: {}", path.display(), e);
-                            get_placeholder()
-                        }
-                    }
-                };
-
+                let buffer = Self::fetch_buffer(&path, &plugin_manager);
                 debug!(
                     "Full loaded: {:?} in {:.2}ms",
                     path.file_name().unwrap_or_default(),
@@ -397,5 +372,29 @@ impl ImageLoader {
             .unwrap()
             .to_str()
             .expect("Image file name should be present")
+    }
+
+    fn fetch_buffer(path: &Path, plugin_manager: &PluginManager) -> SharedPixelBuffer<Rgba8Pixel> {
+        if plugin_manager.has_plugin(&path) {
+            plugin_manager.decode(path).unwrap_or_else(|| {
+                error!("Plugin failed to decode {:?}", path);
+                get_placeholder()
+            })
+        } else {
+            match image::open(path) {
+                Ok(dyn_img) => {
+                    let rgba = dyn_img.to_rgba8();
+                    SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
+                        rgba.as_raw(),
+                        rgba.width(),
+                        rgba.height(),
+                    )
+                }
+                Err(e) => {
+                    error!("Standard loader failed for {:?}: {}", path, e);
+                    get_placeholder()
+                }
+            }
+        }
     }
 }
