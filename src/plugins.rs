@@ -74,6 +74,10 @@ impl Plugin {
         cmd.arg(arg);
         cmd
     }
+
+    fn eval_version(&self) -> bool {
+        self.manifest.version == env!("CARGO_PKG_VERSION")
+    }
 }
 
 pub struct PluginManager {
@@ -116,13 +120,20 @@ impl PluginManager {
 
     fn register(&mut self, manifest: Option<PluginManifest>, path: PathBuf) {
         let manifest = if let Some(m) = manifest {
-            info!("Manifest ok");
             m
         } else {
-            error!("Manifest not ok");
+            error!("Invalid manifest");
             return;
         };
         let plugin = Arc::new(Plugin::new(manifest.clone(), path));
+        if !plugin.eval_version() {
+            error!(
+                "Different plugin version: {} should be {}",
+                manifest.version,
+                env!("CARGO_PKG_VERSION")
+            );
+            return;
+        }
         for cap in &manifest.capabilities {
             match cap {
                 PluginCapability::Decoder => {
@@ -171,12 +182,16 @@ impl PluginManager {
         Some(manifest)
     }
 
-    pub fn get_decoder(&self, path: &Path) -> Option<Arc<dyn ImageDecoder>> {
+    fn get_decoder(&self, path: &Path) -> Option<Arc<dyn ImageDecoder>> {
         if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
             self.decoders.get(&ext.to_lowercase()).cloned()
         } else {
             None
         }
+    }
+
+    pub fn decode(&self, path: &Path) -> Option<SharedPixelBuffer<Rgba8Pixel>> {
+        self.get_decoder(&path).unwrap().decode(&path)
     }
 
     pub fn get_supported_extensions(&self) -> Vec<String> {

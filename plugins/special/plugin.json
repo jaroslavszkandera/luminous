@@ -1,6 +1,6 @@
 {
   "name": "Python Special",
-  "version": "0.1",
+  "version": "0.1.0",
   "interpreter": "python",
   "executable": "special.py",
   "extensions": ["special"],

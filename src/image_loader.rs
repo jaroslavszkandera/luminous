@@ -258,11 +258,7 @@ impl ImageLoader {
 
                 let start = Instant::now();
                 let buffer = if plugin_manager.has_plugin(&path) {
-                    match plugin_manager
-                        .get_decoder(&path)
-                        .expect("Should have been safe with has_plugin")
-                        .decode(&path)
-                    {
+                    match plugin_manager.decode(&path) {
                         Some(buf) => buf,
                         _ => get_placeholder(),
                     }
