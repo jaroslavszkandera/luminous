@@ -9,6 +9,7 @@ fn main() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(&config.log_level))
         .filter_module("winit", log::LevelFilter::Warn)
         .filter_module("tracing", log::LevelFilter::Warn)
+        .filter_module("zbus", log::LevelFilter::Warn)
         .init();
 
     let scan_result = fs_scan::scan(&config.path);
