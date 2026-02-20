@@ -19,6 +19,8 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 struct AppController {
+    // TODO: ImageLoader loades images based on loader.scan.paths on filtered indicies,
+    // load it for filtered loader.scan.paths, could be better in future for sorting
     loader: Arc<ImageLoader>,
     scan: Rc<ScanResult>,
     active_grid_indices: HashSet<usize>,

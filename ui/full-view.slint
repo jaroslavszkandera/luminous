@@ -20,7 +20,7 @@ export component FullView inherits TouchArea {
 
     width: 100%;
     height: 100%;
-    property <string> display_coords: "0, 0";
+    property <string> display_coords: "0,0";
     property <float> zoom_scale: 1.0;
     property <length> last_coords_x;
     property <length> last_coords_y;
@@ -46,17 +46,16 @@ export component FullView inherits TouchArea {
             if (root.mouse-x != root.last_coords_x || root.mouse-y != root.last_coords_y) {
                 root.last_coords_x = root.mouse-x;
                 root.last_coords_y = root.mouse-y;
-                let win_w = root.width;
-                let win_h = root.height;
                 let img_w = root.current_image.width;
                 let img_h = root.current_image.height;
 
                 if (img_w > 0 && img_h > 0) {
-                    let scale = Math.min(win_w / img_w, win_h / img_h);
-                    let off_x = (win_w - img_w * scale) / 2;
-                    let off_y = (win_h - img_h * scale) / 2;
-                    let x = clamp(Math.round((root.last_coords_x - off_x) / scale), 0, img_w);
-                    let y = clamp(Math.round((root.last_coords_y - off_y) / scale), 0, img_h);
+                    let scale = Math.min(img.width / img_w, img.height / img_h);
+                    let visual_img_x = img.x + (img.width - img_w * scale) / 2;
+                    let visual_img_y = img.y + (img.height - img_h * scale) / 2;
+
+                    let x = clamp(Math.round((root.last_coords_x - visual_img_x) / scale), 0, img_w);
+                    let y = clamp(Math.round((root.last_coords_y - visual_img_y) / scale), 0, img_h);
 
                     root.display_coords = x + "," + y;
                 }

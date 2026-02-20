@@ -1,5 +1,5 @@
 use directories::ProjectDirs;
-use log::{debug, error, info, warn};
+use log::{debug, error, warn};
 use sha2::{Digest, Sha256};
 use slint::{Image, Rgba8Pixel, SharedPixelBuffer, Weak};
 use std::collections::{HashMap, HashSet};
@@ -16,6 +16,7 @@ fn get_placeholder() -> SharedPixelBuffer<Rgba8Pixel> {
     SharedPixelBuffer::<Rgba8Pixel>::new(1, 1)
 }
 
+// TODO: ImageLoader loades images based on scan.paths on filtered indicies
 pub struct ImageLoader {
     thumb_cache: Arc<Mutex<HashMap<usize, SharedPixelBuffer<Rgba8Pixel>>>>,
     full_cache: Arc<Mutex<HashMap<usize, SharedPixelBuffer<Rgba8Pixel>>>>,

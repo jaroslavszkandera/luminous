@@ -132,6 +132,7 @@ export component MainWindow inherits Window {
 
     full_ui := FullView {
         visible: root.view_mode == ViewMode.full;
+        timer_running: root.view_mode == ViewMode.full;
         current_image: root.full_view_image;
         curr_image_index: root.curr_image_index;
         curr_image_name: root.curr_image_name;
