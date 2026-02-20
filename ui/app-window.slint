@@ -1,25 +1,12 @@
-import { ScrollView } from "std-widgets.slint";
-
-export struct GridItem {
-  image: image,
-  index: int,
-  selected: bool,
-}
+import { GridView, GridItem, MouseModeGrid } from "grid-view.slint";
+import { FullView, MouseModeFull } from "full-view.slint";
 
 export enum ViewMode {
     full,
     grid,
 }
 
-export enum MouseModeFull {
-    select,
-    drag,
-}
-
-export enum MouseModeGrid {
-    select,
-    switch_to_full,
-}
+export { GridItem } from "grid-view.slint";
 
 export component MainWindow inherits Window {
     title: "Luminous";
@@ -36,44 +23,29 @@ export component MainWindow inherits Window {
     in property <string> bind_grid_pg_dn;
     in property <string> bind_grid_pg_up;
 
-    // Full view
+    // Full view Callbacks
     callback request_next_image();
     callback request_prev_image();
+    callback rotate_plus_90();
+    callback rotate_minus_90();
 
-    // Grid view
+    // Grid view Callbacks
     callback request_grid_data(int, int);
     callback image_selected(int);
     callback bucket_resolution_changed(int);
 
-    // ContextMenuArea
-    callback rotate_plus_90();
-    callback rotate_minus_90();
-
+    // App Callbacks
     callback quit_app();
 
+    // State
     in property <color> app_background: #000000;
     in property <[GridItem]> grid_model;
     in property <image> full_view_image;
     in-out property <int> curr_image_index: 0;
     in property <string> curr_image_name;
-    in-out property <ViewMode> view_mode: ViewMode.grid; // TODO: cache last view mode
+    in-out property <ViewMode> view_mode: ViewMode.grid;
     in-out property <bool> is_fullscreen: false;
     in-out property <int> grid_cols: 5;
-
-    function udpate_visible_rows() {
-        let item_h = grid_container.item_size + grid_container.gap;
-        let cols = grid_container.cols;
-
-        if (item_h > 1px && root.height > 1px) {
-            let start_row = floor(-grid_view.viewport-y / item_h);
-            let screen_rows = ceil(grid_view.height / item_h);
-            let buffer_rows = 5;
-            let start_index = Math.max(0, (start_row - buffer_rows) * cols);
-            let total_count = (screen_rows + (buffer_rows * 2)) * cols;
-            debug("udpate_visible_rows: start_index: ", start_index, " total_count: ", total_count);
-            root.request_grid_data(start_index, total_count);
-        }
-    }
 
     forward-focus: key-handler;
     key-handler := FocusScope {
@@ -88,419 +60,84 @@ export component MainWindow inherits Window {
             }
             if (event.text == root.bind_switch_mode) {
                 root.view_mode = root.view_mode == ViewMode.full ? ViewMode.grid : ViewMode.full;
-                full_view.reset_zoom();
+                full_ui.reset_zoom();
                 return accept;
             }
-            if (root.view-mode == ViewMode.full) {
+            if (root.view_mode == ViewMode.full) {
                 if (event.text == "h" || event.text == Key.LeftArrow) {
-                    full_view.reset_zoom();
+                    full_ui.reset_zoom();
                     root.request_prev_image();
                     return accept;
                 }
                 if (event.text == "l" || event.text == Key.RightArrow) {
-                    full_view.reset_zoom();
+                    full_ui.reset_zoom();
                     root.request_next_image();
                     return accept;
                 }
                 if (event.text == root.bind_reset_zoom) {
-                    full_view.reset_zoom();
+                    full_ui.reset_zoom();
                     return accept;
                 }
                 if (event.text == "m") {
-                    full_view.mouse_mode_full = full_view.mouse_mode_full == MouseModeFull.drag ? MouseModeFull.select : MouseModeFull.drag;
+                    full_ui.toggle_mouse_mode();
                     return accept;
                 }
-            } else if (root.view-mode == ViewMode.grid) {
+            } else if (root.view_mode == ViewMode.grid) {
                 if (event.text == root.bind_grid_pg_dn) {
-                    grid_view.viewport-y = Math.max(
-                        grid_view.viewport-y - grid_view.height,
-                        grid_view.height - grid_view.viewport-height);
-                    root.udpate_visible_rows();
+                    grid_ui.page_down();
                     return accept;
                 }
-                if (event.text == bind_grid_pg_up) {
-                    grid_view.viewport-y = Math.min(
-                        grid_view.viewport-y + grid_view.height,
-                        0px);
-                    root.udpate_visible_rows();
+                if (event.text == root.bind_grid_pg_up) {
+                    grid_ui.page_up();
                     return accept;
                 }
                 if (event.text == "m") {
-                    grid_container.mouse_mode_grid = grid_container.mouse_mode_grid == MouseModeGrid.switch-to-full ? MouseModeGrid.select : MouseModeGrid.switch-to-full;
+                    grid_ui.toggle_mouse_mode();
+                    return accept;
                 }
             }
             reject
         }
     }
 
-    Rectangle {
-        visible: root.view-mode == ViewMode.grid;
-        grid_header := Rectangle {
-            width: 100%;
-            y: 0px;
-            height: 30px;
-            background: #14161b;
-            property <length> font_size: 16px;
-            property <int> selected_count: 0;
-            HorizontalLayout {
-                padding: 5px;
-                Text {
-                    horizontal-alignment: left;
-                    vertical-alignment: center;
-                    font-size: font_size;
-                    color: white;
-                    text: "selected: " + selected_count;
-                }
+    grid_ui := GridView {
+        visible: root.view_mode == ViewMode.grid;
+        model: root.grid_model;
+        grid_cols: root.grid_cols;
 
-                Text {
-                    horizontal-alignment: right;
-                    vertical-alignment: center;
-                    font-size: font_size;
-                    color: white;
-                    text: "mode: " + (grid_container.mouse_mode_grid == MouseModeGrid.switch-to-full ? "F" : "S");
-                }
-            }
+        request_grid_data(start, count) => {
+            root.request_grid_data(start, count);
         }
-
-        grid_view := ScrollView {
-            y: grid_header.height;
-            viewport-height: grid_container.height;
-            property <[length]> resolutions: [256 * 1px, 512 * 1px, 1024 * 1px]; // TODO: sync with Rust get_bucked_res()
-
-        function bucket_resolution(size: length) -> int {
-                if size < resolutions[0] {
-                    return resolutions[0] / 1px;
-                }
-                if size < resolutions[1] {
-                    return resolutions[1] / 1px;
-                }
-                return resolutions[2] / 1px;
-            }
-            function sync_bucket_resolution() {
-                let new_bucket_res = bucket_resolution(grid_container.item_size);
-                debug("new_bucket_res: ", new_bucket_res, " item_size: ", grid_container.item_size);
-                if (new_bucket_res != grid_container.curr_bucket_res) {
-                    let old_bucket_res = grid_container.curr_bucket_res;
-                    grid_container.curr_bucket_res = new_bucket_res;
-                    root.bucket_resolution_changed(new_bucket_res);
-                    debug("Bucket resolution change:", old_bucket_res, "=>", grid_container.curr_bucket_res);
-                }
-            }
-
-            scrolled => {
-                udpate_visible_rows();
-            }
-        // FIX: Rust does not react on init. Does it depend on grid_container?
-        init => {
-                udpate_visible_rows();
-            }
-        // Could be refreshed too much while resizing...
-        changed height => {
-                debug("new height: ", self.height);
-                udpate_visible_rows();
-            }
-            changed width => {
-                debug("new width: ", self.width);
-                sync_bucket_resolution();
-                udpate_visible_rows();
-            }
-
-            grid := TouchArea {
-                property <int> step: 0;
-                property <int> cols: root.grid_cols;
-                property <length> gap: 0px;
-                property <length> item_size: (parent.width - (cols + 1) * gap) / cols;
-                property <int> rows: (root.grid_model.length + cols - 1) / cols;
-                height: (rows * item_size) + ((rows + 1) * gap);
-
-                scroll-event(event) => {
-                    if (event.modifiers.control) {
-                        if event.delta-y > 0 {
-                            step = -1;
-                        } else if event.delta-y < 0 {
-                            step = 1;
-                        }
-                        root.grid_cols = clamp(root.grid_cols + step, 2, 20);
-                        sync_bucket_resolution();
-                        udpate_visible_rows();
-                        accept
-                    }
-                    reject
-                }
-
-                grid_container := Rectangle {
-                    width: parent.width;
-                    height: parent.height;
-                    property <length> item_size: parent.item_size;
-                    property <length> gap: parent.gap;
-                    property <int> cols: parent.cols;
-                    property <int> curr_bucket_res: 0;
-                    property <MouseModeGrid> mouse_mode_grid: MouseModeGrid.switch-to-full;
-
-                    for item[i] in root.grid_model: Rectangle {
-                        width: parent.item_size;
-                        height: parent.item_size;
-                        x: (Math.mod(i, parent.cols) * (parent.item_size + parent.gap)) + parent.gap;
-                        y: (floor(i / parent.cols) * (parent.item_size + parent.gap)) + parent.gap;
-
-                        clip: true;
-                        border-width: item.selected ? 3px : 0px;
-                        border-color: #3498db;
-                        opacity: item.selected ? 0.7 : 1.0;
-
-                        Image {
-                            source: item.image;
-                            image-fit: cover;
-                            width: 100%;
-                            height: 100%;
-                        }
-
-                        TouchArea {
-                            clicked => {
-                                if (mouse_mode_grid == MouseModeGrid.switch-to-full) {
-                                    root.image_selected(item.index);
-                                    root.view_mode = ViewMode.full;
-                                } else if (mouse_mode_grid == MouseModeGrid.select) {
-                                // TODO: Add Ctrl/Shift selection support
-                                item.selected = item.selected ? false : true;
-                                    grid_header.selected_count = item.selected ? grid_header.selected_count + 1 : grid_header.selected_count - 1;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+        bucket_resolution_changed(res) => {
+            root.bucket_resolution_changed(res);
+        }
+        image_selected(idx) => {
+            root.image_selected(idx);
+            root.view_mode = ViewMode.full;
         }
     }
 
-    full_view := TouchArea {
-        visible: root.view-mode == ViewMode.full;
-        width: 100%;
-        height: 100%;
-        mouse-cursor: (mouse_mode_full == MouseModeFull.select) ? crosshair : (mouse_mode_full == MouseModeFull.drag && self.pressed && zoom_scale > 1.0) ? grabbing : (mouse_mode_full == MouseModeFull.drag && zoom_scale > 1.0) ? grab : default;
+    full_ui := FullView {
+        visible: root.view_mode == ViewMode.full;
+        current_image: root.full_view_image;
+        curr_image_index: root.curr_image_index;
+        curr_image_name: root.curr_image_name;
+        total_images: root.grid_model.length;
 
-        property <length> last_coords_x: -1px;
-        property <length> last_coords_y: -1px;
-        property <string> display_coords: "0, 0";
-        property <float> zoom_scale: 1.0;
-
-        property <MouseModeFull> mouse_mode_full: MouseModeFull.select;
-        property <length> start_drag_x;
-        property <length> start_drag_y;
-        property <length> start_img_x;
-        property <length> start_img_y;
-
-        property <bool> is_selecting: mouse_mode_full == MouseModeFull.select && self.pressed;
-        property <length> selection_x;
-        property <length> selection_y;
-        property <length> selection_width;
-        property <length> selection_height;
-
-        pointer-event(event) => {
-            if (event.button == PointerEventButton.left) {
-                if (event.kind == PointerEventKind.down) {
-                    self.start_drag_x = self.mouse-x;
-                    self.start_drag_y = self.mouse-y;
-                    self.start_img_x = img.x;
-                    self.start_img_y = img.y;
-                    if (mouse_mode_full == MouseModeFull.select) {
-                        selection_width = 0px;
-                        selection_height = 0px;
-                    }
-                } else if (event.kind == PointerEventKind.up && mouse_mode_full == MouseModeFull.select) {
-                    if (selection_width > 5px && selection_height > 5px) {
-                        zoom_to_selection();
-                    }
-                }
-            }
+        request_next_image => {
+            root.request_next_image();
         }
-
-        moved => {
-            if (mouse_mode_full == MouseModeFull.drag && self.pressed && zoom_scale > 1.0) {
-                img.x = self.start_img_x + (self.mouse-x - self.start_drag_x);
-                img.y = self.start_img_y + (self.mouse-y - self.start_drag_y);
-            }
-            if (is_selecting) {
-                selection_x = Math.min(self.mouse-x, self.start_drag_x);
-                selection_y = Math.min(self.mouse-y, self.start_drag_y);
-                selection_width = Math.abs(self.mouse-x - self.start_drag_x);
-                selection_height = Math.abs(self.mouse-y - self.start_drag_y);
-            }
+        request_prev_image => {
+            root.request_prev_image();
         }
-
-        scroll-event(event) => {
-            let delta_up = event.delta-y > 0;
-            if (event.modifiers.control) {
-                zoom(delta_up ? 1.1 : 0.9, full_view.mouse-x, full_view.mouse-y);
-            } else {
-                reset_zoom();
-                if (delta_up) {
-                    root.request_prev_image();
-                } else {
-                    root.request_next_image();
-                }
-            }
-            accept
+        rotate_plus_90 => {
+            root.rotate_plus_90();
         }
-
-        double-clicked => {
+        rotate_minus_90 => {
+            root.rotate_minus_90();
+        }
+        exit_full_view => {
             root.view_mode = ViewMode.grid;
-            reset_zoom();
-        }
-
-        coords_timer := Timer {
-            interval: 60ms;
-            running: root.view-mode == ViewMode.full;
-            triggered => {
-                if (full_view.mouse-x != last_coords_x || full_view.mouse-y != last_coords_y) {
-                    last_coords_x = full_view.mouse-x;
-                    last_coords_y = full_view.mouse-y;
-                    let win_w = full_view.width;
-                    let win_h = full_view.height;
-                    let img_w = root.full_view_image.width;
-                    let img_h = root.full_view_image.height;
-
-                    let scale = Math.min(win_w / img_w, win_h / img_h);
-                    let off_x = (win_w - img_w * scale) / 2;
-                    let off_y = (win_h - img_h * scale) / 2;
-                    let x = clamp(Math.round((last_coords_x - off_x) / scale), 0, img_w);
-                    let y = clamp(Math.round((last_coords_y - off_y) / scale), 0, img_h);
-
-                    display_coords = x + "," + y;
-                }
-            }
-        }
-
-        function zoom(scale_delta: float, center_x: length, center_y: length) {
-            let old_scale = zoom_scale;
-            let new_scale = clamp(zoom_scale * scale_delta, 1, 10.0);
-
-            if (old_scale == new_scale) {
-                return;
-            }
-            zoom_scale = new_scale;
-            let ratio = new_scale / old_scale;
-
-            if (img.width == 0px || img.width == parent.width) {
-                img.width = rect_img.width;
-                img.height = rect_img.height;
-                img.x = 0px;
-                img.y = 0px;
-            }
-            img.width = img.width * ratio;
-            img.height = img.height * ratio;
-
-            img.x = center_x - (center_x - img.x) * ratio;
-            img.y = center_y - (center_y - img.y) * ratio;
-
-            debug("Zoom: " + Math.round(zoom_scale * 100) + "%");
-        }
-
-        function zoom_to_selection() {
-            let scale_x = self.width / selection_width;
-            let scale_y = self.height / selection_height;
-            let zoom_factor = Math.min(scale_x, scale_y);
-
-            let center_x = selection_x + selection_width / 2;
-            let center_y = selection_y + selection_height / 2;
-
-            zoom(zoom_factor, center_x, center_y);
-
-            selection_width = 0px;
-            selection_height = 0px;
-        }
-
-        function reset_zoom() {
-            zoom_scale = 1;
-            img.width = root.width;
-            img.height = root.height;
-            img.x = 0;
-            img.y = 0;
-        }
-
-        rect_img := Rectangle {
-            img := Image {
-                source: root.full_view_image;
-                image-fit: contain;
-                width: 100%;
-                height: 100%;
-                x: 0px;
-                y: 0px;
-            }
-
-            Rectangle {
-                height: 16px;
-                y: parent.height - self.height;
-                width: 100%;
-                background: #000000a0;
-                Text {
-                    x: 0px;
-                    color: white;
-                    text: (curr_image_index + 1) + "/" + grid_model.length;
-                }
-
-                Text {
-                    color: white;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                    text: curr_image_name;
-                }
-
-                Text {
-                    x: parent.width - self.width;
-                    color: white;
-                    text: "[x,y]=[" + display_coords + "]";
-                }
-            }
-
-            Rectangle {
-                x: full_view.selection_x;
-                y: full_view.selection_y;
-                width: full_view.selection_width;
-                height: full_view.selection_height;
-                visible: full_view.is_selecting || (full_view.selection_width > 0px && mouse_mode_full == MouseModeFull.select);
-                background: #3498db33;
-                border-color: #3498db;
-                border-width: 1px;
-            }
-
-            ContextMenuArea {
-                Menu {
-                    MenuItem {
-                        title: @tr("Rotate +90");
-                        activated => {
-                            debug("Rotate +90");
-                            rotate_plus_90();
-                        }
-                    }
-
-                    MenuItem {
-                        title: @tr("Rotate -90");
-                        activated => {
-                            debug("Rotate -90");
-                            rotate_minus_90();
-                        }
-                    }
-
-                    MenuItem {
-                        title: @tr("Reset zoom");
-                        activated => {
-                            debug("Reset zoom");
-                            reset_zoom();
-                        }
-                    }
-                }
-            }
-        }
-
-        // TODO: recalculate the zoom when height or width changes
-        changed height => {
-            debug("new height: ", self.height);
-            reset_zoom();
-        }
-        changed width => {
-            debug("new width: ", self.width);
-            reset_zoom();
         }
     }
 }
