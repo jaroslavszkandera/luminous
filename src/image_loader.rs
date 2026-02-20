@@ -1,5 +1,5 @@
 use directories::ProjectDirs;
-use log::{debug, error, warn};
+use log::{debug, error, info, warn};
 use sha2::{Digest, Sha256};
 use slint::{Image, Rgba8Pixel, SharedPixelBuffer, Weak};
 use std::collections::{HashMap, HashSet};
@@ -188,15 +188,17 @@ impl ImageLoader {
         None
     }
 
-    pub fn prune_grid_thumbs(&self, indices: &[usize]) {
-        if indices.is_empty() {
-            return;
-        }
+    // NOTE: Maybe retain would be a better name?
+    pub fn prune_grid_thumbs(&self, start: usize, count: usize) {
+        let margin = 30;
         let mut cache = self.thumb_cache.lock().unwrap();
-        for idx in indices {
-            cache.remove(idx);
-        }
-        debug!("Batch pruned {} images", indices.len());
+        cache.retain(|&idx, _| {
+            idx >= start.saturating_sub(margin) && idx <= (start + count + margin)
+        });
+    }
+
+    pub fn clear_thumbs(&self) {
+        self.thumb_cache.lock().unwrap().clear();
     }
 
     pub fn load_full_progressive<F>(

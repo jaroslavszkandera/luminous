@@ -16,12 +16,13 @@ use std::collections::HashSet;
 use std::error::Error;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
 struct AppController {
     loader: Arc<ImageLoader>,
     scan: Rc<ScanResult>,
     active_grid_indices: HashSet<usize>,
-    search_indices: HashSet<usize>,
+    filtered_indices: Vec<usize>,
     window_weak: slint::Weak<MainWindow>,
 }
 
@@ -36,7 +37,7 @@ impl AppController {
             )),
             scan,
             active_grid_indices: HashSet::new(),
-            search_indices: (0..total).collect(),
+            filtered_indices: (0..total).collect(),
             window_weak: window.as_weak(),
         }
     }
@@ -46,6 +47,12 @@ impl AppController {
             Some(ui) => ui,
             None => return,
         };
+
+        let margin = 30;
+        let visible_range = start.saturating_sub(margin)..(start + count + margin);
+        self.loader.prune_grid_thumbs(start, count);
+        self.active_grid_indices
+            .retain(|&idx| visible_range.contains(&idx));
 
         let model = ui.get_grid_model();
         let end = cmp::min(start + count, model.row_count());
@@ -107,10 +114,20 @@ impl AppController {
 
     fn handle_navigate(&self, delta: isize) {
         if let Some(ui) = self.window_weak.upgrade() {
-            let len = self.scan.paths.len() as isize;
-            let current = ui.get_curr_image_index() as isize;
-            let next = (current + delta).rem_euclid(len) as usize;
-            self.handle_full_view_load(next);
+            let total_filtered = self.filtered_indices.len();
+            if total_filtered == 0 {
+                return;
+            }
+            let curr_abs_idx = ui.get_curr_image_index() as usize;
+            let curr_pos = self
+                .filtered_indices
+                .iter()
+                .position(|&idx| idx == curr_abs_idx)
+                .unwrap_or(0);
+            let next_pos = (curr_pos as isize + delta).rem_euclid(total_filtered as isize) as usize;
+            if let Some(&next_abs_idx) = self.filtered_indices.get(next_pos) {
+                self.handle_full_view_load(next_abs_idx);
+            }
         }
     }
 
@@ -163,7 +180,7 @@ impl AppController {
     fn handle_search(&mut self, query: String) {
         let query = query.to_lowercase();
 
-        let filtered_indices: Vec<usize> = self
+        self.filtered_indices = self
             .scan
             .paths
             .iter()
@@ -179,17 +196,16 @@ impl AppController {
             .map(|(idx, _)| idx)
             .collect();
         debug!(
-            "query: \"{}\"\n search_indices: {:?}",
-            query, filtered_indices
+            "query: \"{}\"\n filtered_indices: {:?}",
+            query, self.filtered_indices
         );
 
-        self.search_indices = filtered_indices.iter().cloned().collect();
         self.active_grid_indices.clear();
-        self.loader
-            .prune_grid_thumbs(&(0..self.scan.paths.len()).collect::<Vec<_>>());
+        self.loader.clear_thumbs();
 
         if let Some(ui) = self.window_weak.upgrade() {
-            let items: Vec<GridItem> = filtered_indices
+            let items: Vec<GridItem> = self
+                .filtered_indices
                 .iter()
                 .map(|&abs_idx| GridItem {
                     image: Image::default(),
@@ -199,6 +215,13 @@ impl AppController {
                 .collect();
 
             ui.set_grid_model(Rc::new(VecModel::from(items)).into());
+        }
+
+        if let Some(&first_abs_idx) = self.filtered_indices.first() {
+            self.loader
+                .active_idx
+                .store(first_abs_idx, Ordering::Relaxed);
+            self.handle_full_view_load(first_abs_idx);
         }
         self.handle_grid_request(0, 50);
     }
