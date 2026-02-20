@@ -53,6 +53,7 @@ pub fn scan(path_str: &str) -> ScanResult {
     debug!("Scanning directory: {}", scan_dir.display());
 
     for entry in WalkDir::new(scan_dir)
+        .max_depth(1)
         .sort_by(|a, b| a.file_name().cmp(b.file_name()))
         .into_iter()
         .filter_map(|e| e.ok())
