@@ -1,4 +1,4 @@
-import { ScrollView } from "std-widgets.slint";
+import { ScrollView, LineEdit } from "std-widgets.slint";
 import { Theme } from "theme.slint";
 
 export struct GridItem {
@@ -18,6 +18,11 @@ export component GridView inherits Rectangle {
     callback request_grid_data(int, int);
     callback image_selected(int);
     callback bucket_resolution_changed(int);
+    callback search_submitted(string);
+
+    public function focus_search() {
+        search_input.focus();
+    }
 
     public function page_down() {
         grid_view.viewport-y = Math.max(
@@ -61,12 +66,33 @@ export component GridView inherits Rectangle {
 
         HorizontalLayout {
             padding: 5px;
+            spacing: 30px;
             Text {
                 horizontal-alignment: left;
                 vertical-alignment: center;
                 font-size: font_size;
                 color: Theme.text-main;
                 text: "selected: " + selected_count;
+            }
+
+            search_input := LineEdit {
+                enabled: true;
+                placeholder-text: "Search";
+                font-size: font_size;
+                accepted(text) => {
+                    debug("accepted: ", text);
+                    root.search_submitted(self.text);
+                    self.clear-focus();
+                }
+                key-pressed(event) => {
+                    if (event.text == Key.Escape) {
+                        self.text = "";
+                        root.search_submitted("");
+                        self.clear-focus();
+                        return accept;
+                    }
+                    reject
+                }
             }
 
             Text {

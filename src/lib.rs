@@ -8,6 +8,7 @@ use config::Config;
 use fs_scan::ScanResult;
 use image_loader::ImageLoader;
 
+use log::debug;
 use slint::{Image, Model, Rgba8Pixel, SharedPixelBuffer, VecModel};
 use std::cell::RefCell;
 use std::cmp;
@@ -20,11 +21,13 @@ struct AppController {
     loader: Arc<ImageLoader>,
     scan: Rc<ScanResult>,
     active_grid_indices: HashSet<usize>,
+    search_indices: HashSet<usize>,
     window_weak: slint::Weak<MainWindow>,
 }
 
 impl AppController {
     fn new(scan: Rc<ScanResult>, config: &Config, window: &MainWindow) -> Self {
+        let total = scan.paths.len();
         Self {
             loader: Arc::new(ImageLoader::new(
                 scan.paths.clone(),
@@ -33,82 +36,53 @@ impl AppController {
             )),
             scan,
             active_grid_indices: HashSet::new(),
+            search_indices: (0..total).collect(),
             window_weak: window.as_weak(),
         }
     }
 
     fn handle_grid_request(&mut self, start: usize, count: usize) {
-        let _timer = std::time::Instant::now();
-        let total = self.scan.paths.len();
-        let end = cmp::min(start + count, total);
+        let ui = match self.window_weak.upgrade() {
+            Some(ui) => ui,
+            None => return,
+        };
 
-        let buffer = 50;
-        let keep_start = start.saturating_sub(buffer);
-        let keep_end = end + buffer;
-
-        let to_remove: Vec<usize> = self
-            .active_grid_indices
-            .iter()
-            .cloned()
-            .filter(|&idx| idx < keep_start || idx >= keep_end)
-            .collect();
-
-        for idx in &to_remove {
-            self.active_grid_indices.remove(idx);
-        }
-        self.loader.prune_grid_thumbs(&to_remove);
-
-        if !to_remove.is_empty() {
-            let weak = self.window_weak.clone();
-            let _ = slint::invoke_from_event_loop(move || {
-                if let Some(ui) = weak.upgrade() {
-                    let model = ui.get_grid_model();
-                    for idx in to_remove {
-                        if let Some(mut item) = model.row_data(idx) {
-                            if item.image.size().width > 0 {
-                                item.image = Image::default();
-                                model.set_row_data(idx, item);
-                            }
-                        }
-                    }
-                }
-            });
-        }
-
+        let model = ui.get_grid_model();
+        let end = cmp::min(start + count, model.row_count());
         let mut cached_updates = Vec::new();
-        for index in start..end {
-            if self.active_grid_indices.contains(&index) {
+
+        for row in start..end {
+            if self.active_grid_indices.contains(&row) {
                 continue;
             }
-            self.active_grid_indices.insert(index);
 
-            let weak = self.window_weak.clone();
-            let on_loaded = move |ui: MainWindow, idx: usize, img: Image| {
-                let model = ui.get_grid_model();
-                if let Some(mut item) = model.row_data(idx) {
-                    item.image = img;
-                    model.set_row_data(idx, item);
+            if let Some(item) = model.row_data(row) {
+                self.active_grid_indices.insert(row);
+                let abs_idx = item.index as usize;
+                let weak = self.window_weak.clone();
+
+                if let Some(buffer) =
+                    self.loader
+                        .load_grid_thumb(abs_idx, weak, move |ui, _, img| {
+                            let m = ui.get_grid_model();
+                            if let Some(mut it) = m.row_data(row) {
+                                it.image = img;
+                                m.set_row_data(row, it);
+                            }
+                        })
+                {
+                    cached_updates.push((row, buffer));
                 }
-            };
-
-            if let Some(buffer) = self.loader.load_grid_thumb(index, weak, on_loaded) {
-                cached_updates.push((index, buffer));
             }
         }
 
         if !cached_updates.is_empty() {
-            let weak = self.window_weak.clone();
-            let _ = slint::invoke_from_event_loop(move || {
-                if let Some(ui) = weak.upgrade() {
-                    let model = ui.get_grid_model();
-                    for (idx, buf) in cached_updates {
-                        if let Some(mut item) = model.row_data(idx) {
-                            item.image = Image::from_rgba8(buf);
-                            model.set_row_data(idx, item);
-                        }
-                    }
+            for (row, buf) in cached_updates {
+                if let Some(mut item) = model.row_data(row) {
+                    item.image = Image::from_rgba8(buf);
+                    model.set_row_data(row, item);
                 }
-            });
+            }
         }
     }
 
@@ -185,6 +159,49 @@ impl AppController {
         self.loader.set_bucket_resolution(resolution);
         self.active_grid_indices.clear();
     }
+
+    fn handle_search(&mut self, query: String) {
+        let query = query.to_lowercase();
+
+        let filtered_indices: Vec<usize> = self
+            .scan
+            .paths
+            .iter()
+            .enumerate()
+            .filter(|(_, path)| {
+                query.is_empty()
+                    || path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .map(|s| s.to_lowercase().contains(&query))
+                        .unwrap_or(false)
+            })
+            .map(|(idx, _)| idx)
+            .collect();
+        debug!(
+            "query: \"{}\"\n search_indices: {:?}",
+            query, filtered_indices
+        );
+
+        self.search_indices = filtered_indices.iter().cloned().collect();
+        self.active_grid_indices.clear();
+        self.loader
+            .prune_grid_thumbs(&(0..self.scan.paths.len()).collect::<Vec<_>>());
+
+        if let Some(ui) = self.window_weak.upgrade() {
+            let items: Vec<GridItem> = filtered_indices
+                .iter()
+                .map(|&abs_idx| GridItem {
+                    image: Image::default(),
+                    index: abs_idx as i32,
+                    selected: false,
+                })
+                .collect();
+
+            ui.set_grid_model(Rc::new(VecModel::from(items)).into());
+        }
+        self.handle_grid_request(0, 50);
+    }
 }
 
 pub fn run(scan: ScanResult, config: Config) -> Result<(), Box<dyn Error>> {
@@ -222,6 +239,11 @@ pub fn run(scan: ScanResult, config: Config) -> Result<(), Box<dyn Error>> {
         dbg!(bucket_resolution);
         c.borrow_mut()
             .handle_bucket_resolution(bucket_resolution as u32);
+    });
+
+    let c = controller.clone();
+    main_window.on_search_submitted(move |query| {
+        c.borrow_mut().handle_search(query.to_string());
     });
 
     let c = controller.clone();

@@ -33,6 +33,7 @@ export component MainWindow inherits Window {
     callback request_grid_data(int, int);
     callback image_selected(int);
     callback bucket_resolution_changed(int);
+    callback search_submitted(string);
 
     // App Callbacks
     callback quit_app();
@@ -47,6 +48,9 @@ export component MainWindow inherits Window {
     in-out property <bool> is_fullscreen: false;
     in-out property <int> grid_cols: 5;
 
+    public function return_focus() {
+        key-handler.focus();
+    }
     forward-focus: key-handler;
     key-handler := FocusScope {
         key-pressed(event) => {
@@ -95,6 +99,10 @@ export component MainWindow inherits Window {
                     grid_ui.toggle_mouse_mode();
                     return accept;
                 }
+                if (event.text == "/") {
+                    grid_ui.focus_search();
+                    return accept;
+                }
             }
             reject
         }
@@ -104,6 +112,7 @@ export component MainWindow inherits Window {
         visible: root.view_mode == ViewMode.grid;
         model: root.grid_model;
         grid_cols: root.grid_cols;
+        forward-focus: key-handler;
 
         request_grid_data(start, count) => {
             root.request_grid_data(start, count);
@@ -114,6 +123,10 @@ export component MainWindow inherits Window {
         image_selected(idx) => {
             root.image_selected(idx);
             root.view_mode = ViewMode.full;
+        }
+        search_submitted(query) => {
+            root.search_submitted(query);
+            root.return_focus();
         }
     }
 
