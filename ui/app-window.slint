@@ -56,7 +56,7 @@ export component MainWindow inherits Window {
     in property <image> full_view_image;
     in-out property <int> curr_image_index: 0;
     in property <string> curr_image_name;
-    in-out property <ViewMode> view_mode: ViewMode.full; // TODO: cache last view mode
+    in-out property <ViewMode> view_mode: ViewMode.grid; // TODO: cache last view mode
     in-out property <bool> is_fullscreen: false;
     in-out property <int> grid_cols: 5;
 
@@ -133,107 +133,138 @@ export component MainWindow inherits Window {
         }
     }
 
-    grid_view := ScrollView {
+    Rectangle {
         visible: root.view-mode == ViewMode.grid;
-        viewport-height: grid_container.height;
-        property <[length]> resolutions: [256 * 1px, 512 * 1px, 1024 * 1px]; // TODO: sync with Rust get_bucked_res()
+        grid_header := Rectangle {
+            width: 100%;
+            y: 0px;
+            height: 30px;
+            background: #14161b;
+            property <length> font_size: 16px;
+            property <int> selected_count: 0;
+            HorizontalLayout {
+                padding: 5px;
+                Text {
+                    horizontal-alignment: left;
+                    vertical-alignment: center;
+                    font-size: font_size;
+                    color: white;
+                    text: "selected: " + selected_count;
+                }
+
+                Text {
+                    horizontal-alignment: right;
+                    vertical-alignment: center;
+                    font-size: font_size;
+                    color: white;
+                    text: "mode: " + (grid_container.mouse_mode_grid == MouseModeGrid.switch-to-full ? "F" : "S");
+                }
+            }
+        }
+
+        grid_view := ScrollView {
+            y: grid_header.height;
+            viewport-height: grid_container.height;
+            property <[length]> resolutions: [256 * 1px, 512 * 1px, 1024 * 1px]; // TODO: sync with Rust get_bucked_res()
 
         function bucket_resolution(size: length) -> int {
-            if size < resolutions[0] {
-                return resolutions[0] / 1px;
+                if size < resolutions[0] {
+                    return resolutions[0] / 1px;
+                }
+                if size < resolutions[1] {
+                    return resolutions[1] / 1px;
+                }
+                return resolutions[2] / 1px;
             }
-            if size < resolutions[1] {
-                return resolutions[1] / 1px;
+            function sync_bucket_resolution() {
+                let new_bucket_res = bucket_resolution(grid_container.item_size);
+                debug("new_bucket_res: ", new_bucket_res, " item_size: ", grid_container.item_size);
+                if (new_bucket_res != grid_container.curr_bucket_res) {
+                    let old_bucket_res = grid_container.curr_bucket_res;
+                    grid_container.curr_bucket_res = new_bucket_res;
+                    root.bucket_resolution_changed(new_bucket_res);
+                    debug("Bucket resolution change:", old_bucket_res, "=>", grid_container.curr_bucket_res);
+                }
             }
-            return resolutions[2] / 1px;
-        }
-        function sync_bucket_resolution() {
-            let new_bucket_res = bucket_resolution(grid_container.item_size);
-            debug("new_bucket_res: ", new_bucket_res, " item_size: ", grid_container.item_size);
-            if (new_bucket_res != grid_container.curr_bucket_res) {
-                let old_bucket_res = grid_container.curr_bucket_res;
-                grid_container.curr_bucket_res = new_bucket_res;
-                root.bucket_resolution_changed(new_bucket_res);
-                debug("Bucket resolution change:", old_bucket_res, "=>", grid_container.curr_bucket_res);
-            }
-        }
 
-        scrolled => {
-            udpate_visible_rows();
-        }
+            scrolled => {
+                udpate_visible_rows();
+            }
         // FIX: Rust does not react on init. Does it depend on grid_container?
         init => {
-            udpate_visible_rows();
-        }
+                udpate_visible_rows();
+            }
         // Could be refreshed too much while resizing...
         changed height => {
-            debug("new height: ", self.height);
-            udpate_visible_rows();
-        }
-        changed width => {
-            debug("new width: ", self.width);
-            sync_bucket_resolution();
-            udpate_visible_rows();
-        }
-        TouchArea {
-            width: 100%;
-            property <int> step: 0;
-            property <int> cols: root.grid_cols;
-            property <length> gap: 0px;
-            property <length> item_size: (parent.width - (cols + 1) * gap) / cols;
-            property <int> rows: (root.grid_model.length + cols - 1) / cols;
-            height: (rows * item_size) + ((rows + 1) * gap);
-
-            scroll-event(event) => {
-                if (event.modifiers.control) {
-                    if event.delta-y > 0 {
-                        step = -1;
-                    } else if event.delta-y < 0 {
-                        step = 1;
-                    }
-                    root.grid_cols = clamp(root.grid_cols + step, 2, 20);
-                    sync_bucket_resolution();
-                    udpate_visible_rows();
-                    accept
-                }
-                reject
+                debug("new height: ", self.height);
+                udpate_visible_rows();
+            }
+            changed width => {
+                debug("new width: ", self.width);
+                sync_bucket_resolution();
+                udpate_visible_rows();
             }
 
-            grid_container := Rectangle {
-                width: parent.width;
-                height: parent.height;
-                property <length> item_size: parent.item_size;
-                property <length> gap: parent.gap;
-                property <int> cols: parent.cols;
-                property <int> curr_bucket_res: 0;
-                property <MouseModeGrid> mouse_mode_grid: MouseModeGrid.switch-to-full;
+            grid := TouchArea {
+                property <int> step: 0;
+                property <int> cols: root.grid_cols;
+                property <length> gap: 0px;
+                property <length> item_size: (parent.width - (cols + 1) * gap) / cols;
+                property <int> rows: (root.grid_model.length + cols - 1) / cols;
+                height: (rows * item_size) + ((rows + 1) * gap);
 
-                for item[i] in root.grid_model: Rectangle {
-                    width: parent.item_size;
-                    height: parent.item_size;
-                    x: (Math.mod(i, parent.cols) * (parent.item_size + parent.gap)) + parent.gap;
-                    y: (floor(i / parent.cols) * (parent.item_size + parent.gap)) + parent.gap;
-
-                    clip: true;
-                    border-width: item.selected ? 3px : 0px;
-                    border-color: #3498db;
-                    opacity: item.selected ? 0.7 : 1.0;
-
-                    Image {
-                        source: item.image;
-                        image-fit: cover;
-                        width: 100%;
-                        height: 100%;
+                scroll-event(event) => {
+                    if (event.modifiers.control) {
+                        if event.delta-y > 0 {
+                            step = -1;
+                        } else if event.delta-y < 0 {
+                            step = 1;
+                        }
+                        root.grid_cols = clamp(root.grid_cols + step, 2, 20);
+                        sync_bucket_resolution();
+                        udpate_visible_rows();
+                        accept
                     }
+                    reject
+                }
 
-                    TouchArea {
-                        clicked => {
-                            if (mouse_mode_grid == MouseModeGrid.switch-to-full) {
-                                root.image_selected(item.index);
-                                root.view_mode = ViewMode.full;
-                            } else if (mouse_mode_grid == MouseModeGrid.select) {
+                grid_container := Rectangle {
+                    width: parent.width;
+                    height: parent.height;
+                    property <length> item_size: parent.item_size;
+                    property <length> gap: parent.gap;
+                    property <int> cols: parent.cols;
+                    property <int> curr_bucket_res: 0;
+                    property <MouseModeGrid> mouse_mode_grid: MouseModeGrid.switch-to-full;
+
+                    for item[i] in root.grid_model: Rectangle {
+                        width: parent.item_size;
+                        height: parent.item_size;
+                        x: (Math.mod(i, parent.cols) * (parent.item_size + parent.gap)) + parent.gap;
+                        y: (floor(i / parent.cols) * (parent.item_size + parent.gap)) + parent.gap;
+
+                        clip: true;
+                        border-width: item.selected ? 3px : 0px;
+                        border-color: #3498db;
+                        opacity: item.selected ? 0.7 : 1.0;
+
+                        Image {
+                            source: item.image;
+                            image-fit: cover;
+                            width: 100%;
+                            height: 100%;
+                        }
+
+                        TouchArea {
+                            clicked => {
+                                if (mouse_mode_grid == MouseModeGrid.switch-to-full) {
+                                    root.image_selected(item.index);
+                                    root.view_mode = ViewMode.full;
+                                } else if (mouse_mode_grid == MouseModeGrid.select) {
                                 // TODO: Add Ctrl/Shift selection support
                                 item.selected = item.selected ? false : true;
+                                    grid_header.selected_count = item.selected ? grid_header.selected_count + 1 : grid_header.selected_count - 1;
+                                }
                             }
                         }
                     }
