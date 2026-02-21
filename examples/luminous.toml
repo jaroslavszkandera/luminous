@@ -1,5 +1,5 @@
 # Logging level: trace, debug, info, warn, error
-log_level = "info"
+log = "warn"
 
 # Number of images to pre-cache in full view
 window_size = 3

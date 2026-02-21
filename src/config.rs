@@ -9,7 +9,7 @@ use std::path::PathBuf;
 #[derive(Debug, Clone)]
 pub struct Config {
     pub path: String,
-    pub log_level: String,
+    pub log: String,
     pub threads: usize,
     pub window_size: usize,
     pub background: Color,
@@ -24,7 +24,7 @@ struct Cli {
     /// Logging level (error, warn, info, debug, trace)
     /// Defaults to "warn"
     #[arg(short, long)]
-    log_level: Option<String>,
+    log: Option<String>,
     /// Number of worker threads
     /// Defaults to the number of CPUs available
     #[arg(short, long)]
@@ -43,7 +43,7 @@ struct Cli {
 #[derive(Deserialize, Default)]
 struct TomlConfig {
     path: Option<String>,
-    log_level: Option<String>,
+    log: Option<String>,
     threads: Option<usize>,
     window_size: Option<usize>,
     background: Option<String>,
@@ -61,11 +61,11 @@ impl Config {
             .unwrap_or_default();
 
         if !toml_config.unknown.is_empty() {
-            log::warn!("Unknown config keys: {:?}", toml_config.unknown.keys());
+            eprintln!("Unknown config keys: {:?}", toml_config.unknown.keys());
         }
 
         let path = Self::resolve(cli.path, toml_config.path, ".".to_string());
-        let log_level = Self::resolve(cli.log_level, toml_config.log_level, "warn".to_string());
+        let log = Self::resolve(cli.log, toml_config.log, "warn".to_string());
         let threads = Self::resolve(cli.threads, toml_config.threads, num_cpus::get());
         let window_size = Self::resolve(cli.window_size, toml_config.window_size, 3);
         let background_str = Self::resolve(
@@ -82,7 +82,7 @@ impl Config {
 
         Config {
             path,
-            log_level,
+            log,
             threads,
             window_size,
             background,

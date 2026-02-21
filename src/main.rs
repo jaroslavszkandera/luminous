@@ -1,4 +1,3 @@
-use log::{error, info};
 use std::process;
 
 use luminous::config::Config;
@@ -6,7 +5,7 @@ use luminous::fs_scan;
 
 fn main() {
     let config = Config::load();
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(&config.log_level))
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(&config.log))
         .filter_module("winit", log::LevelFilter::Warn)
         .filter_module("tracing", log::LevelFilter::Warn)
         .filter_module("zbus", log::LevelFilter::Warn)
@@ -15,15 +14,15 @@ fn main() {
     let scan_result = fs_scan::scan(&config.path);
 
     if scan_result.paths.is_empty() {
-        error!("No supported images found in {}", config.path);
+        log::error!("No supported images found in {}", config.path);
         // TODO: File manager pop-up
         process::exit(1);
     }
 
-    info!("Starting with {} worker threads", config.threads);
+    log::info!("Starting with {} worker threads", config.threads);
 
     if let Err(e) = luminous::run(scan_result, config) {
-        error!("Application error: {e}");
+        log::error!("Application error: {e}");
         process::exit(1);
     };
 }
