@@ -277,6 +277,20 @@ pub fn run(scan: ScanResult, config: Config) -> Result<(), Box<dyn Error>> {
     });
 
     let c = controller.clone();
+    main_window.on_toggle_select_all(move |select| {
+        if let Some(ui) = c.borrow().window_weak.upgrade() {
+            let model = ui.get_grid_model();
+
+            for i in 0..model.row_count() {
+                if let Some(mut item) = model.row_data(i) {
+                    item.selected = select;
+                    model.set_row_data(i, item);
+                }
+            }
+        }
+    });
+
+    let c = controller.clone();
     main_window.on_request_next_image(move || c.borrow().handle_navigate(1));
     let c = controller.clone();
     main_window.on_request_prev_image(move || c.borrow().handle_navigate(-1));

@@ -1,4 +1,4 @@
-import { ScrollView, LineEdit } from "std-widgets.slint";
+import { ScrollView, LineEdit, Button } from "std-widgets.slint";
 import { Theme } from "theme.slint";
 
 export struct GridItem {
@@ -14,11 +14,13 @@ export enum MouseModeGrid {
 
 export component GridView inherits Rectangle {
     in property <[GridItem]> model;
+    property <int> total_images: model.length;
     in-out property <int> grid_cols: 5;
     callback request_grid_data(int, int);
     callback image_selected(int);
     callback bucket_resolution_changed(int);
     callback search_submitted(string);
+    callback toggle_select_all(bool);
 
     public function focus_search() {
         search_input.focus();
@@ -67,12 +69,13 @@ export component GridView inherits Rectangle {
         HorizontalLayout {
             padding: 5px;
             spacing: 30px;
-            Text {
-                horizontal-alignment: left;
-                vertical-alignment: center;
-                font-size: font_size;
-                color: Theme.text-main;
-                text: "selected: " + selected_count;
+            Button {
+                property <bool> is_selected: selected_count == 0 ? false : true;
+                text: is_selected ? selected_count + "/" + total_images : total_images;
+                clicked => {
+                    selected_count = is_selected ? 0 : total_images;
+                    root.toggle_select_all(is_selected);
+                }
             }
 
             search_input := LineEdit {

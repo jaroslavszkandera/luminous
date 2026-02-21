@@ -35,6 +35,7 @@ export component MainWindow inherits Window {
     callback image_selected(int);
     callback bucket_resolution_changed(int);
     callback search_submitted(string);
+    callback toggle_select_all(bool);
 
     // App Callbacks
     callback quit_app();
@@ -128,6 +129,9 @@ export component MainWindow inherits Window {
         search_submitted(query) => {
             root.search_submitted(query);
             root.return_focus();
+        }
+        toggle_select_all(select) => {
+            root.toggle_select_all(select);
         }
     }
 
