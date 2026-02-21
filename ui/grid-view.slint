@@ -16,11 +16,15 @@ export component GridView inherits Rectangle {
     in property <[GridItem]> model;
     property <int> total_images: model.length;
     in-out property <int> grid_cols: 5;
+    in-out property <int> selected_count: 0;
+    property <int> last_clicked_index: -1;
     callback request_grid_data(int, int);
     callback image_selected(int);
     callback bucket_resolution_changed(int);
     callback search_submitted(string);
     callback toggle_select_all(bool);
+    callback request_range_select(int, int);
+    callback print_selected_paths();
 
     public function focus_search() {
         search_input.focus();
@@ -64,7 +68,6 @@ export component GridView inherits Rectangle {
         height: 30px;
         background: Theme.surface-dark;
         property <length> font_size: 16px;
-        property <int> selected_count: 0;
 
         HorizontalLayout {
             padding: 5px;
@@ -197,14 +200,32 @@ export component GridView inherits Rectangle {
                     }
 
                     TouchArea {
-                        clicked => {
-                            if (mouse_mode_grid == MouseModeGrid.switch-to-full) {
-                                root.image_selected(item.index);
-                            } else if (mouse_mode_grid == MouseModeGrid.select) {
-                                item.selected = !item.selected;
-                                grid_header.selected_count += item.selected ? 1 : -1;
+                        pointer-event(event) => {
+                            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                                if (event.modifiers.control) {
+                                    item.selected = !item.selected;
+                                    selected_count += item.selected ? 1 : -1;
+                                    root.last_clicked_index = i;
+                                } else if (event.modifiers.shift && root.last_clicked_index != -1) {
+                                    root.request_range_select(root.last_clicked_index, i);
+                                    // root.last_clicked_index = i;
+                                }
                             }
                         }
+                        double-clicked() => {
+                            root.image_selected(item.index);
+                        }
+                    }
+                }
+            }
+        }
+
+        ContextMenuArea {
+            Menu {
+                MenuItem {
+                    title: @tr("Print selected paths to stdout");
+                    activated => {
+                        print_selected_paths();
                     }
                 }
             }

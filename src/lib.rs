@@ -215,7 +215,7 @@ impl AppController {
                     selected: false,
                 })
                 .collect();
-
+            ui.set_selected_count(0);
             ui.set_grid_model(Rc::new(VecModel::from(items)).into());
         }
 
@@ -288,6 +288,67 @@ pub fn run(scan: ScanResult, config: Config) -> Result<(), Box<dyn Error>> {
                 }
             }
         }
+    });
+
+    let c = controller.clone();
+    main_window.on_request_range_select(move |start_idx, end_idx| {
+        let ui = c.borrow().window_weak.upgrade().unwrap();
+        let model = ui.get_grid_model();
+
+        let target_state = model
+            .row_data(start_idx as usize)
+            .map(|item| item.selected)
+            .unwrap_or(true);
+
+        let min = start_idx.min(end_idx) as usize;
+        let max = start_idx.max(end_idx) as usize;
+
+        let mut total_selected = 0;
+
+        for i in min..=model.row_count() {
+            if let Some(mut item) = model.row_data(i) {
+                if i >= min && i <= max {
+                    item.selected = target_state;
+                }
+                let is_selected = item.selected;
+                model.set_row_data(i, item);
+                if is_selected {
+                    total_selected += 1;
+                }
+            }
+        }
+
+        ui.set_selected_count(total_selected);
+    });
+
+    let c = controller.clone();
+    main_window.on_print_selected_paths(move || {
+        let ui = c.borrow().window_weak.upgrade().unwrap();
+        let model = ui.get_grid_model();
+        let paths = c.borrow().scan.paths.clone();
+
+        let mut selected_paths = Vec::new();
+
+        for i in 0..model.row_count() {
+            if let Some(item) = model.row_data(i) {
+                if item.selected {
+                    let abs_idx = item.index as usize;
+                    if let Some(path) = paths.get(abs_idx) {
+                        selected_paths.push(path.to_string_lossy().to_string());
+                    }
+                }
+            }
+        }
+
+        if selected_paths.is_empty() {
+            log::info!("No files selected");
+            return;
+        }
+        log::info!(
+            "Files selected ({:}): {:?}",
+            selected_paths.len(),
+            selected_paths
+        );
     });
 
     let c = controller.clone();

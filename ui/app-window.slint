@@ -36,6 +36,8 @@ export component MainWindow inherits Window {
     callback bucket_resolution_changed(int);
     callback search_submitted(string);
     callback toggle_select_all(bool);
+    callback request_range_select(int, int);
+    callback print_selected_paths();
 
     // App Callbacks
     callback quit_app();
@@ -49,6 +51,7 @@ export component MainWindow inherits Window {
     in-out property <ViewMode> view_mode: ViewMode.grid;
     in-out property <bool> is_fullscreen: false;
     in-out property <int> grid_cols: 5;
+    in-out property <int> selected_count: 0;
 
     public function return_focus() {
         key-handler.focus();
@@ -115,6 +118,7 @@ export component MainWindow inherits Window {
         model: root.grid_model;
         grid_cols: root.grid_cols;
         forward-focus: key-handler;
+        selected_count <=> root.selected_count;
 
         request_grid_data(start, count) => {
             root.request_grid_data(start, count);
@@ -132,6 +136,12 @@ export component MainWindow inherits Window {
         }
         toggle_select_all(select) => {
             root.toggle_select_all(select);
+        }
+        request_range_select(start_idx, end_idx) => {
+            root.request_range_select(start_idx, end_idx);
+        }
+        print_selected_paths() => {
+            root.print_selected_paths();
         }
     }
 
