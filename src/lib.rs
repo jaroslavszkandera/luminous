@@ -305,10 +305,12 @@ pub fn run(scan: ScanResult, config: Config) -> Result<(), Box<dyn Error>> {
 
         let mut total_selected = 0;
 
-        for i in min..=model.row_count() {
+        for i in 0..=model.row_count() {
             if let Some(mut item) = model.row_data(i) {
                 if i >= min && i <= max {
                     item.selected = target_state;
+                } else {
+                    item.selected = false;
                 }
                 let is_selected = item.selected;
                 model.set_row_data(i, item);

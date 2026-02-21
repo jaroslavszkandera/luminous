@@ -208,8 +208,14 @@ export component GridView inherits Rectangle {
                                     root.last_clicked_index = i;
                                 } else if (event.modifiers.shift && root.last_clicked_index != -1) {
                                     root.request_range_select(root.last_clicked_index, i);
-                                    // root.last_clicked_index = i;
                                 }
+                                // TODO:
+                                // } else {
+                                //     root.toggle_select_all(false);
+                                //     item.selected = true;
+                                //     selected_count = 1;
+                                //     root.last_clicked_index = i;
+                                // }
                             }
                         }
                         double-clicked() => {
