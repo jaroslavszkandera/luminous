@@ -8,6 +8,7 @@ const SUPPORTED_EXTENSIONS: &[&str; 6] = &["jpg", "jpeg", "png", "bmp", "gif", "
 pub struct ScanResult {
     pub paths: Vec<PathBuf>,
     pub start_index: usize,
+    pub is_dir: bool,
 }
 
 fn is_image(path: &Path) -> bool {
@@ -20,6 +21,7 @@ fn is_image(path: &Path) -> bool {
 pub fn scan(path_str: &str) -> ScanResult {
     let main_path = Path::new(&path_str);
     let metadata = fs::metadata(main_path).unwrap();
+    let mut is_dir = false;
 
     let mut paths: Vec<PathBuf> = Vec::new();
     let mut starting_index: usize = 0;
@@ -34,6 +36,7 @@ pub fn scan(path_str: &str) -> ScanResult {
             return ScanResult {
                 paths: vec![],
                 start_index: 0,
+                is_dir: false,
             };
         }
         start_img_path = Some(main_path.to_path_buf());
@@ -48,6 +51,7 @@ pub fn scan(path_str: &str) -> ScanResult {
         return ScanResult {
             paths: vec![],
             start_index: 0,
+            is_dir: false,
         };
     };
     debug!("Scanning directory: {}", scan_dir.display());
@@ -72,6 +76,7 @@ pub fn scan(path_str: &str) -> ScanResult {
     if metadata.is_dir() {
         debug!("Path was a directory, starting index is 0.");
         starting_index = 0;
+        is_dir = true;
     }
 
     info!(
@@ -82,5 +87,6 @@ pub fn scan(path_str: &str) -> ScanResult {
     ScanResult {
         paths: paths,
         start_index: starting_index,
+        is_dir: is_dir,
     }
 }

@@ -298,6 +298,11 @@ pub fn run(scan: ScanResult, config: Config) -> Result<(), Box<dyn Error>> {
     }
 
     main_window.set_app_background(config.background);
+    main_window.set_view_mode(if scan_rc.is_dir {
+        ViewMode::Grid
+    } else {
+        ViewMode::Full
+    });
 
     setup_bindings(&main_window, &config);
 
