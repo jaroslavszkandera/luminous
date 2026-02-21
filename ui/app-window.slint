@@ -1,4 +1,4 @@
-import { GridView, GridItem, MouseModeGrid } from "grid-view.slint";
+import { GridView, GridItem } from "grid-view.slint";
 import { FullView, MouseModeFull } from "full-view.slint";
 
 export enum ViewMode {
@@ -98,10 +98,6 @@ export component MainWindow inherits Window {
                 }
                 if (event.text == root.bind_grid_pg_up) {
                     grid_ui.page_up();
-                    return accept;
-                }
-                if (event.text == root.bind_switch_mouse_mode) {
-                    grid_ui.toggle_mouse_mode();
                     return accept;
                 }
                 if (event.text == "/") {

@@ -7,11 +7,6 @@ export struct GridItem {
     selected: bool,
 }
 
-export enum MouseModeGrid {
-    select,
-    switch_to_full,
-}
-
 export component GridView inherits Rectangle {
     in property <[GridItem]> model;
     property <int> total_images: model.length;
@@ -42,10 +37,6 @@ export component GridView inherits Rectangle {
             grid_view.viewport-y + grid_view.height,
             0px);
         update_visible_rows();
-    }
-
-    public function toggle_mouse_mode() {
-        grid_container.mouse_mode_grid = grid_container.mouse_mode_grid == MouseModeGrid.switch-to-full ? MouseModeGrid.select : MouseModeGrid.switch-to-full;
     }
 
     public function update_visible_rows() {
@@ -99,14 +90,6 @@ export component GridView inherits Rectangle {
                     }
                     reject
                 }
-            }
-
-            Text {
-                horizontal-alignment: right;
-                vertical-alignment: center;
-                font-size: font_size;
-                color: Theme.text-main;
-                text: "mode: " + (grid_container.mouse_mode_grid == MouseModeGrid.switch-to-full ? "F" : "S");
             }
         }
     }
@@ -179,7 +162,6 @@ export component GridView inherits Rectangle {
                 property <length> gap: parent.gap;
                 property <int> cols: parent.cols;
                 property <int> curr_bucket_res: 0;
-                property <MouseModeGrid> mouse_mode_grid: MouseModeGrid.switch-to-full;
 
                 for item[i] in root.model: Rectangle {
                     width: parent.item_size;
