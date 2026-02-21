@@ -187,16 +187,16 @@ export component GridView inherits Rectangle {
                     x: (Math.mod(i, parent.cols) * (parent.item_size + parent.gap)) + parent.gap;
                     y: (floor(i / parent.cols) * (parent.item_size + parent.gap)) + parent.gap;
 
-                    clip: true;
+                    // clip: true;
                     border-width: item.selected ? 3px : 0px;
-                    border-color: Theme.primary;
-                    opacity: item.selected ? 0.7 : 1.0;
+                    border-color: item.selected ? Theme.primary : transparent;
 
                     Image {
                         source: item.image;
                         image-fit: cover;
                         width: 100%;
                         height: 100%;
+                        opacity: item.selected ? 0.5 : 1.0;
                     }
 
                     TouchArea {

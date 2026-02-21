@@ -283,8 +283,10 @@ pub fn run(scan: ScanResult, config: Config) -> Result<(), Box<dyn Error>> {
 
             for i in 0..model.row_count() {
                 if let Some(mut item) = model.row_data(i) {
-                    item.selected = select;
-                    model.set_row_data(i, item);
+                    if item.selected != select {
+                        item.selected = select;
+                        model.set_row_data(i, item);
+                    }
                 }
             }
         }
@@ -299,22 +301,20 @@ pub fn run(scan: ScanResult, config: Config) -> Result<(), Box<dyn Error>> {
             .row_data(start_idx as usize)
             .map(|item| item.selected)
             .unwrap_or(true);
-
-        let min = start_idx.min(end_idx) as usize;
-        let max = start_idx.max(end_idx) as usize;
-
+        let (min, max) = (
+            start_idx.min(end_idx) as usize,
+            start_idx.max(end_idx) as usize,
+        );
         let mut total_selected = 0;
 
-        for i in 0..=model.row_count() {
+        for i in 0..model.row_count() {
             if let Some(mut item) = model.row_data(i) {
-                if i >= min && i <= max {
-                    item.selected = target_state;
-                } else {
-                    item.selected = false;
+                let should_be_selected = (i >= min && i <= max) && target_state;
+                if item.selected != should_be_selected {
+                    item.selected = should_be_selected;
+                    model.set_row_data(i, item);
                 }
-                let is_selected = item.selected;
-                model.set_row_data(i, item);
-                if is_selected {
+                if should_be_selected {
                     total_selected += 1;
                 }
             }
