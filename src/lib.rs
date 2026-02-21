@@ -319,7 +319,8 @@ fn setup_bindings(main_window: &MainWindow, config: &Config) {
 
     main_window.set_bind_quit(get_key("quit"));
     main_window.set_bind_fullscreen(get_key("toggle_fullscreen"));
-    main_window.set_bind_switch_mode(get_key("switch_mode"));
+    main_window.set_bind_switch_view_mode(get_key("switch_view_mode"));
+    main_window.set_bind_switch_mouse_mode(get_key("switch_mouse_mode"));
     main_window.set_bind_reset_zoom(get_key("reset_zoom"));
     main_window.set_bind_grid_pg_dn(get_key("grid_page_down"));
     main_window.set_bind_grid_pg_up(get_key("grid_page_up"));

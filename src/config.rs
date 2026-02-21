@@ -66,7 +66,11 @@ impl Config {
 
         let path = Self::resolve(cli.path, toml_config.path, ".".to_string());
         let log = Self::resolve(cli.log, toml_config.log, "warn".to_string());
-        let threads = Self::resolve(cli.threads, toml_config.threads, num_cpus::get());
+        let threads = cli
+            .threads
+            .or(toml_config.threads)
+            .filter(|&t| t > 0)
+            .unwrap_or_else(num_cpus::get);
         let window_size = Self::resolve(cli.window_size, toml_config.window_size, 3);
         let background_str = Self::resolve(
             cli.background,
@@ -151,7 +155,8 @@ impl Config {
         let mut map = HashMap::new();
         map.insert("quit".into(), "q".into());
         map.insert("toggle_fullscreen".into(), "f".into());
-        map.insert("switch_mode".into(), "Escape".into());
+        map.insert("switch_view_mode".into(), "Escape".into());
+        map.insert("switch_mouse_mode".into(), "m".into());
         map.insert("grid_page_down".into(), "PageDown".into());
         map.insert("grid_page_up".into(), "PageUp".into());
         map.insert("reset_zoom".into(), "z".into());

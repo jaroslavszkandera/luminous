@@ -18,10 +18,11 @@ export component MainWindow inherits Window {
     // Bindings
     in property <string> bind_quit;
     in property <string> bind_fullscreen;
-    in property <string> bind_switch_mode;
+    in property <string> bind_switch_view_mode;
     in property <string> bind_reset_zoom;
     in property <string> bind_grid_pg_dn;
     in property <string> bind_grid_pg_up;
+    in property <string> bind_switch_mouse_mode;
 
     // Full view Callbacks
     callback request_next_image();
@@ -62,7 +63,7 @@ export component MainWindow inherits Window {
                 root.is_fullscreen = !root.is_fullscreen;
                 return accept;
             }
-            if (event.text == root.bind_switch_mode) {
+            if (event.text == root.bind_switch_view_mode) {
                 root.view_mode = root.view_mode == ViewMode.full ? ViewMode.grid : ViewMode.full;
                 full_ui.reset_zoom();
                 return accept;
@@ -82,7 +83,7 @@ export component MainWindow inherits Window {
                     full_ui.reset_zoom();
                     return accept;
                 }
-                if (event.text == "m") {
+                if (event.text == root.bind_switch_mouse_mode) {
                     full_ui.toggle_mouse_mode();
                     return accept;
                 }
@@ -95,7 +96,7 @@ export component MainWindow inherits Window {
                     grid_ui.page_up();
                     return accept;
                 }
-                if (event.text == "m") {
+                if (event.text == root.bind_switch_mouse_mode) {
                     grid_ui.toggle_mouse_mode();
                     return accept;
                 }
