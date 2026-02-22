@@ -9,10 +9,12 @@ export struct GridItem {
 
 export component GridView inherits Rectangle {
     in property <[GridItem]> model;
+    in property <[GridItem]> visible_model;
     property <int> total_images: model.length;
     in-out property <int> grid_cols: 5;
     in-out property <int> selected_count: 0;
     property <int> last_clicked_index: -1;
+
     callback request_grid_data(int, int);
     callback image_selected(int);
     callback bucket_resolution_changed(int);
@@ -20,6 +22,7 @@ export component GridView inherits Rectangle {
     callback toggle_select_all(bool);
     callback request_range_select(int, int);
     callback print_selected_paths();
+    callback toggle_selection(int);
 
     public function focus_search() {
         search_input.focus();
@@ -157,17 +160,19 @@ export component GridView inherits Rectangle {
 
             grid_container := Rectangle {
                 width: parent.width;
-                height: parent.height;
+                height: parent.height; // height for scrolling
+
                 property <length> item_size: parent.item_size;
                 property <length> gap: parent.gap;
                 property <int> cols: parent.cols;
                 property <int> curr_bucket_res: 0;
 
-                for item[i] in root.model: Rectangle {
+                for item in root.visible_model: Rectangle {
                     width: parent.item_size;
                     height: parent.item_size;
-                    x: (Math.mod(i, parent.cols) * (parent.item_size + parent.gap)) + parent.gap;
-                    y: (floor(i / parent.cols) * (parent.item_size + parent.gap)) + parent.gap;
+
+                    x: (Math.mod(item.index, parent.cols) * (parent.item_size + parent.gap)) + parent.gap;
+                    y: (floor(item.index / parent.cols) * (parent.item_size + parent.gap)) + parent.gap;
 
                     // clip: true;
                     border-width: item.selected ? 3px : 0px;
@@ -185,11 +190,12 @@ export component GridView inherits Rectangle {
                         pointer-event(event) => {
                             if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
                                 if (event.modifiers.control) {
-                                    item.selected = !item.selected;
-                                    selected_count += item.selected ? 1 : -1;
-                                    root.last_clicked_index = i;
+                                    // item.selected = !item.selected;
+                                    // selected_count += item.selected ? 1 : -1;
+                                    root.toggle_selection(item.index);
+                                    root.last_clicked_index = item.index;
                                 } else if (event.modifiers.shift && root.last_clicked_index != -1) {
-                                    root.request_range_select(root.last_clicked_index, i);
+                                    root.request_range_select(root.last_clicked_index, item.index);
                                 }
                                 // TODO:
                                 // } else {

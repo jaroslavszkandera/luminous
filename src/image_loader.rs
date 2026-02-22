@@ -22,8 +22,9 @@ pub struct ImageLoader {
     pub paths: Vec<PathBuf>,
     pub pool: ThreadPool,
     pub active_idx: Arc<AtomicUsize>,
+    pub active_window: Arc<Mutex<HashSet<usize>>>,
     full_load_generation: Arc<AtomicUsize>,
-    window_size: usize,
+    pub window_size: usize,
     cache_dir: Option<PathBuf>,
     bucket_resolution: AtomicU32,
 }
@@ -47,23 +48,12 @@ impl ImageLoader {
             paths,
             pool: ThreadPool::new(workers),
             active_idx: Arc::new(AtomicUsize::new(0)),
+            active_window: Arc::new(Mutex::new(HashSet::new())),
             full_load_generation: Arc::new(AtomicUsize::new(0)),
             window_size: window_size,
             cache_dir,
             bucket_resolution: AtomicU32::new(0),
         }
-    }
-
-    fn is_job_relevant(
-        target_idx: usize,
-        job_idx: usize,
-        total_len: usize,
-        window_size: usize,
-    ) -> bool {
-        let dist = (target_idx as isize - job_idx as isize).abs() as usize;
-        let wrap_dist = total_len - dist;
-        let actual_dist = dist.min(wrap_dist);
-        actual_dist <= window_size
     }
 
     pub fn set_bucket_resolution(&self, resolution: u32) {
@@ -128,11 +118,6 @@ impl ImageLoader {
                     if let Some(ref cp) = cache_path {
                         if cp.exists() {
                             if let Ok(cached_img) = image::open(cp) {
-                                debug!(
-                                    "Cache hit ({} px) for {:?}",
-                                    res,
-                                    path.file_name().unwrap_or_default(),
-                                );
                                 return Ok(cached_img.to_rgba8());
                             }
                         }
@@ -290,30 +275,30 @@ impl ImageLoader {
         backup_image
     }
 
-    pub fn update_sliding_window(&self, center_idx: usize) {
-        let len = self.paths.len();
-        if len == 0 {
+    pub fn update_sliding_window(&self, center_idx: usize, window_indices: Vec<usize>) {
+        if self.paths.is_empty() {
             return;
         }
 
-        let mut keep_indices = HashSet::new();
-        keep_indices.insert(center_idx);
+        {
+            let mut active_set = self.active_window.lock().unwrap();
+            active_set.clear();
+            active_set.insert(center_idx);
+            for &idx in &window_indices {
+                active_set.insert(idx);
+            }
+        }
 
-        for i in 1..=self.window_size {
-            let prev = (center_idx as isize - i as isize).rem_euclid(len as isize) as usize;
-            keep_indices.insert(prev);
-            self.preload_background(prev);
-
-            let next = (center_idx + i).rem_euclid(len);
-            keep_indices.insert(next);
-            self.preload_background(next);
+        for &idx in &window_indices {
+            self.preload_background(idx);
         }
 
         // Eviction Policy
         let mut cache = self.full_cache.lock().unwrap();
+        let active_set = self.active_window.lock().unwrap();
         let keys_to_remove: Vec<usize> = cache
             .keys()
-            .filter(|k| !keep_indices.contains(k))
+            .filter(|k| !active_set.contains(k))
             .cloned()
             .collect();
 
@@ -331,16 +316,12 @@ impl ImageLoader {
         if let Some(path) = self.paths.get(index) {
             let path = path.clone();
             let cache_clone = self.full_cache.clone();
-            let active_idx = self.active_idx.clone();
-            let total_len = self.paths.len();
-            let window_size = self.window_size;
+            let active_window = self.active_window.clone();
 
             self.pool.execute(move || {
-                let current_focus = active_idx.load(Ordering::Relaxed);
-                if !Self::is_job_relevant(current_focus, index, total_len, window_size) {
+                if !active_window.lock().unwrap().contains(&index) {
                     return;
                 }
-
                 if cache_clone.lock().unwrap().contains_key(&index) {
                     return;
                 }

@@ -38,6 +38,7 @@ export component MainWindow inherits Window {
     callback toggle_select_all(bool);
     callback request_range_select(int, int);
     callback print_selected_paths();
+    callback toggle_selection(int);
 
     // App Callbacks
     callback quit_app();
@@ -45,6 +46,7 @@ export component MainWindow inherits Window {
     // State
     in property <color> app_background: #000000;
     in property <[GridItem]> grid_model;
+    in property <[GridItem]> visible_grid_model;
     in property <image> full_view_image;
     in-out property <int> curr_image_index: 0;
     in property <string> curr_image_name;
@@ -111,6 +113,7 @@ export component MainWindow inherits Window {
 
     grid_ui := GridView {
         visible: root.view_mode == ViewMode.grid;
+        visible_model: root.visible_grid_model;
         model: root.grid_model;
         grid_cols: root.grid_cols;
         forward-focus: key-handler;
@@ -138,6 +141,9 @@ export component MainWindow inherits Window {
         }
         print_selected_paths() => {
             root.print_selected_paths();
+        }
+        toggle_selection(idx) => {
+            root.toggle_selection(idx);
         }
     }
 
