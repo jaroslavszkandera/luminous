@@ -1,0 +1,6 @@
+{
+  "name": "Test plugin, generates red image",
+  "version": "0.1.0",
+  "extensions": ["red"],
+  "capabilities": ["decoder"]
+}

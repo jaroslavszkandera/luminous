@@ -27,3 +27,5 @@ target
 
 # Other
 *.sh
+build
+*.so

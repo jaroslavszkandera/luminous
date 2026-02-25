@@ -13,6 +13,7 @@ clap = { version = "4.5.57", default-features = false, features = [
 ] }
 csscolorparser = "0.8.2"
 directories = "6.0.0"
+dlopen2 = "0.8.2"
 env_logger = "0.11.8"
 hex = "0.4.3"
 image = { version = "0.25.9", default-features = false, features = [
@@ -25,6 +26,7 @@ image = { version = "0.25.9", default-features = false, features = [
 log = "0.4.29"
 num_cpus = "1.17.0"
 serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
 sha2 = "0.10.9"
 threadpool = "1.8.1"
 toml = "0.9.11"

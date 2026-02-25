@@ -8,6 +8,7 @@ pub mod plugins;
 use config::Config;
 use fs_scan::ScanResult;
 use image_loader::ImageLoader;
+use plugins::PluginManager;
 
 use log::debug;
 use slint::{Image, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, VecModel};
@@ -15,6 +16,7 @@ use std::cell::RefCell;
 use std::cmp;
 use std::collections::HashSet;
 use std::error::Error;
+use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -30,13 +32,19 @@ struct AppController {
 }
 
 impl AppController {
-    fn new(scan: Rc<ScanResult>, config: &Config, window: &MainWindow) -> Self {
+    fn new(
+        plugin_manager: PluginManager,
+        scan: Rc<ScanResult>,
+        config: &Config,
+        window: &MainWindow,
+    ) -> Self {
         let total = scan.paths.len();
         Self {
             loader: Arc::new(ImageLoader::new(
                 scan.paths.clone(),
                 config.threads,
                 config.window_size,
+                plugin_manager,
             )),
             scan,
             active_grid_indices: HashSet::new(),
@@ -312,8 +320,11 @@ impl AppController {
 }
 
 pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
-    let scan = fs_scan::scan(&config.path, &[]);
+    let mut plugin_manager = plugins::PluginManager::new();
 
+    plugin_manager.discover(Path::new("plugins"));
+    let extra_exts = plugin_manager.get_supported_extensions();
+    let scan = fs_scan::scan(&config.path, &extra_exts);
     if scan.paths.is_empty() {
         // TODO: File manager pop-up
         log::error!("No supported images found in {}", config.path);
@@ -336,6 +347,7 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
 
     let scan_rc = Rc::new(scan);
     let controller = Rc::new(RefCell::new(AppController::new(
+        plugin_manager,
         scan_rc.clone(),
         &config,
         &main_window,

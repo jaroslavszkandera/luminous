@@ -11,6 +11,7 @@ use std::time::Instant;
 use threadpool::ThreadPool;
 
 use crate::MainWindow;
+use crate::plugins::PluginManager;
 
 fn get_placeholder() -> SharedPixelBuffer<Rgba8Pixel> {
     SharedPixelBuffer::<Rgba8Pixel>::new(1, 1)
@@ -27,10 +28,16 @@ pub struct ImageLoader {
     pub window_size: usize,
     cache_dir: Option<PathBuf>,
     bucket_resolution: AtomicU32,
+    plugin_manager: Arc<PluginManager>,
 }
 
 impl ImageLoader {
-    pub fn new(paths: Vec<PathBuf>, workers: usize, window_size: usize) -> Self {
+    pub fn new(
+        paths: Vec<PathBuf>,
+        workers: usize,
+        window_size: usize,
+        plugin_manager: PluginManager,
+    ) -> Self {
         let cache_dir = if let Some(proj_dirs) = ProjectDirs::from("", "", "luminous") {
             let dir = proj_dirs.cache_dir().join("thumbnails");
             if let Err(e) = fs::create_dir_all(&dir) {
@@ -53,6 +60,7 @@ impl ImageLoader {
             window_size: window_size,
             cache_dir,
             bucket_resolution: AtomicU32::new(0),
+            plugin_manager: Arc::new(plugin_manager),
         }
     }
 
@@ -61,6 +69,7 @@ impl ImageLoader {
         self.thumb_cache.lock().unwrap().clear();
     }
 
+    // TODO: detect if cache is corrupted
     fn get_cache_path(
         cache_dir: Option<&PathBuf>,
         original_path: &Path,
@@ -78,12 +87,14 @@ impl ImageLoader {
         hasher.update(original_path.to_string_lossy().as_bytes());
         hasher.update(modified.to_be_bytes());
         let hash = hasher.finalize();
+        // Is it better to convert it to an uniform format or not?
+        let format = "png";
 
         Some(cache_dir?.join(format!(
             "{}_{}.{}",
             hex::encode(hash),
             resolution,
-            original_path.extension()?.to_str()?
+            format, // original_path.extension()?.to_str()?
         )))
     }
 
@@ -97,6 +108,11 @@ impl ImageLoader {
     where
         F: Fn(MainWindow, usize, Image) + Send + 'static,
     {
+        // FIX: Should be handled by slint
+        if self.bucket_resolution.load(Ordering::Relaxed) == 0 {
+            // error!("Bucket resolution is 0");
+            return Some(get_placeholder());
+        }
         {
             let cache_handle = self.thumb_cache.lock().unwrap();
             if let Some(buffer) = cache_handle.get(&index) {
@@ -110,48 +126,54 @@ impl ImageLoader {
             let cache_dir = self.cache_dir.clone();
             let res = self.bucket_resolution.load(Ordering::Relaxed);
             let cache_path = Self::get_cache_path(cache_dir.as_ref(), &path, res);
+            let plugin_manager = self.plugin_manager.clone();
 
             self.pool.execute(move || {
                 let _start = Instant::now();
 
-                let buffer: Result<image::RgbaImage, image::ImageError> = (|| {
-                    if let Some(ref cp) = cache_path {
-                        if cp.exists() {
-                            if let Ok(cached_img) = image::open(cp) {
-                                return Ok(cached_img.to_rgba8());
-                            }
+                let buffer = if let Some(ref cp) = cache_path.as_ref().filter(|p| p.exists()) {
+                    match image::open(cp) {
+                        Ok(cached_img) => {
+                            let rgba = cached_img.to_rgba8();
+                            SharedPixelBuffer::clone_from_slice(
+                                rgba.as_raw(),
+                                rgba.width(),
+                                rgba.height(),
+                            )
+                        }
+                        Err(_) => {
+                            error!(
+                                "Cache failed to open ({} px) for {:?} (plugin)",
+                                res,
+                                path.file_name()
+                            );
+                            get_placeholder()
                         }
                     }
-
-                    let dyn_img = image::open(&path)?;
-                    let resized = dyn_img.thumbnail(res, res);
-                    let rgba = resized.to_rgba8();
-
+                } else {
+                    debug!("Cache ({} px) not found for {:?}", res, path.file_name());
+                    let full_buffer = Self::fetch_buffer(&path, &plugin_manager);
+                    let (w, h) = (full_buffer.width(), full_buffer.height());
+                    let img_view = image::RgbaImage::from_raw(
+                        w,
+                        h,
+                        full_buffer
+                            .as_slice()
+                            .iter()
+                            .flat_map(|p| [p.r, p.g, p.b, p.a])
+                            .collect(),
+                    )
+                    .unwrap();
+                    let resized = image::DynamicImage::ImageRgba8(img_view).thumbnail(res, res);
                     if let Some(ref cp) = cache_path {
                         if let Err(e) = resized.save(cp) {
-                            warn!(
-                                "Failed to save cache file {}, res {}: {}",
-                                cp.display(),
-                                res,
-                                e
-                            );
+                            error!("Failed to save thumbnail cache to {:?}: {}", cp, e);
                         }
                     }
-
-                    Ok(rgba)
-                })();
-
-                let final_buffer = match buffer {
-                    Ok(rgba) => SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
-                        rgba.as_raw(),
-                        rgba.width(),
-                        rgba.height(),
-                    ),
-                    Err(e) => {
-                        error!("Failed to load/process image {}: {}", path.display(), e);
-                        get_placeholder()
-                    }
+                    let rgba = resized.to_rgba8();
+                    SharedPixelBuffer::clone_from_slice(rgba.as_raw(), rgba.width(), rgba.height())
                 };
+
                 debug!(
                     "Thumb loaded ({} px): {:?} in {:.2}ms",
                     res,
@@ -159,13 +181,10 @@ impl ImageLoader {
                     _start.elapsed().as_secs_f64() * 1000.0
                 );
 
-                cache_clone
-                    .lock()
-                    .unwrap()
-                    .insert(index, final_buffer.clone());
+                cache_clone.lock().unwrap().insert(index, buffer.clone());
 
                 let _ = ui_handle.upgrade_in_event_loop(move |ui| {
-                    let img = Image::from_rgba8(final_buffer);
+                    let img = Image::from_rgba8(buffer);
                     on_loaded(ui, index, img);
                 });
             });
@@ -222,6 +241,7 @@ impl ImageLoader {
             let path = path.clone();
             let cache_clone = self.full_cache.clone();
             let full_load_generation = self.full_load_generation.clone();
+            let plugin_manager = self.plugin_manager.clone();
 
             self.pool.execute(move || {
                 let current_generation = full_load_generation.load(Ordering::Relaxed);
@@ -234,20 +254,7 @@ impl ImageLoader {
                 }
 
                 let start = Instant::now();
-                let buffer = match image::open(&path) {
-                    Ok(dyn_img) => {
-                        let rgba = dyn_img.to_rgba8();
-                        SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
-                            rgba.as_raw(),
-                            rgba.width(),
-                            rgba.height(),
-                        )
-                    }
-                    Err(e) => {
-                        error!("Full load fail {}: {}", path.display(), e);
-                        get_placeholder()
-                    }
-                };
+                let buffer = Self::fetch_buffer(&path, &plugin_manager);
 
                 debug!(
                     "Full loaded: {:?} in {:.2}ms",
@@ -363,5 +370,25 @@ impl ImageLoader {
             .unwrap()
             .to_str()
             .expect("Image file name should be present")
+    }
+
+    fn fetch_buffer(path: &Path, plugin_manager: &PluginManager) -> SharedPixelBuffer<Rgba8Pixel> {
+        if let Some(buffer) = plugin_manager.decode(path) {
+            return buffer;
+        }
+
+        image::open(path)
+            .map(|dyn_img| {
+                let rgba = dyn_img.to_rgba8();
+                SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
+                    rgba.as_raw(),
+                    rgba.width(),
+                    rgba.height(),
+                )
+            })
+            .unwrap_or_else(|e| {
+                error!("Image load failed for {:?}: {}", path, e);
+                get_placeholder()
+            })
     }
 }
