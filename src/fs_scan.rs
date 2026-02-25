@@ -1,9 +1,11 @@
 use log::{debug, error, info};
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
-const SUPPORTED_EXTENSIONS: &[&str; 6] = &["jpg", "jpeg", "png", "bmp", "gif", "webp"];
+// TMP: red should extension is for testing
+// const SUPPORTED_EXTENSIONS: &[&str; 7] = &["jpg", "jpeg", "png", "bmp", "gif", "webp", "red"];
 
 pub struct ScanResult {
     pub paths: Vec<PathBuf>,
@@ -11,14 +13,25 @@ pub struct ScanResult {
     pub is_dir: bool,
 }
 
-fn is_image(path: &Path) -> bool {
-    path.extension()
-        .and_then(|ext| ext.to_str())
-        .map(|ext_str| SUPPORTED_EXTENSIONS.contains(&ext_str.to_lowercase().as_str()))
-        .unwrap_or(false)
+fn is_image(path: &Path, extensions: &HashSet<String>) -> bool {
+    let ext_os = match path.extension() {
+        Some(e) => e,
+        None => return false,
+    };
+    let ext_str = match ext_os.to_str() {
+        Some(s) => s,
+        None => return false,
+    };
+
+    if extensions.contains(ext_str) {
+        return true;
+    }
+
+    let lower = ext_str.to_lowercase();
+    extensions.contains(&lower)
 }
 
-pub fn scan(path_str: &str) -> ScanResult {
+pub fn scan(path_str: &str, extra_exts: &[&str]) -> ScanResult {
     let main_path = Path::new(&path_str);
     let metadata = fs::metadata(main_path).unwrap();
     let mut is_dir = false;
@@ -27,8 +40,21 @@ pub fn scan(path_str: &str) -> ScanResult {
     let mut starting_index: usize = 0;
     let mut start_img_path: Option<PathBuf> = None;
 
+    let mut extensions: HashSet<String> = [
+        "avif", "bmp", "dds", "exr", "ff", "gif", "hdr", "ico", "jpeg", "jpg", "png", "pnm", "qoi",
+        "tga", "tif", "tiff", "webp",
+    ]
+    .into_iter()
+    .map(String::from)
+    .collect();
+
+    for ext in extra_exts {
+        extensions.insert(ext.to_lowercase());
+    }
+    info!("Supported extensions: {:?}", extensions);
+
     let scan_dir = if metadata.is_file() {
-        if !is_image(main_path) {
+        if !is_image(&main_path, &extensions) {
             error!(
                 "File is not a supported image type: {}",
                 main_path.display()
@@ -63,7 +89,7 @@ pub fn scan(path_str: &str) -> ScanResult {
         .filter_map(|e| e.ok())
     {
         let path = entry.into_path();
-        if path.is_file() && is_image(&path) {
+        if path.is_file() && is_image(&path, &extensions) {
             if let Some(ref curr) = start_img_path {
                 if path == *curr {
                     starting_index = paths.len();

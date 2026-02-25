@@ -3,6 +3,7 @@ slint::include_modules!();
 pub mod config;
 pub mod fs_scan;
 mod image_loader;
+pub mod plugins;
 
 use config::Config;
 use fs_scan::ScanResult;
@@ -310,7 +311,15 @@ impl AppController {
     }
 }
 
-pub fn run(scan: ScanResult, config: Config) -> Result<(), Box<dyn Error>> {
+pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
+    let scan = fs_scan::scan(&config.path, &[]);
+
+    if scan.paths.is_empty() {
+        // TODO: File manager pop-up
+        log::error!("No supported images found in {}", config.path);
+        return Err(format!("No images in {}", config.path).into());
+    }
+
     let main_window = MainWindow::new()?;
 
     let grid_data: Vec<GridItem> = scan

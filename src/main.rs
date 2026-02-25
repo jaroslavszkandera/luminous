@@ -1,7 +1,6 @@
 use std::process;
 
 use luminous::config::Config;
-use luminous::fs_scan;
 
 fn main() {
     let config = Config::load();
@@ -9,19 +8,12 @@ fn main() {
         .filter_module("winit", log::LevelFilter::Warn)
         .filter_module("tracing", log::LevelFilter::Warn)
         .filter_module("zbus", log::LevelFilter::Warn)
+        .filter_module("sctk", log::LevelFilter::Warn)
         .init();
-
-    let scan_result = fs_scan::scan(&config.path);
-
-    if scan_result.paths.is_empty() {
-        log::error!("No supported images found in {}", config.path);
-        // TODO: File manager pop-up
-        process::exit(1);
-    }
 
     log::info!("Starting with {} worker threads", config.threads);
 
-    if let Err(e) = luminous::run(scan_result, config) {
+    if let Err(e) = luminous::run(config) {
         log::error!("Application error: {e}");
         process::exit(1);
     };
