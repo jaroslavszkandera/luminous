@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 4.0)
-project(red)
+cmake_minimum_required(VERSION 3.25)
+project(test_plugin)
 
-add_library(red SHARED red_image_plugin.cpp)
+add_library(test_plugin SHARED test_plugin.cpp)
