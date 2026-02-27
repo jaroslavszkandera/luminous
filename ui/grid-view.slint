@@ -56,6 +56,12 @@ export component GridView inherits Rectangle {
         }
     }
 
+    public function update_grid_cols(grid_cols: int) {
+        root.grid_cols = clamp(grid_cols, 2, 20);
+        grid_view.sync_bucket_resolution();
+        update_visible_rows();
+    }
+
     grid_header := Rectangle {
         width: 100%;
         y: 0px;
@@ -149,9 +155,7 @@ export component GridView inherits Rectangle {
                     } else if event.delta-y < 0 {
                         step = 1;
                     }
-                    root.grid_cols = clamp(root.grid_cols + step, 2, 20);
-                    grid_view.sync_bucket_resolution();
-                    root.update_visible_rows();
+                    root.update_grid_cols(root.grid_cols + step);
                     accept
                 } else {
                     reject
@@ -174,16 +178,21 @@ export component GridView inherits Rectangle {
                     x: (Math.mod(item.index, parent.cols) * (parent.item_size + parent.gap)) + parent.gap;
                     y: (floor(item.index / parent.cols) * (parent.item_size + parent.gap)) + parent.gap;
 
-                    // clip: true;
+                    clip: true;
                     border-width: item.selected ? 3px : 0px;
                     border-color: item.selected ? Theme.primary : transparent;
+                    background: item.selected ? Theme.primary.with-alpha(0.3) : transparent;
+                    animate border-width {
+                        duration: 150ms;
+                        easing: ease-in-out;
+                    }
 
                     Image {
                         source: item.image;
                         image-fit: cover;
                         width: 100%;
                         height: 100%;
-                        opacity: item.selected ? 0.5 : 1.0;
+                        opacity: item.selected ? 0.7 : 1.0;
                     }
 
                     TouchArea {

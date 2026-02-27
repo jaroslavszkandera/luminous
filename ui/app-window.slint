@@ -102,6 +102,12 @@ export component MainWindow inherits Window {
                     grid_ui.page_up();
                     return accept;
                 }
+                if (event.text == "=" || event.text == "+") {
+                    grid_ui.update_grid_cols(grid_cols - 1);
+                }
+                if (event.text == "-" || event.text == "_") {
+                    grid_ui.update_grid_cols(grid_cols + 1);
+                }
                 if (event.text == "/") {
                     grid_ui.focus_search();
                     return accept;
@@ -115,7 +121,7 @@ export component MainWindow inherits Window {
         visible: root.view_mode == ViewMode.grid;
         visible_model: root.visible_grid_model;
         model: root.grid_model;
-        grid_cols: root.grid_cols;
+        grid_cols <=> root.grid_cols;
         forward-focus: key-handler;
         selected_count <=> root.selected_count;
 
