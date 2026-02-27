@@ -3,6 +3,7 @@ import { Theme } from "theme.slint";
 export enum MouseModeFull {
     select,
     drag,
+    segment,
 }
 
 export component FullView inherits TouchArea {
@@ -11,12 +12,14 @@ export component FullView inherits TouchArea {
     in property <string> curr_image_name;
     in property <int> total_images;
     in property <bool> timer_running: false;
+    in property <image> mask_overlay;
 
     callback request_next_image();
     callback request_prev_image();
     callback rotate_plus_90();
     callback rotate_minus_90();
     callback exit_full_view();
+    callback request_segmentation(int, int);
 
     width: 100%;
     height: 100%;
@@ -25,7 +28,7 @@ export component FullView inherits TouchArea {
     property <length> last_coords_x;
     property <length> last_coords_y;
 
-    property <MouseModeFull> mouse_mode_full: MouseModeFull.select;
+    property <MouseModeFull> mouse_mode_full: MouseModeFull.segment; // TESTING
     mouse-cursor: (mouse_mode_full == MouseModeFull.select) ? crosshair : (mouse_mode_full == MouseModeFull.drag && self.pressed && zoom_scale > 1.0) ? grabbing : (mouse_mode_full == MouseModeFull.drag && zoom_scale > 1.0) ? grab : default;
 
     property <length> start_drag_x;
@@ -64,7 +67,13 @@ export component FullView inherits TouchArea {
     }
 
     public function toggle_mouse_mode() {
-        mouse_mode_full = mouse_mode_full == MouseModeFull.drag ? MouseModeFull.select : MouseModeFull.drag;
+        if (mouse_mode_full == MouseModeFull.select) {
+            mouse_mode_full = MouseModeFull.drag;
+        } else if (mouse_mode_full == MouseModeFull.drag) {
+            mouse_mode_full = MouseModeFull.segment;
+        } else {
+            mouse_mode_full = MouseModeFull.select;
+        }
     }
 
     public function reset_zoom() {
@@ -126,6 +135,17 @@ export component FullView inherits TouchArea {
                 if (selection_width > 5px && selection_height > 5px) {
                     zoom_to_selection();
                 }
+            } else if (event.kind == PointerEventKind.up && mouse_mode_full == MouseModeFull.segment) {
+                let img_w = root.current_image.width;
+                let img_h = root.current_image.height;
+                if (img_w > 0 && img_h > 0) {
+                    let scale = Math.min(img.width / img_w, img.height / img_h);
+                    let visual_img_x = img.x + (img.width - img_w * scale) / 2;
+                    let visual_img_y = img.y + (img.height - img_h * scale) / 2;
+                    let orig_x = clamp(Math.round((root.mouse-x - visual_img_x) / scale), 0, img_w);
+                    let orig_y = clamp(Math.round((root.mouse-y - visual_img_y) / scale), 0, img_h);
+                    root.request_segmentation(orig_x, orig_y);
+                }
             }
         }
     }
@@ -171,6 +191,15 @@ export component FullView inherits TouchArea {
             height: 100%;
             x: 0px;
             y: 0px;
+        }
+
+        mask := Image {
+            source: root.mask_overlay;
+            image-fit: contain;
+            width: img.width;
+            height: img.height;
+            x: img.x;
+            y: img.y;
         }
 
         Rectangle {

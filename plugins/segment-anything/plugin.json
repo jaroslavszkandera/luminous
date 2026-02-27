@@ -1,0 +1,9 @@
+{
+  "name": "Segment Anything Model for Interactive Segmentation",
+  "version": "0.1.0",
+  "backend": "daemon",
+  "interpreter": "uv run",
+  "capabilities": ["interactive"],
+  "extensions": [],
+  "daemon_port": 50021
+}

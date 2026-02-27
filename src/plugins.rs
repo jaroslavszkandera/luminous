@@ -1,14 +1,17 @@
 use dlopen2::wrapper::{Container, WrapperApi};
 use log::{debug, error, info};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+use shared_memory::{Shmem, ShmemConf};
 use slint::{Rgba8Pixel, SharedPixelBuffer};
 use std::collections::HashMap;
 use std::ffi::CString;
 use std::fs;
+use std::io::{Read, Write};
+use std::net::TcpStream;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
-// Expected ABI
+// Expected ABI for shared libs
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub struct ImageBuffer {
@@ -20,8 +23,10 @@ pub struct ImageBuffer {
 }
 
 // API from the shared library
+// NOTE: Could be split into decode/encode?
 #[derive(WrapperApi)]
-struct ImagePluginApi {
+pub struct ImagePluginApi {
+    // pub is to suppress warning for now
     load_image: unsafe extern "C" fn(path: *const i8) -> ImageBuffer,
     save_image: unsafe extern "C" fn(path: *const i8, img: ImageBuffer) -> bool,
     free_image: unsafe extern "C" fn(img: ImageBuffer),
@@ -32,8 +37,16 @@ struct ImagePluginApi {
 pub struct PluginManifest {
     pub name: String,
     pub version: String,
+    #[serde(default = "default_plugin_type")]
+    pub backend: String,
     pub extensions: Vec<String>,
     pub capabilities: Vec<PluginCapability>,
+    pub daemon_port: Option<u16>,
+    pub interpreter: Option<String>,
+}
+
+fn default_plugin_type() -> String {
+    "shared_lib".to_string()
 }
 
 #[derive(Deserialize, Debug, Clone, PartialEq)]
@@ -41,61 +54,117 @@ pub struct PluginManifest {
 pub enum PluginCapability {
     Decoder,
     Encoder,
+    Interactive,
     Unknown,
+}
+
+#[derive(Serialize)]
+struct IpcCmd<'a> {
+    action: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    shm_name: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    width: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    height: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    x: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    y: Option<u32>,
+}
+
+// Seems so sketchy, is there better way to do this?
+pub struct ShmemWrapper(pub Shmem);
+unsafe impl Send for ShmemWrapper {}
+unsafe impl Sync for ShmemWrapper {}
+
+pub enum PluginBackend {
+    SharedLib(Container<ImagePluginApi>),
+    Daemon {
+        stream: Mutex<TcpStream>,
+        shm_img: Mutex<Option<ShmemWrapper>>,
+        shm_mask: Mutex<Option<ShmemWrapper>>,
+        curr_width: Mutex<u32>,
+        curr_height: Mutex<u32>,
+    },
 }
 
 pub struct Plugin {
     manifest: PluginManifest,
-    container: Container<ImagePluginApi>,
+    backend: PluginBackend,
 }
 
 impl Plugin {
     pub fn new(manifest: PluginManifest, dir_path: PathBuf) -> Option<Self> {
-        let suffix = std::env::consts::DLL_SUFFIX;
-        debug!(
-            "Searching for library with suffix '{}' in {:?}",
-            suffix, dir_path
-        );
+        if manifest.backend == "daemon" {
+            // Plugin through IPC and shared memory
+            let port = manifest.daemon_port.unwrap_or(50021);
+            let stream = TcpStream::connect(("127.0.0.1", port))
+                .map_err(|e| {
+                    error!("Failed to connect to daemon {}: {}", manifest.name, e);
+                })
+                .ok()?;
 
-        let entries: Vec<_> = fs::read_dir(&dir_path)
-            .ok()?
-            .filter_map(|e| e.ok())
-            .map(|e| e.path())
-            .collect();
+            info!("Connected to daemon plugin '{}'", manifest.name);
+            return Some(Self {
+                manifest,
+                backend: PluginBackend::Daemon {
+                    stream: Mutex::new(stream),
+                    shm_img: Mutex::new(None),
+                    shm_mask: Mutex::new(None),
+                    curr_width: Mutex::new(0),
+                    curr_height: Mutex::new(0),
+                },
+            });
+        } else {
+            // Shared library plugin
+            let suffix = std::env::consts::DLL_SUFFIX;
+            debug!(
+                "Searching for library with suffix '{}' in {:?}",
+                suffix, dir_path
+            );
 
-        for p in &entries {
-            debug!("Checking file: {:?}", p);
-        }
+            let entries: Vec<_> = fs::read_dir(&dir_path)
+                .ok()?
+                .filter_map(|e| e.ok())
+                .map(|e| e.path())
+                .collect();
 
-        let lib_path = entries
-            .into_iter()
-            .find(|p| p.to_string_lossy().ends_with(suffix))?;
-
-        info!("Found library: {:?}", lib_path);
-
-        let abs_lib_path = std::fs::canonicalize(&lib_path).ok()?;
-        info!("Attempting to load absolute path: {:?}", abs_lib_path);
-
-        let container = unsafe {
-            match Container::load(&abs_lib_path) {
-                Ok(c) => c,
-                Err(e) => {
-                    error!("Failed to load library {:?}: {}", abs_lib_path, e);
-                    return None;
-                }
+            for p in &entries {
+                debug!("Checking file: {:?}", p);
             }
-        };
-        debug!("New plugin '{}' successfully registered", manifest.name);
-        Some(Self {
-            manifest,
-            container,
-        })
+
+            let lib_path = entries
+                .into_iter()
+                .find(|p| p.to_string_lossy().ends_with(suffix))?;
+
+            info!("Found library: {:?}", lib_path);
+
+            let abs_lib_path = std::fs::canonicalize(&lib_path).ok()?;
+            info!("Attempting to load absolute path: {:?}", abs_lib_path);
+
+            let container = unsafe {
+                match Container::load(&abs_lib_path) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        error!("Failed to load library {:?}: {}", abs_lib_path, e);
+                        return None;
+                    }
+                }
+            };
+            debug!("New plugin '{}' successfully registered", manifest.name);
+            Some(Self {
+                manifest,
+                backend: PluginBackend::SharedLib(container),
+            })
+        }
     }
 
     fn eval_version(&self) -> bool {
         self.manifest.version == env!("CARGO_PKG_VERSION")
     }
 
+    // --- Shared library methods
     pub fn decode(&self, path: &Path) -> Option<SharedPixelBuffer<Rgba8Pixel>> {
         if !self
             .manifest
@@ -106,22 +175,26 @@ impl Plugin {
             return None;
         }
 
-        let c_path = CString::new(path.to_str()?).ok()?;
-        let ffi_buffer = unsafe { self.container.load_image(c_path.as_ptr()) };
+        if let PluginBackend::SharedLib(container) = &self.backend {
+            let c_path = CString::new(path.to_str()?).ok()?;
+            let ffi_buffer = unsafe { container.load_image(c_path.as_ptr()) };
 
-        if ffi_buffer.data.is_null() {
-            return None;
+            if ffi_buffer.data.is_null() {
+                return None;
+            }
+
+            let pixel_slice =
+                unsafe { std::slice::from_raw_parts(ffi_buffer.data, ffi_buffer.len) };
+            let buffer = SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
+                pixel_slice,
+                ffi_buffer.width,
+                ffi_buffer.height,
+            );
+
+            unsafe { container.free_image(ffi_buffer) };
+            return Some(buffer);
         }
-
-        let pixel_slice = unsafe { std::slice::from_raw_parts(ffi_buffer.data, ffi_buffer.len) };
-        let buffer = SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
-            pixel_slice,
-            ffi_buffer.width,
-            ffi_buffer.height,
-        );
-
-        unsafe { self.container.free_image(ffi_buffer) };
-        Some(buffer)
+        None
     }
 
     pub fn encode(&self, path: &Path, buffer: &SharedPixelBuffer<Rgba8Pixel>) -> bool {
@@ -134,50 +207,166 @@ impl Plugin {
             return false;
         }
 
-        let c_path = CString::new(path.to_str().unwrap_or_default())
-            .ok()
-            .unwrap();
-        let ffi_buffer = ImageBuffer {
-            data: buffer.as_slice().as_ptr() as *mut u8,
-            len: buffer.as_slice().len() * 4,
-            width: buffer.width(),
-            height: buffer.height(),
-            channels: 4,
-        };
-        unsafe { self.container.save_image(c_path.as_ptr(), ffi_buffer) }
+        if let PluginBackend::SharedLib(container) = &self.backend {
+            let c_path = CString::new(path.to_str().unwrap_or_default())
+                .ok()
+                .unwrap();
+            let ffi_buffer = ImageBuffer {
+                data: buffer.as_slice().as_ptr() as *mut u8,
+                len: buffer.as_slice().len() * 4,
+                width: buffer.width(),
+                height: buffer.height(),
+                channels: 4,
+            };
+            unsafe { container.save_image(c_path.as_ptr(), ffi_buffer) };
+            return true;
+        }
+        false
     }
 
     pub fn get_info(&self) -> (String, String) {
-        let mut name = vec![0u8; 256];
-        let mut exts = vec![0u8; 256];
-        unsafe {
-            self.container.get_plugin_info(
-                name.as_mut_ptr() as *mut i8,
-                256,
-                exts.as_mut_ptr() as *mut i8,
-                256,
+        if let PluginBackend::SharedLib(container) = &self.backend {
+            let mut name = vec![0u8; 256];
+            let mut exts = vec![0u8; 256];
+            unsafe {
+                container.get_plugin_info(
+                    name.as_mut_ptr() as *mut i8,
+                    256,
+                    exts.as_mut_ptr() as *mut i8,
+                    256,
+                );
+            }
+            return (
+                String::from_utf8_lossy(&name)
+                    .trim_matches(char::from(0))
+                    .to_string(),
+                String::from_utf8_lossy(&exts)
+                    .trim_matches(char::from(0))
+                    .to_string(),
             );
         }
-        (
-            String::from_utf8_lossy(&name)
-                .trim_matches(char::from(0))
-                .to_string(),
-            String::from_utf8_lossy(&exts)
-                .trim_matches(char::from(0))
-                .to_string(),
-        )
+        (String::from(""), String::from(""))
     }
+    // --- Shared library methods
+
+    // --- IPC Methods ---
+    pub fn set_interactive_image(&self, buffer: &SharedPixelBuffer<Rgba8Pixel>) -> bool {
+        if let PluginBackend::Daemon {
+            stream,
+            shm_img,
+            shm_mask,
+            curr_width,
+            curr_height,
+        } = &self.backend
+        {
+            let width = buffer.width();
+            let height = buffer.height();
+            let size = (width * height * 4) as usize;
+            let mask_size = (width * height) as usize;
+
+            let img_mem = ShmemConf::new().size(size).create().unwrap();
+            let mask_mem = ShmemConf::new().size(mask_size).create().unwrap();
+
+            unsafe {
+                std::ptr::copy_nonoverlapping(
+                    buffer.as_slice().as_ptr() as *const u8,
+                    img_mem.as_ptr(),
+                    size,
+                );
+            }
+
+            let cmd = IpcCmd {
+                action: "set_image",
+                shm_name: Some(img_mem.get_os_id()),
+                width: Some(width),
+                height: Some(height),
+                x: None,
+                y: None,
+            };
+
+            let mut s = stream.lock().unwrap();
+            let mut payload = serde_json::to_string(&cmd).unwrap();
+            payload.push('\n');
+            s.write_all(payload.as_bytes()).unwrap();
+
+            // Wait for ACK
+            let mut ack = [0u8; 2];
+            s.read_exact(&mut ack).unwrap();
+
+            *curr_width.lock().unwrap() = width;
+            *curr_height.lock().unwrap() = height;
+            *shm_img.lock().unwrap() = Some(ShmemWrapper(img_mem));
+            *shm_mask.lock().unwrap() = Some(ShmemWrapper(mask_mem));
+            return true;
+        }
+        false
+    }
+
+    pub fn interactive_click(&self, x: u32, y: u32) -> Option<SharedPixelBuffer<Rgba8Pixel>> {
+        if let PluginBackend::Daemon {
+            stream,
+            shm_mask,
+            curr_width,
+            curr_height,
+            ..
+        } = &self.backend
+        {
+            let mask_guard = shm_mask.lock().unwrap();
+            let wrapper = mask_guard.as_ref()?;
+            let mask_name = wrapper.0.get_os_id().to_string();
+
+            let cmd = IpcCmd {
+                action: "click",
+                shm_name: Some(&mask_name),
+                width: None,
+                height: None,
+                x: Some(x),
+                y: Some(y),
+            };
+
+            let mut s = stream.lock().unwrap();
+            let mut payload = serde_json::to_string(&cmd).unwrap();
+            payload.push('\n');
+            s.write_all(payload.as_bytes()).unwrap();
+
+            let mut ack = [0u8; 2];
+            s.read_exact(&mut ack).unwrap();
+
+            // TODO: more efficiently
+            let w = *curr_width.lock().unwrap();
+            let h = *curr_height.lock().unwrap();
+            let size = (w * h) as usize;
+            let mask_data = unsafe { std::slice::from_raw_parts(wrapper.0.as_ptr(), size) };
+
+            let mut raw_bytes = Vec::with_capacity(size * 4);
+            for &val in mask_data.iter() {
+                if val > 0 {
+                    raw_bytes.extend_from_slice(&[255, 0, 0, 128]); // R, G, B, A
+                } else {
+                    raw_bytes.extend_from_slice(&[0, 0, 0, 0]);
+                }
+            }
+
+            return Some(SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
+                &raw_bytes, w, h,
+            ));
+        }
+        None
+    }
+    // --- IPC Methods ---
 }
 
 pub struct PluginManager {
     /// extension -> Plugin
     plugins: HashMap<String, Arc<Plugin>>,
+    interactive_plugins: Vec<Arc<Plugin>>,
 }
 
 impl PluginManager {
     pub fn new() -> Self {
         Self {
             plugins: HashMap::new(),
+            interactive_plugins: Vec::new(),
         }
     }
 
@@ -211,6 +400,10 @@ impl PluginManager {
         }
     }
 
+    pub fn get_interactive_plugin(&self) -> Option<Arc<Plugin>> {
+        self.interactive_plugins.first().cloned()
+    }
+
     fn register(&mut self, dir_path: PathBuf, manifest: PluginManifest) {
         let plugin = match Plugin::new(manifest.clone(), dir_path) {
             Some(p) => Arc::new(p),
@@ -242,6 +435,10 @@ impl PluginManager {
                         "Added encoding support for \"{:?}\" extension",
                         manifest.extensions
                     );
+                }
+                PluginCapability::Interactive => {
+                    self.interactive_plugins.push(plugin.clone());
+                    debug!("Added interactive plugin \"{}\"", manifest.name);
                 }
                 PluginCapability::Unknown => {
                     error!("Unknown plugin capability in {}: {:?}", manifest.name, cap);

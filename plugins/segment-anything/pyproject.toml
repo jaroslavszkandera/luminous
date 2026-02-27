@@ -1,0 +1,7 @@
+[project]
+name = "segment-anything"
+version = "0.1.0"
+description = "Segment Anything Model for Interactive Segmentation"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = ["numpy>=2.4.2", "segment-anything-py>=1.0.1"]

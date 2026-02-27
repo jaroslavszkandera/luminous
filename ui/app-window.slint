@@ -29,6 +29,7 @@ export component MainWindow inherits Window {
     callback request_prev_image();
     callback rotate_plus_90();
     callback rotate_minus_90();
+    callback request_segmentation(int, int);
 
     // Grid view Callbacks
     callback request_grid_data(int, int);
@@ -54,6 +55,7 @@ export component MainWindow inherits Window {
     in-out property <bool> is_fullscreen: false;
     in-out property <int> grid_cols: 5;
     in-out property <int> selected_count: 0;
+    in property <image> mask_overlay;
 
     public function return_focus() {
         key-handler.focus();
@@ -160,6 +162,7 @@ export component MainWindow inherits Window {
         curr_image_index: root.curr_image_index;
         curr_image_name: root.curr_image_name;
         total_images: root.grid_model.length;
+        mask_overlay: root.mask_overlay;
 
         request_next_image => {
             root.request_next_image();
@@ -172,6 +175,9 @@ export component MainWindow inherits Window {
         }
         rotate_minus_90 => {
             root.rotate_minus_90();
+        }
+        request_segmentation(x, y) => {
+            root.request_segmentation(x, y);
         }
         exit_full_view => {
             root.view_mode = ViewMode.grid;

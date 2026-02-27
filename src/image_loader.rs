@@ -28,7 +28,7 @@ pub struct ImageLoader {
     pub window_size: usize,
     cache_dir: Option<PathBuf>,
     bucket_resolution: AtomicU32,
-    plugin_manager: Arc<PluginManager>,
+    pub plugin_manager: Arc<PluginManager>,
 }
 
 impl ImageLoader {
@@ -222,6 +222,19 @@ impl ImageLoader {
             let full_handle = self.full_cache.lock().unwrap();
             if let Some(buffer) = full_handle.get(&index) {
                 debug!("Full cache hit: {}", index);
+
+                // TODO: Put into func
+                let pm = self.plugin_manager.clone();
+                let buf = buffer.clone();
+                let active = self.active_idx.clone();
+                self.pool.execute(move || {
+                    if index == active.load(Ordering::Relaxed) {
+                        if let Some(plugin) = pm.get_interactive_plugin() {
+                            plugin.set_interactive_image(&buf);
+                        }
+                    }
+                });
+                // Put into func
                 return Image::from_rgba8(buffer.clone());
             }
         }
@@ -242,6 +255,7 @@ impl ImageLoader {
             let cache_clone = self.full_cache.clone();
             let full_load_generation = self.full_load_generation.clone();
             let plugin_manager = self.plugin_manager.clone();
+            let active_idx = self.active_idx.clone();
 
             self.pool.execute(move || {
                 let current_generation = full_load_generation.load(Ordering::Relaxed);
@@ -261,6 +275,12 @@ impl ImageLoader {
                     path.file_name().unwrap_or_default(),
                     start.elapsed().as_secs_f64() * 1000.0
                 );
+
+                if index == active_idx.load(Ordering::Relaxed) {
+                    if let Some(plugin) = plugin_manager.get_interactive_plugin() {
+                        plugin.set_interactive_image(&buffer);
+                    }
+                }
 
                 cache_clone.lock().unwrap().insert(index, buffer.clone());
 
@@ -373,22 +393,24 @@ impl ImageLoader {
     }
 
     fn fetch_buffer(path: &Path, plugin_manager: &PluginManager) -> SharedPixelBuffer<Rgba8Pixel> {
-        if let Some(buffer) = plugin_manager.decode(path) {
-            return buffer;
-        }
+        let buffer = if let Some(buffer) = plugin_manager.decode(path) {
+            buffer
+        } else {
+            image::open(path)
+                .map(|dyn_img| {
+                    let rgba = dyn_img.to_rgba8();
+                    SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
+                        rgba.as_raw(),
+                        rgba.width(),
+                        rgba.height(),
+                    )
+                })
+                .unwrap_or_else(|e| {
+                    error!("Image load failed for {:?}: {}", path, e);
+                    get_placeholder()
+                })
+        };
 
-        image::open(path)
-            .map(|dyn_img| {
-                let rgba = dyn_img.to_rgba8();
-                SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
-                    rgba.as_raw(),
-                    rgba.width(),
-                    rgba.height(),
-                )
-            })
-            .unwrap_or_else(|e| {
-                error!("Image load failed for {:?}: {}", path, e);
-                get_placeholder()
-            })
+        buffer
     }
 }

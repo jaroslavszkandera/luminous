@@ -140,12 +140,14 @@ impl AppController {
 
         let on_loaded = move |ui: MainWindow, img: Image| {
             ui.set_full_view_image(img);
+            ui.set_mask_overlay(Image::default());
         };
 
         let display_img = loader.load_full_progressive(index, weak.clone(), on_loaded);
 
         if let Some(ui) = weak.upgrade() {
             ui.set_full_view_image(display_img);
+            ui.set_mask_overlay(Image::default());
             ui.set_curr_image_index(index as i32);
             ui.set_curr_image_name(loader.get_curr_image_file_name(index).into());
         }
@@ -316,6 +318,21 @@ impl AppController {
                 }
             }
         }
+    }
+
+    fn handle_segmentation(&self, x: u32, y: u32) {
+        let weak = self.window_weak.clone();
+        let loader = self.loader.clone();
+
+        self.loader.pool.execute(move || {
+            if let Some(plugin) = loader.plugin_manager.get_interactive_plugin() {
+                if let Some(mask_buf) = plugin.interactive_click(x, y) {
+                    let _ = weak.upgrade_in_event_loop(move |ui| {
+                        ui.set_mask_overlay(Image::from_rgba8(mask_buf));
+                    });
+                }
+            }
+        });
     }
 }
 
@@ -496,6 +513,12 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
     main_window.on_rotate_plus_90(move || c.borrow().handle_rotate(90));
     let c = controller.clone();
     main_window.on_rotate_minus_90(move || c.borrow().handle_rotate(-90));
+
+    let c = controller.clone();
+    main_window.on_request_segmentation(move |x, y| {
+        debug!("Received [{},{}]", x, y);
+        c.borrow().handle_segmentation(x as u32, y as u32);
+    });
 
     main_window.on_quit_app(move || {
         let _ = slint::quit_event_loop();
