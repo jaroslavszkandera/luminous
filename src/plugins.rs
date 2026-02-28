@@ -9,6 +9,7 @@ use std::fs;
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};
+use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 
 // Expected ABI for shared libs
@@ -86,6 +87,7 @@ pub enum PluginBackend {
         shm_mask: Mutex<Option<ShmemWrapper>>,
         curr_width: Mutex<u32>,
         curr_height: Mutex<u32>,
+        process: Mutex<Option<Child>>,
     },
 }
 
@@ -98,12 +100,73 @@ impl Plugin {
     pub fn new(manifest: PluginManifest, dir_path: PathBuf) -> Option<Self> {
         if manifest.backend == "daemon" {
             // Plugin through IPC and shared memory
-            let port = manifest.daemon_port.unwrap_or(50021);
-            let stream = TcpStream::connect(("127.0.0.1", port))
-                .map_err(|e| {
-                    error!("Failed to connect to daemon {}: {}", manifest.name, e);
-                })
-                .ok()?;
+            let port = manifest.daemon_port.unwrap_or(50051);
+            let mut child_process = None;
+
+            if let Some(interpreter) = &manifest.interpreter {
+                let parts: Vec<&str> = interpreter.split_whitespace().collect();
+                let cmd_exe = parts[0];
+                let cmd_args = &parts[1..];
+                let script_name = "main.py"; // tmp
+
+                info!(
+                    "Starting daemon process: {} {} {}",
+                    cmd_exe,
+                    cmd_args.join(" "),
+                    script_name
+                );
+
+                match Command::new(cmd_exe)
+                    .args(cmd_args)
+                    .arg(&script_name)
+                    .current_dir(&dir_path)
+                    .stdout(Stdio::inherit())
+                    .stderr(Stdio::inherit())
+                    .spawn()
+                {
+                    Ok(c) => child_process = Some(c),
+                    Err(e) => {
+                        error!("Failed to launch daemon: {}", e);
+                        return None;
+                    }
+                }
+            }
+
+            // Allow python to load the model before connecting
+            let mut stream_opt = None;
+            let attempt_cnt = 15; // Up to 7.5 seconds
+            for i in 0..attempt_cnt {
+                match TcpStream::connect(("127.0.0.1", port)) {
+                    Ok(s) => {
+                        stream_opt = Some(s);
+                        break;
+                    }
+                    Err(_) => {
+                        debug!(
+                            "Waiting for daemon {} to bind on port {} (Attempt {}/{})...",
+                            manifest.name,
+                            port,
+                            i + 1,
+                            attempt_cnt
+                        );
+                        std::thread::sleep(std::time::Duration::from_millis(500));
+                    }
+                }
+            }
+
+            let stream = match stream_opt {
+                Some(s) => s,
+                None => {
+                    error!(
+                        "Failed to connect to daemon '{}'. Did the python script crash?",
+                        manifest.name
+                    );
+                    if let Some(mut c) = child_process {
+                        let _ = c.kill();
+                    }
+                    return None;
+                }
+            };
 
             info!("Connected to daemon plugin '{}'", manifest.name);
             return Some(Self {
@@ -114,6 +177,7 @@ impl Plugin {
                     shm_mask: Mutex::new(None),
                     curr_width: Mutex::new(0),
                     curr_height: Mutex::new(0),
+                    process: Mutex::new(child_process), // Save the child process
                 },
             });
         } else {
@@ -257,6 +321,7 @@ impl Plugin {
             shm_mask,
             curr_width,
             curr_height,
+            ..
         } = &self.backend
         {
             let width = buffer.width();
@@ -332,7 +397,7 @@ impl Plugin {
             let mut ack = [0u8; 2];
             s.read_exact(&mut ack).unwrap();
 
-            // TODO: more efficiently
+            // Build buffer from shared memory
             let w = *curr_width.lock().unwrap();
             let h = *curr_height.lock().unwrap();
             let size = (w * h) as usize;
@@ -354,6 +419,18 @@ impl Plugin {
         None
     }
     // --- IPC Methods ---
+}
+
+impl Drop for Plugin {
+    fn drop(&mut self) {
+        if let PluginBackend::Daemon { process, .. } = &self.backend {
+            if let Some(mut child) = process.lock().unwrap().take() {
+                info!("Shutting down process for plugin '{}'", self.manifest.name);
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+        }
+    }
 }
 
 pub struct PluginManager {
