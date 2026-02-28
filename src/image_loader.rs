@@ -222,19 +222,6 @@ impl ImageLoader {
             let full_handle = self.full_cache.lock().unwrap();
             if let Some(buffer) = full_handle.get(&index) {
                 debug!("Full cache hit: {}", index);
-
-                // TODO: Put into func
-                let pm = self.plugin_manager.clone();
-                let buf = buffer.clone();
-                let active = self.active_idx.clone();
-                self.pool.execute(move || {
-                    if index == active.load(Ordering::Relaxed) {
-                        if let Some(plugin) = pm.get_interactive_plugin() {
-                            plugin.set_interactive_image(&buf);
-                        }
-                    }
-                });
-                // Put into func
                 return Image::from_rgba8(buffer.clone());
             }
         }
@@ -255,7 +242,7 @@ impl ImageLoader {
             let cache_clone = self.full_cache.clone();
             let full_load_generation = self.full_load_generation.clone();
             let plugin_manager = self.plugin_manager.clone();
-            let active_idx = self.active_idx.clone();
+            // let active_idx = self.active_idx.clone();
 
             self.pool.execute(move || {
                 let current_generation = full_load_generation.load(Ordering::Relaxed);
@@ -275,12 +262,6 @@ impl ImageLoader {
                     path.file_name().unwrap_or_default(),
                     start.elapsed().as_secs_f64() * 1000.0
                 );
-
-                if index == active_idx.load(Ordering::Relaxed) {
-                    if let Some(plugin) = plugin_manager.get_interactive_plugin() {
-                        plugin.set_interactive_image(&buffer);
-                    }
-                }
 
                 cache_clone.lock().unwrap().insert(index, buffer.clone());
 

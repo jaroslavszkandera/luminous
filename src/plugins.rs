@@ -79,16 +79,203 @@ pub struct ShmemWrapper(pub Shmem);
 unsafe impl Send for ShmemWrapper {}
 unsafe impl Sync for ShmemWrapper {}
 
+pub struct ActiveShmem {
+    pub img: ShmemWrapper,
+    pub mask: ShmemWrapper,
+    pub width: u32,
+    pub height: u32,
+}
+
+pub struct InteractiveDaemon {
+    pub manifest_name: String,
+    stream: Arc<Mutex<Option<TcpStream>>>,
+    process: Mutex<Option<Child>>,
+    active_shm: Arc<Mutex<Option<ActiveShmem>>>,
+    pending_image: Arc<Mutex<Option<SharedPixelBuffer<Rgba8Pixel>>>>,
+}
+
+impl InteractiveDaemon {
+    pub fn new(manifest: &PluginManifest, dir_path: &Path) -> Arc<Self> {
+        let port = manifest.daemon_port.unwrap_or(50051);
+        let mut process = None;
+
+        if let Some(interpreter) = &manifest.interpreter {
+            let parts: Vec<&str> = interpreter.split_whitespace().collect();
+            if let Some((&cmd_exe, cmd_args)) = parts.split_first() {
+                let script_name = "main.py"; // tmp
+                info!(
+                    "Starting daemon process: {} {:?} {}",
+                    cmd_exe, cmd_args, script_name
+                );
+
+                process = Command::new(cmd_exe)
+                    .args(cmd_args)
+                    .arg(script_name)
+                    .current_dir(dir_path)
+                    .stdout(Stdio::inherit())
+                    .stderr(Stdio::inherit())
+                    .spawn()
+                    .ok();
+            }
+        }
+
+        let daemon = Arc::new(Self {
+            manifest_name: manifest.name.clone(),
+            stream: Arc::new(Mutex::new(None)),
+            process: Mutex::new(process),
+            active_shm: Arc::new(Mutex::new(None)),
+            pending_image: Arc::new(Mutex::new(None)),
+        });
+
+        let stream_clone = daemon.stream.clone();
+        let pending_clone = daemon.pending_image.clone();
+        let active_shm_clone = daemon.active_shm.clone();
+
+        std::thread::spawn(move || {
+            for _ in 0..20 {
+                if let Ok(mut s) = TcpStream::connect(("127.0.0.1", port)) {
+                    info!("Successfully connected to daemon on port {}", port);
+                    if let Some(img) = pending_clone.lock().unwrap().take() {
+                        let _ = Self::send_image(&mut s, &active_shm_clone, &img);
+                    }
+                    *stream_clone.lock().unwrap() = Some(s);
+                    return;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(500));
+            }
+            error!("Failed to connect to daemon after 10 seconds.");
+        });
+
+        daemon
+    }
+
+    fn send_image(
+        stream: &mut TcpStream,
+        active_shm: &Mutex<Option<ActiveShmem>>,
+        buffer: &SharedPixelBuffer<Rgba8Pixel>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let width = buffer.width();
+        let height = buffer.height();
+        let size = (width * height * 4) as usize;
+        let mask_size = (width * height) as usize;
+
+        let img_mem = ShmemConf::new().size(size).create()?;
+        let mask_mem = ShmemConf::new().size(mask_size).create()?;
+
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                buffer.as_slice().as_ptr() as *const u8,
+                img_mem.as_ptr(),
+                size,
+            );
+        }
+
+        let cmd = IpcCmd {
+            action: "set_image",
+            shm_name: Some(img_mem.get_os_id()),
+            width: Some(width),
+            height: Some(height),
+            x: None,
+            y: None,
+        };
+
+        let mut payload = serde_json::to_string(&cmd)?;
+        payload.push('\n');
+        stream.write_all(payload.as_bytes())?;
+
+        let mut ack = [0u8; 2];
+        stream.read_exact(&mut ack)?;
+
+        *active_shm.lock().unwrap() = Some(ActiveShmem {
+            img: ShmemWrapper(img_mem),
+            mask: ShmemWrapper(mask_mem),
+            width,
+            height,
+        });
+
+        Ok(())
+    }
+
+    pub fn set_interactive_image(&self, buffer: &SharedPixelBuffer<Rgba8Pixel>) {
+        let mut stream_guard = self.stream.lock().unwrap();
+        if let Some(s) = stream_guard.as_mut() {
+            if let Err(e) = Self::send_image(s, &self.active_shm, buffer) {
+                error!("Daemon image sync failed: {}", e);
+            }
+        } else {
+            *self.pending_image.lock().unwrap() = Some(buffer.clone());
+        }
+    }
+
+    pub fn interactive_click(&self, x: u32, y: u32) -> Option<SharedPixelBuffer<Rgba8Pixel>> {
+        debug!("Interative click requested: [{},{}]", x, y);
+        let shm_guard = self.active_shm.lock().unwrap();
+        let active = shm_guard.as_ref().or_else(|| {
+            error!("Click received but no active image SHM found in daemon");
+            None
+        })?;
+
+        let cmd = IpcCmd {
+            action: "click",
+            shm_name: Some(active.mask.0.get_os_id()),
+            width: None,
+            height: None,
+            x: Some(x),
+            y: Some(y),
+        };
+
+        let mut stream_guard = self.stream.lock().unwrap();
+        let s = stream_guard.as_mut().or_else(|| {
+            error!("Daemon stream not connected");
+            None
+        })?;
+
+        let mut payload = serde_json::to_string(&cmd).ok()?;
+        payload.push('\n');
+        if let Err(e) = s.write_all(payload.as_bytes()) {
+            error!("Failed to send click to daemon: {}", e);
+            return None;
+        }
+
+        let mut ack = [0u8; 2];
+        if let Err(e) = s.read_exact(&mut ack) {
+            error!("Daemon failed to ACK click: {}", e);
+            return None;
+        }
+
+        let w = active.width;
+        let h = active.height;
+        let size = (w * h) as usize;
+        let mask_data = unsafe { std::slice::from_raw_parts(active.mask.0.as_ptr(), size) };
+
+        let mut raw_bytes = Vec::with_capacity(size * 4);
+        for &val in mask_data.iter() {
+            if val > 0 {
+                raw_bytes.extend_from_slice(&[255, 0, 0, 128]);
+            } else {
+                raw_bytes.extend_from_slice(&[0, 0, 0, 0]);
+            }
+        }
+
+        Some(SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
+            &raw_bytes, w, h,
+        ))
+    }
+}
+
+impl Drop for InteractiveDaemon {
+    fn drop(&mut self) {
+        if let Some(mut child) = self.process.lock().unwrap().take() {
+            info!("Shutting down daemon process for '{}'", self.manifest_name);
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+}
+
 pub enum PluginBackend {
     SharedLib(Container<ImagePluginApi>),
-    Daemon {
-        stream: Mutex<TcpStream>,
-        shm_img: Mutex<Option<ShmemWrapper>>,
-        shm_mask: Mutex<Option<ShmemWrapper>>,
-        curr_width: Mutex<u32>,
-        curr_height: Mutex<u32>,
-        process: Mutex<Option<Child>>,
-    },
+    Daemon(Arc<InteractiveDaemon>),
 }
 
 pub struct Plugin {
@@ -100,86 +287,10 @@ impl Plugin {
     pub fn new(manifest: PluginManifest, dir_path: PathBuf) -> Option<Self> {
         if manifest.backend == "daemon" {
             // Plugin through IPC and shared memory
-            let port = manifest.daemon_port.unwrap_or(50051);
-            let mut child_process = None;
-
-            if let Some(interpreter) = &manifest.interpreter {
-                let parts: Vec<&str> = interpreter.split_whitespace().collect();
-                let cmd_exe = parts[0];
-                let cmd_args = &parts[1..];
-                let script_name = "main.py"; // tmp
-
-                info!(
-                    "Starting daemon process: {} {} {}",
-                    cmd_exe,
-                    cmd_args.join(" "),
-                    script_name
-                );
-
-                match Command::new(cmd_exe)
-                    .args(cmd_args)
-                    .arg(&script_name)
-                    .current_dir(&dir_path)
-                    .stdout(Stdio::inherit())
-                    .stderr(Stdio::inherit())
-                    .spawn()
-                {
-                    Ok(c) => child_process = Some(c),
-                    Err(e) => {
-                        error!("Failed to launch daemon: {}", e);
-                        return None;
-                    }
-                }
-            }
-
-            // Allow python to load the model before connecting
-            let mut stream_opt = None;
-            let attempt_cnt = 15; // Up to 7.5 seconds
-            for i in 0..attempt_cnt {
-                match TcpStream::connect(("127.0.0.1", port)) {
-                    Ok(s) => {
-                        stream_opt = Some(s);
-                        break;
-                    }
-                    Err(_) => {
-                        debug!(
-                            "Waiting for daemon {} to bind on port {} (Attempt {}/{})...",
-                            manifest.name,
-                            port,
-                            i + 1,
-                            attempt_cnt
-                        );
-                        std::thread::sleep(std::time::Duration::from_millis(500));
-                    }
-                }
-            }
-
-            let stream = match stream_opt {
-                Some(s) => s,
-                None => {
-                    error!(
-                        "Failed to connect to daemon '{}'. Did the python script crash?",
-                        manifest.name
-                    );
-                    if let Some(mut c) = child_process {
-                        let _ = c.kill();
-                    }
-                    return None;
-                }
-            };
-
-            info!("Connected to daemon plugin '{}'", manifest.name);
-            return Some(Self {
-                manifest,
-                backend: PluginBackend::Daemon {
-                    stream: Mutex::new(stream),
-                    shm_img: Mutex::new(None),
-                    shm_mask: Mutex::new(None),
-                    curr_width: Mutex::new(0),
-                    curr_height: Mutex::new(0),
-                    process: Mutex::new(child_process), // Save the child process
-                },
-            });
+            Some(Self {
+                manifest: manifest.clone(),
+                backend: PluginBackend::Daemon(InteractiveDaemon::new(&manifest, &dir_path)),
+            })
         } else {
             // Shared library plugin
             let suffix = std::env::consts::DLL_SUFFIX;
@@ -314,123 +425,20 @@ impl Plugin {
     // --- Shared library methods
 
     // --- IPC Methods ---
-    pub fn set_interactive_image(&self, buffer: &SharedPixelBuffer<Rgba8Pixel>) -> bool {
-        if let PluginBackend::Daemon {
-            stream,
-            shm_img,
-            shm_mask,
-            curr_width,
-            curr_height,
-            ..
-        } = &self.backend
-        {
-            let width = buffer.width();
-            let height = buffer.height();
-            let size = (width * height * 4) as usize;
-            let mask_size = (width * height) as usize;
-
-            let img_mem = ShmemConf::new().size(size).create().unwrap();
-            let mask_mem = ShmemConf::new().size(mask_size).create().unwrap();
-
-            unsafe {
-                std::ptr::copy_nonoverlapping(
-                    buffer.as_slice().as_ptr() as *const u8,
-                    img_mem.as_ptr(),
-                    size,
-                );
-            }
-
-            let cmd = IpcCmd {
-                action: "set_image",
-                shm_name: Some(img_mem.get_os_id()),
-                width: Some(width),
-                height: Some(height),
-                x: None,
-                y: None,
-            };
-
-            let mut s = stream.lock().unwrap();
-            let mut payload = serde_json::to_string(&cmd).unwrap();
-            payload.push('\n');
-            s.write_all(payload.as_bytes()).unwrap();
-
-            // Wait for ACK
-            let mut ack = [0u8; 2];
-            s.read_exact(&mut ack).unwrap();
-
-            *curr_width.lock().unwrap() = width;
-            *curr_height.lock().unwrap() = height;
-            *shm_img.lock().unwrap() = Some(ShmemWrapper(img_mem));
-            *shm_mask.lock().unwrap() = Some(ShmemWrapper(mask_mem));
-            return true;
+    pub fn set_interactive_image(&self, buffer: &SharedPixelBuffer<Rgba8Pixel>) {
+        if let PluginBackend::Daemon(daemon) = &self.backend {
+            daemon.set_interactive_image(buffer);
         }
-        false
     }
 
     pub fn interactive_click(&self, x: u32, y: u32) -> Option<SharedPixelBuffer<Rgba8Pixel>> {
-        if let PluginBackend::Daemon {
-            stream,
-            shm_mask,
-            curr_width,
-            curr_height,
-            ..
-        } = &self.backend
-        {
-            let mask_guard = shm_mask.lock().unwrap();
-            let wrapper = mask_guard.as_ref()?;
-            let mask_name = wrapper.0.get_os_id().to_string();
-
-            let cmd = IpcCmd {
-                action: "click",
-                shm_name: Some(&mask_name),
-                width: None,
-                height: None,
-                x: Some(x),
-                y: Some(y),
-            };
-
-            let mut s = stream.lock().unwrap();
-            let mut payload = serde_json::to_string(&cmd).unwrap();
-            payload.push('\n');
-            s.write_all(payload.as_bytes()).unwrap();
-
-            let mut ack = [0u8; 2];
-            s.read_exact(&mut ack).unwrap();
-
-            // Build buffer from shared memory
-            let w = *curr_width.lock().unwrap();
-            let h = *curr_height.lock().unwrap();
-            let size = (w * h) as usize;
-            let mask_data = unsafe { std::slice::from_raw_parts(wrapper.0.as_ptr(), size) };
-
-            let mut raw_bytes = Vec::with_capacity(size * 4);
-            for &val in mask_data.iter() {
-                if val > 0 {
-                    raw_bytes.extend_from_slice(&[255, 0, 0, 128]); // R, G, B, A
-                } else {
-                    raw_bytes.extend_from_slice(&[0, 0, 0, 0]);
-                }
-            }
-
-            return Some(SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
-                &raw_bytes, w, h,
-            ));
+        if let PluginBackend::Daemon(daemon) = &self.backend {
+            daemon.interactive_click(x, y)
+        } else {
+            None
         }
-        None
     }
     // --- IPC Methods ---
-}
-
-impl Drop for Plugin {
-    fn drop(&mut self) {
-        if let PluginBackend::Daemon { process, .. } = &self.backend {
-            if let Some(mut child) = process.lock().unwrap().take() {
-                info!("Shutting down process for plugin '{}'", self.manifest.name);
-                let _ = child.kill();
-                let _ = child.wait();
-            }
-        }
-    }
 }
 
 pub struct PluginManager {

@@ -138,7 +138,18 @@ impl AppController {
         let weak = self.window_weak.clone();
         let loader = self.loader.clone();
 
+        self.loader.active_idx.store(index, Ordering::SeqCst);
+
+        let loader_clone = loader.clone();
         let on_loaded = move |ui: MainWindow, img: Image| {
+            let loader_bg = loader_clone.clone();
+            loader_clone.pool.execute(move || {
+                if let Some(plugin) = loader_bg.plugin_manager.get_interactive_plugin() {
+                    if let Some(pixel_buffer) = loader_bg.get_curr_active_buffer() {
+                        plugin.set_interactive_image(&pixel_buffer);
+                    }
+                }
+            });
             ui.set_full_view_image(img);
             ui.set_mask_overlay(Image::default());
         };
@@ -146,6 +157,14 @@ impl AppController {
         let display_img = loader.load_full_progressive(index, weak.clone(), on_loaded);
 
         if let Some(ui) = weak.upgrade() {
+            let loader_bg = loader.clone();
+            loader.pool.execute(move || {
+                if let Some(plugin) = loader_bg.plugin_manager.get_interactive_plugin() {
+                    if let Some(pixel_buffer) = loader_bg.get_curr_active_buffer() {
+                        plugin.set_interactive_image(&pixel_buffer);
+                    }
+                }
+            });
             ui.set_full_view_image(display_img);
             ui.set_mask_overlay(Image::default());
             ui.set_curr_image_index(index as i32);
