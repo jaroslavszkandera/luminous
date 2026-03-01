@@ -1,9 +1,12 @@
 import json
+import os
 import socket
+import sys
 from multiprocessing import resource_tracker, shared_memory
 from time import time
 
 import numpy as np
+import torch
 from segment_anything import SamPredictor, sam_model_registry
 
 HOST = "127.0.0.1"
@@ -12,19 +15,29 @@ PORT = 50021
 
 def main():
     print("Loading SAM model...")
-    # TODO: Add missing model exeption
-    sam = sam_model_registry["vit_b"](checkpoint="sam_vit_b_01ec64.pth")
+    checkpoint_path = "sam_vit_b_01ec64.pth"
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"Using {device=}")
+
+    if not os.path.exists(checkpoint_path):
+        print(f"ERROR: SAM checkpoint not found at {os.path.abspath(checkpoint_path)}")
+        print(
+            f"Download '{checkpoint_path}' from: 'https://github.com/facebookresearch/segment-anything?tab=readme-ov-file#model-checkpoints'"
+        )
+        sys.exit(1)
+
+    sam = sam_model_registry["vit_b"](checkpoint=checkpoint_path).to(device=device)
     predictor = SamPredictor(sam)
 
-    cur_img_w: int = 0
+    curr_img_w: int = 0
     curr_img_h: int = 0
-    shm: shared_memory.SharedMemory = None
-    mask_shm: shared_memory.SharedMemory = None
 
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             s.bind((HOST, PORT))
-            s.listen()
+            s.listen(1)
             print(f"SAM Daemon listening on {HOST}:{PORT}")
 
             conn, addr = s.accept()
@@ -44,59 +57,62 @@ def main():
                         if not line:
                             continue
 
+                    try:
                         cmd = json.loads(line)
-                        print(f"{cmd=}")
+                        action = cmd.get("action")
 
-                        if cmd["action"] == "set_image":
-                            cur_img_w = cmd["width"]
+                        if action == "set_image":
+                            curr_img_w = cmd["width"]
                             curr_img_h = cmd["height"]
 
-                            shm_name = cmd["shm_name"]
-                            shm = shared_memory.SharedMemory(name=shm_name)
+                            shm = shared_memory.SharedMemory(name=cmd["shm_name"])
                             resource_tracker.unregister(shm._name, "shared_memory")
 
                             img_array = np.ndarray(
-                                (curr_img_h, cur_img_w, 4),
+                                (curr_img_h, curr_img_w, 4),
                                 dtype=np.uint8,
                                 buffer=shm.buf,
                             )
-                            start = time()
-                            print("Setting image for predictor")
-                            predictor.set_image(img_array[:, :, :3])
-                            print(f"Image for predictor set in {time() - start:.3f} s")
-                            shm.close()
 
-                            print("Sending ACK")
+                            start = time()
+                            predictor.set_image(img_array[:, :, :3])
+                            print(f"Embedding generated in {time() - start:.3f}s")
+
+                            shm.close()
                             conn.sendall(b"OK")
 
-                        elif cmd["action"] == "click":
-                            x, y = cmd["x"], cmd["y"]
-                            shm_mask_name = cmd["shm_name"]
-                            points = np.array([[x, y]])
-                            labels = np.array([1])  # 1 = foreground selection
+                        elif action == "click":
+                            if (
+                                not hasattr(predictor, "features")
+                                or predictor.features is None
+                            ):
+                                print("BUSY")
+                                conn.sendall(b"BY")
+                                continue
 
+                            x, y = cmd["x"], cmd["y"]
                             masks, _, _ = predictor.predict(
-                                point_coords=points,
-                                point_labels=labels,
+                                point_coords=np.array([[x, y]]),
+                                point_labels=np.array([1]),
                                 multimask_output=False,
                             )
 
-                            mask_shm = shared_memory.SharedMemory(name=shm_mask_name)
-                            resource_tracker.unregister(mask_shm._name, "shared_memory")
+                            m_shm = shared_memory.SharedMemory(name=cmd["shm_name"])
+                            resource_tracker.unregister(m_shm._name, "shared_memory")
+
                             mask_out = np.ndarray(
-                                (curr_img_h, cur_img_w),
+                                (curr_img_h, curr_img_w),
                                 dtype=np.uint8,
-                                buffer=mask_shm.buf,
+                                buffer=m_shm.buf,
                             )
-
-                            start = time()
-                            print("Sending mask...")
                             np.copyto(mask_out, (masks[0] * 255).astype(np.uint8))
-                            print(f"Mask sent in {time() - start:.3f} s")
-                            mask_shm.close()
 
-                            print("Sending ACK")
+                            m_shm.close()
                             conn.sendall(b"OK")
+
+                    except Exception as e:
+                        print(f"Error processing command: {e}")
+                        conn.sendall(b"ER")
     finally:
         print("Exiting SAM...")
 

@@ -4,4 +4,29 @@ version = "0.1.0"
 description = "Segment Anything Model for Interactive Segmentation"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = ["numpy>=2.4.2", "segment-anything-py>=1.0.1"]
+dependencies = [
+  "numpy>=2.4.2",
+  "segment-anything-py>=1.0.1",
+  "torch>=2.10.0",
+  "torchvision>=0.25.0",
+]
+
+[tool.uv.sources]
+torch = [
+  { index = "pytorch-cpu", marker = "sys_platform != 'linux'" },
+  { index = "pytorch-cu126", marker = "sys_platform == 'linux'" },
+]
+torchvision = [
+  { index = "pytorch-cpu", marker = "sys_platform != 'linux'" },
+  { index = "pytorch-cu126", marker = "sys_platform == 'linux'" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
