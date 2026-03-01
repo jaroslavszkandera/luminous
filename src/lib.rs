@@ -360,6 +360,7 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
 
     if !config.safe_mode {
         plugin_manager.discover(Path::new("plugins"));
+    } else {
         info!("Starting with safe mode");
     }
     let extra_exts = plugin_manager.get_supported_extensions();
