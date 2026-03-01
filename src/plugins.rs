@@ -207,6 +207,7 @@ impl InteractiveDaemon {
         }
     }
 
+    // FIX: communication will stop working if click request is send when image is being sent
     pub fn interactive_click(&self, x: u32, y: u32) -> Option<SharedPixelBuffer<Rgba8Pixel>> {
         debug!("Interative click requested: [{},{}]", x, y);
         let shm_guard = self.active_shm.lock().unwrap();

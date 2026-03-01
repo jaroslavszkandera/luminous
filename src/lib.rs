@@ -10,7 +10,7 @@ use fs_scan::ScanResult;
 use image_loader::ImageLoader;
 use plugins::PluginManager;
 
-use log::debug;
+use log::{debug, info};
 use slint::{Image, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, VecModel};
 use std::cell::RefCell;
 use std::cmp;
@@ -358,7 +358,10 @@ impl AppController {
 pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
     let mut plugin_manager = plugins::PluginManager::new();
 
-    plugin_manager.discover(Path::new("plugins"));
+    if !config.safe_mode {
+        plugin_manager.discover(Path::new("plugins"));
+        info!("Starting with safe mode");
+    }
     let extra_exts = plugin_manager.get_supported_extensions();
     let scan = fs_scan::scan(&config.path, &extra_exts);
     if scan.paths.is_empty() {

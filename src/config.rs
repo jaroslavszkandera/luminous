@@ -14,6 +14,7 @@ pub struct Config {
     pub window_size: usize,
     pub background: Color,
     pub bindings: HashMap<String, String>,
+    pub safe_mode: bool,
 }
 
 #[derive(Parser, Debug)]
@@ -26,18 +27,21 @@ struct Cli {
     #[arg(short, long)]
     log: Option<String>,
     /// Number of worker threads
-    /// Defaults to the number of CPUs available
+    /// Defaults to the number of CPUs available or when 0 is specified
     #[arg(short, long)]
     threads: Option<usize>,
     /// Custom path to a config file
     #[arg(long)]
     config_file: Option<PathBuf>,
+    /// Cache size in full view
     #[arg(long)]
-    // Cache size in full view
     window_size: Option<usize>,
+    /// Background window color (RGB hexadecimal (with and without `#` prefix) format)
     #[arg(long)]
-    // Background window color
     background: Option<String>,
+    /// Start without plugins
+    #[arg(long)]
+    safe_mode: bool,
 }
 
 #[derive(Deserialize, Default)]
@@ -84,6 +88,8 @@ impl Config {
             bindings.extend(user_bindings);
         }
 
+        let safe_mode = cli.safe_mode;
+
         Config {
             path,
             log,
@@ -91,6 +97,7 @@ impl Config {
             window_size,
             background,
             bindings,
+            safe_mode,
         }
     }
 
