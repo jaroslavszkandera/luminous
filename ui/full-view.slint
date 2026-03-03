@@ -6,6 +6,12 @@ export enum MouseModeFull {
     segment,
 }
 
+export enum ImgFmt {
+    png,
+    jpeg,
+    webp,
+}
+
 export component FullView inherits TouchArea {
     in property <image> current_image;
     in property <int> curr_image_index;
@@ -20,6 +26,7 @@ export component FullView inherits TouchArea {
     callback rotate_minus_90();
     callback exit_full_view();
     callback request_segmentation(int, int);
+    callback save_with_format(ImgFmt);
 
     width: 100%;
     height: 100%;
@@ -258,6 +265,31 @@ export component FullView inherits TouchArea {
                     title: @tr("Reset zoom");
                     activated => {
                         root.reset_zoom();
+                    }
+                }
+
+                // TODO: Add more formats
+                Menu {
+                    title: @tr("Save with format");
+                    MenuItem {
+                        title: @tr("png");
+                        activated => {
+                            root.save_with_format(ImgFmt.png);
+                        }
+                    }
+
+                    MenuItem {
+                        title: @tr("jpeg");
+                        activated => {
+                            root.save_with_format(ImgFmt.jpeg);
+                        }
+                    }
+
+                    MenuItem {
+                        title: @tr("webp");
+                        activated => {
+                            root.save_with_format(ImgFmt.webp);
+                        }
                     }
                 }
             }

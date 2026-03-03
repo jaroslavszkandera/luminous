@@ -3,11 +3,13 @@ slint::include_modules!();
 pub mod config;
 pub mod fs_scan;
 mod image_loader;
+pub mod image_processing;
 pub mod plugins;
 
 use config::Config;
 use fs_scan::ScanResult;
 use image_loader::ImageLoader;
+use image_processing::save_image;
 use plugins::PluginManager;
 
 use log::{debug, info};
@@ -395,6 +397,8 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
 
     // Callbacks
 
+    // Grid View Callbacks
+
     let c = controller.clone();
     main_window.on_request_grid_data(move |start, count| {
         c.borrow_mut()
@@ -527,6 +531,8 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
         );
     });
 
+    // Full View Callbacks
+
     let c = controller.clone();
     main_window.on_request_next_image(move || c.borrow().handle_navigate(1));
     let c = controller.clone();
@@ -536,12 +542,36 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
     main_window.on_rotate_plus_90(move || c.borrow().handle_rotate(90));
     let c = controller.clone();
     main_window.on_rotate_minus_90(move || c.borrow().handle_rotate(-90));
+    let c = controller.clone();
+    main_window.on_save_with_format(move |format| {
+        let (img, img_path, weak_ui) = {
+            let c_ref = c.borrow();
+            let loader = &c_ref.loader;
+            let active_idx = loader.active_idx.load(Ordering::Relaxed);
+
+            (
+                loader.get_curr_active_buffer(),
+                loader.paths.get(active_idx).cloned(),
+                c_ref.window_weak.clone(),
+            )
+        };
+
+        save_image(img, img_path, format);
+        slint::invoke_from_event_loop(move || {
+            if let Some(ui) = weak_ui.upgrade() {
+                ui.invoke_return_focus();
+            }
+        })
+        .unwrap();
+    });
 
     let c = controller.clone();
     main_window.on_request_segmentation(move |x, y| {
         debug!("Received [{},{}]", x, y);
         c.borrow().handle_segmentation(x as u32, y as u32);
     });
+
+    // Other Callbacks
 
     main_window.on_quit_app(move || {
         let _ = slint::quit_event_loop();

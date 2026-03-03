@@ -1,5 +1,5 @@
 import { GridView, GridItem } from "grid-view.slint";
-import { FullView, MouseModeFull } from "full-view.slint";
+import { FullView, MouseModeFull, ImgFmt } from "full-view.slint";
 
 export enum ViewMode {
     full,
@@ -30,6 +30,7 @@ export component MainWindow inherits Window {
     callback rotate_plus_90();
     callback rotate_minus_90();
     callback request_segmentation(int, int);
+    callback save_with_format(ImgFmt);
 
     // Grid view Callbacks
     callback request_grid_data(int, int);
@@ -178,6 +179,9 @@ export component MainWindow inherits Window {
         }
         request_segmentation(x, y) => {
             root.request_segmentation(x, y);
+        }
+        save_with_format(image_format) => {
+            root.save_with_format(image_format);
         }
         exit_full_view => {
             root.view_mode = ViewMode.grid;
