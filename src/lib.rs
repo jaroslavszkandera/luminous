@@ -23,6 +23,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
+use crate::image_processing::batch_save_images;
+
 struct AppController {
     // TODO: ImageLoader loades images based on loader.scan.paths on filtered indicies,
     // load it for filtered loader.scan.paths, could be better in future for sorting
@@ -529,6 +531,48 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
             selected_paths.len(),
             selected_paths
         );
+    });
+
+    let c = controller.clone();
+    main_window.on_batch_save_with_format(move |format| {
+        // TODO: remake into a func
+        let (selected_paths, weak_ui) = {
+            let c_ref = c.borrow();
+            let ui = c_ref.window_weak.upgrade().unwrap();
+            let weak_ui = c_ref.window_weak.clone();
+            let model = ui.get_grid_model();
+            // TODO: paths as Arc<paths>
+            let paths = c_ref.scan.paths.clone();
+            let filtered = &c_ref.filtered_indices;
+
+            let mut selected_paths = Vec::new();
+
+            for i in 0..model.row_count() {
+                if let Some(item) = model.row_data(i) {
+                    if item.selected {
+                        let row_idx = item.index as usize;
+                        if let Some(&abs_idx) = filtered.get(row_idx) {
+                            if let Some(path) = paths.get(abs_idx) {
+                                selected_paths.push(path.clone());
+                            }
+                        }
+                    }
+                }
+            }
+
+            if selected_paths.is_empty() {
+                log::info!("No files selected");
+                return;
+            }
+            (selected_paths, weak_ui)
+        };
+        batch_save_images(selected_paths, format);
+        slint::invoke_from_event_loop(move || {
+            if let Some(ui) = weak_ui.upgrade() {
+                ui.invoke_return_focus();
+            }
+        })
+        .unwrap();
     });
 
     // Full View Callbacks

@@ -1,5 +1,6 @@
 import { ScrollView, LineEdit, Button } from "std-widgets.slint";
 import { Theme } from "theme.slint";
+import { ImgFmt } from "common.slint";
 
 export struct GridItem {
     image: image,
@@ -23,6 +24,7 @@ export component GridView inherits Rectangle {
     callback request_range_select(int, int);
     callback print_selected_paths();
     callback toggle_selection(int);
+    callback batch_save_with_format(ImgFmt);
 
     public function focus_search() {
         search_input.focus();
@@ -229,6 +231,33 @@ export component GridView inherits Rectangle {
                     title: @tr("Print selected paths to stdout");
                     activated => {
                         print_selected_paths();
+                    }
+                }
+
+                Menu {
+                    title: @tr("Convert to...");
+                    MenuItem {
+                        title: @tr("png");
+                        activated => {
+                            batch_save_with_format(ImgFmt.png);
+                            toggle_select_all(false);
+                        }
+                    }
+
+                    MenuItem {
+                        title: @tr("jpeg");
+                        activated => {
+                            batch_save_with_format(ImgFmt.jpeg);
+                            toggle_select_all(false);
+                        }
+                    }
+
+                    MenuItem {
+                        title: @tr("webp");
+                        activated => {
+                            batch_save_with_format(ImgFmt.webp);
+                            toggle_select_all(false);
+                        }
                     }
                 }
             }

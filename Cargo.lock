@@ -2674,6 +2674,7 @@ dependencies = [
  "image",
  "log",
  "num_cpus",
+ "rayon",
  "rfd",
  "serde",
  "serde_json",

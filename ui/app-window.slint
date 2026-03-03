@@ -1,5 +1,6 @@
 import { GridView, GridItem } from "grid-view.slint";
-import { FullView, MouseModeFull, ImgFmt } from "full-view.slint";
+import { FullView, MouseModeFull } from "full-view.slint";
+import { ImgFmt } from "common.slint";
 
 export enum ViewMode {
     full,
@@ -41,6 +42,7 @@ export component MainWindow inherits Window {
     callback request_range_select(int, int);
     callback print_selected_paths();
     callback toggle_selection(int);
+    callback batch_save_with_format(ImgFmt);
 
     // App Callbacks
     callback quit_app();
@@ -153,6 +155,9 @@ export component MainWindow inherits Window {
         }
         toggle_selection(idx) => {
             root.toggle_selection(idx);
+        }
+        batch_save_with_format(format) => {
+            root.batch_save_with_format(format);
         }
     }
 
