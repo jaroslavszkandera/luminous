@@ -84,7 +84,7 @@ pub fn batch_save_images(paths: Vec<PathBuf>, format: ImgFmt) {
         if let Some(dst_path) = dialog.pick_folder() {
             std::thread::spawn(move || {
                 paths.par_iter().for_each(|path| {
-                    let start = std::time::Instant::now();
+                    let start = Instant::now();
                     let replace_ext = path.with_extension(format_to_str(format));
                     let new_image_name = replace_ext.file_name().unwrap();
                     let dst_file = dst_path.join(new_image_name);

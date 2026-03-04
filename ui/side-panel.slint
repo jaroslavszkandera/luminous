@@ -1,0 +1,31 @@
+import { Theme } from "theme.slint";
+
+export component SidePanel inherits Rectangle {
+    in-out property <length> side_width: 240px;
+    in property <bool> is_visible: true;
+    min_width: 150px;
+    max_width: 500px;
+
+    width: is_visible ? side_width : 0px;
+    background: Theme.border;
+    clip: true;
+
+    TouchArea {
+        width: 6px;
+        x: 0;
+        mouse-cursor: ew-resize;
+        moved => {
+            if (self.pressed) {
+                let new_width = root.side_width - (self.mouse-x - self.pressed-x);
+                root.side_width = Math.max(root.min_width, Math.min(root.max_width, new_width));
+            }
+        }
+    }
+
+    Rectangle {
+        x: 3px;
+        width: parent.width - 3px;
+        background: Theme.surface;
+        @children
+    }
+}
