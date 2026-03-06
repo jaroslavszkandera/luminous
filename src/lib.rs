@@ -2,7 +2,7 @@ slint::include_modules!();
 
 pub mod config;
 pub mod fs_scan;
-mod image_loader;
+pub mod image_loader;
 pub mod image_processing;
 pub mod plugins;
 
