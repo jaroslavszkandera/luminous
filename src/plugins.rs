@@ -373,6 +373,39 @@ impl Plugin {
         None
     }
 
+    pub fn decode_dynamic(&self, path: &Path) -> Option<image::DynamicImage> {
+        if !self
+            .manifest
+            .capabilities
+            .contains(&PluginCapability::Decoder)
+        {
+            error!("Plugin '{}' does not support decoding", self.manifest.name);
+            return None;
+        }
+
+        if let PluginBackend::SharedLib(container) = &self.backend {
+            let c_path = CString::new(path.to_str()?).ok()?;
+            let ffi_buffer = unsafe { container.load_image(c_path.as_ptr()) };
+
+            if ffi_buffer.data.is_null() {
+                return None;
+            }
+
+            let pixel_slice =
+                unsafe { std::slice::from_raw_parts(ffi_buffer.data, ffi_buffer.len) };
+            let buffer = image::RgbaImage::from_raw(
+                ffi_buffer.width,
+                ffi_buffer.height,
+                pixel_slice.to_vec(),
+            )
+            .map(image::DynamicImage::ImageRgba8);
+
+            unsafe { container.free_image(ffi_buffer) };
+            return buffer;
+        }
+        None
+    }
+
     pub fn encode(&self, path: &Path, buffer: &SharedPixelBuffer<Rgba8Pixel>) -> bool {
         if !self
             .manifest
@@ -568,6 +601,16 @@ impl PluginManager {
         if let Some(plugin) = self.plugins.get(&ext) {
             debug!("Using plugin '{}' for {:?}", plugin.manifest.name, path);
             plugin.decode(path)
+        } else {
+            None
+        }
+    }
+
+    pub fn decode_dynamic(&self, path: &Path) -> Option<image::DynamicImage> {
+        let ext = path.extension()?.to_str()?.to_lowercase();
+        if let Some(plugin) = self.plugins.get(&ext) {
+            debug!("Using plugin '{}' for {:?}", plugin.manifest.name, path);
+            plugin.decode_dynamic(path)
         } else {
             None
         }
