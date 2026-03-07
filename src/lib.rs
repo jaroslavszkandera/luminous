@@ -147,7 +147,7 @@ impl AppController {
         let loader_clone = loader.clone();
         let on_loaded = move |ui: MainWindow, img: Image| {
             let loader_bg = loader_clone.clone();
-            loader_clone.pool.execute(move || {
+            loader_clone.pool.spawn(move || {
                 if let Some(plugin) = loader_bg.plugin_manager.get_interactive_plugin() {
                     if let Some(pixel_buffer) = loader_bg.get_curr_active_buffer() {
                         plugin.set_interactive_image(&pixel_buffer);
@@ -162,7 +162,7 @@ impl AppController {
 
         if let Some(ui) = weak.upgrade() {
             let loader_bg = loader.clone();
-            loader.pool.execute(move || {
+            loader.pool.spawn(move || {
                 if let Some(plugin) = loader_bg.plugin_manager.get_interactive_plugin() {
                     if let Some(pixel_buffer) = loader_bg.get_curr_active_buffer() {
                         plugin.set_interactive_image(&pixel_buffer);
@@ -219,7 +219,7 @@ impl AppController {
             let loader = self.loader.clone();
             let weak = self.window_weak.clone();
 
-            self.loader.pool.execute(move || {
+            self.loader.pool.spawn(move || {
                 let width = buffer.width();
                 let height = buffer.height();
                 let raw: Vec<u8> = buffer
@@ -347,7 +347,7 @@ impl AppController {
         let weak = self.window_weak.clone();
         let loader = self.loader.clone();
 
-        self.loader.pool.execute(move || {
+        self.loader.pool.spawn(move || {
             if let Some(plugin) = loader.plugin_manager.get_interactive_plugin() {
                 if let Some(mask_buf) = plugin.interactive_click(x, y) {
                     let _ = weak.upgrade_in_event_loop(move |ui| {
