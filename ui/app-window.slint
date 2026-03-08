@@ -1,6 +1,7 @@
 import { GridView, GridItem } from "grid-view.slint";
 import { FullView, MouseModeFull } from "full-view.slint";
 import { ImgFmt } from "common.slint";
+import { PipelineStep, PipelineStepKind, RotateAngle } from "side-panel.slint";
 
 export enum ViewMode {
     full,
@@ -43,6 +44,14 @@ export component MainWindow inherits Window {
     callback print_selected_paths();
     callback toggle_selection(int);
     callback batch_save_with_format(ImgFmt);
+
+    // Pipeline
+    in-out property <[PipelineStep]> pipeline_steps;
+    callback pipeline_add_step(PipelineStepKind);
+    callback pipeline_remove_step(int);
+    callback pipeline_update_rotate(int, RotateAngle);
+    callback pipeline_update_sigma(int, float);
+    callback pipeline_run();
 
     // App Callbacks
     callback quit_app();
@@ -129,6 +138,7 @@ export component MainWindow inherits Window {
         grid_cols <=> root.grid_cols;
         forward-focus: key-handler;
         selected_count <=> root.selected_count;
+        pipeline_steps <=> root.pipeline_steps;
 
         request_grid_data(start, count) => {
             root.request_grid_data(start, count);
@@ -158,6 +168,21 @@ export component MainWindow inherits Window {
         }
         batch_save_with_format(format) => {
             root.batch_save_with_format(format);
+        }
+        pipeline_add_step(k) => {
+            root.pipeline_add_step(k);
+        }
+        pipeline_remove_step(i) => {
+            root.pipeline_remove_step(i);
+        }
+        pipeline_update_rotate(i, a) => {
+            root.pipeline_update_rotate(i, a);
+        }
+        pipeline_update_sigma(i, s) => {
+            root.pipeline_update_sigma(i, s);
+        }
+        pipeline_run() => {
+            root.pipeline_run();
         }
     }
 

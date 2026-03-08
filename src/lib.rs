@@ -4,12 +4,14 @@ pub mod config;
 pub mod fs_scan;
 pub mod image_loader;
 pub mod image_processing;
+pub mod pipeline;
 pub mod plugins;
 
 use config::Config;
 use fs_scan::ScanResult;
 use image_loader::ImageLoader;
-use image_processing::save_image;
+use image_processing::{batch_save_images, save_image};
+use pipeline::{StepFactory, run_pipeline_on_selection};
 use plugins::PluginManager;
 
 use log::{debug, info};
@@ -22,8 +24,6 @@ use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
-
-use crate::image_processing::batch_save_images;
 
 struct AppController {
     loader: Arc<ImageLoader>,
@@ -394,6 +394,8 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
 
     let main_window = MainWindow::new()?;
 
+    // Grid View
+
     let grid_data: Vec<GridItem> = scan
         .paths
         .iter()
@@ -540,6 +542,112 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
         })
         .unwrap();
     });
+
+    // Pipeline
+    let factory = Arc::new(StepFactory::new());
+
+    let c = controller.clone();
+    main_window.on_pipeline_add_step(move |kind| {
+        let Some(ui) = c.borrow().window_weak.upgrade() else {
+            return;
+        };
+        let model = ui.get_pipeline_steps(); // ModelRc<PipelineStep>
+        let vec_model = model
+            .as_any()
+            .downcast_ref::<VecModel<PipelineStep>>()
+            .expect("pipeline_steps must be a VecModel");
+
+        let new_step = PipelineStep {
+            kind,
+            rotate_angle: RotateAngle::R90,
+            blur_sigma: 1.0,
+        };
+        vec_model.push(new_step);
+    });
+
+    let c = controller.clone();
+    main_window.on_pipeline_remove_step(move |index| {
+        let Some(ui) = c.borrow().window_weak.upgrade() else {
+            return;
+        };
+        let model = ui.get_pipeline_steps();
+        let vec_model = model
+            .as_any()
+            .downcast_ref::<VecModel<PipelineStep>>()
+            .expect("pipeline_steps must be a VecModel");
+        if (index as usize) < vec_model.row_count() {
+            vec_model.remove(index as usize);
+        }
+    });
+
+    let c = controller.clone();
+    main_window.on_pipeline_update_rotate(move |index, angle| {
+        let Some(ui) = c.borrow().window_weak.upgrade() else {
+            return;
+        };
+        let model = ui.get_pipeline_steps();
+        let vec_model = model
+            .as_any()
+            .downcast_ref::<VecModel<PipelineStep>>()
+            .expect("pipeline_steps must be a VecModel");
+        if let Some(mut step) = vec_model.row_data(index as usize) {
+            step.rotate_angle = angle;
+            vec_model.set_row_data(index as usize, step);
+        }
+    });
+
+    let c = controller.clone();
+    main_window.on_pipeline_update_sigma(move |index, sigma| {
+        let Some(ui) = c.borrow().window_weak.upgrade() else {
+            return;
+        };
+        let model = ui.get_pipeline_steps();
+        let vec_model = model
+            .as_any()
+            .downcast_ref::<VecModel<PipelineStep>>()
+            .expect("pipeline_steps must be a VecModel");
+        if let Some(mut step) = vec_model.row_data(index as usize) {
+            step.blur_sigma = sigma;
+            vec_model.set_row_data(index as usize, step);
+        }
+    });
+
+    let c = controller.clone();
+    let factory_run = factory.clone();
+    main_window.on_pipeline_run(move || {
+        let (paths, weak_ui) = {
+            let c_ref = c.borrow();
+            let paths = c_ref.collect_selected_paths();
+            let weak = c_ref.window_weak.clone();
+            (paths, weak)
+        };
+
+        if paths.is_empty() {
+            log::info!("Pipeline: no images selected");
+            return;
+        }
+
+        let steps: Vec<PipelineStep> = {
+            let Some(ui) = weak_ui.upgrade() else { return };
+            let model = ui.get_pipeline_steps();
+            (0..model.row_count())
+                .filter_map(|i| model.row_data(i))
+                .collect()
+        };
+
+        run_pipeline_on_selection(paths, steps, factory_run.clone());
+
+        slint::invoke_from_event_loop(move || {
+            if let Some(ui) = weak_ui.upgrade() {
+                ui.invoke_return_focus();
+            }
+        })
+        .unwrap();
+    });
+
+    main_window.set_pipeline_steps(Rc::new(VecModel::<PipelineStep>::default()).into());
+
+    // Full View
 
     let c = controller.clone();
     main_window.on_request_next_image(move || c.borrow().handle_navigate(1));

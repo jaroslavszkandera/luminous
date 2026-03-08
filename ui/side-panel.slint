@@ -1,10 +1,12 @@
 import { Theme } from "theme.slint";
+import { Button, ScrollView, LineEdit, ComboBox } from "std-widgets.slint";
 
 export component SidePanel inherits Rectangle {
     in-out property <length> side_width: 240px;
     in property <bool> is_visible: true;
-    min_width: 150px;
-    max_width: 500px;
+
+    min-width: 150px;
+    max-width: 500px;
 
     width: is_visible ? side_width : 0px;
     background: Theme.border;
@@ -27,5 +29,163 @@ export component SidePanel inherits Rectangle {
         width: parent.width - 3px;
         background: Theme.surface;
         @children
+    }
+}
+
+export enum PipelineStepKind {
+    Rotate,
+}
+
+export enum RotateAngle {
+    R90,
+    R180,
+    R270,
+    Random,
+}
+
+export struct PipelineStep {
+    kind: PipelineStepKind,
+    rotate-angle: RotateAngle,
+    blur-sigma: float,
+}
+
+export component RotateStepCard inherits Rectangle {
+    in-out property <RotateAngle> angle: RotateAngle.R90;
+    callback remove();
+    callback angle-changed(RotateAngle);
+
+    height: 76px;
+    border-radius: 6px;
+    background: Theme.surface.darker(10%);
+    border-width: 1px;
+    border-color: Theme.border;
+
+    VerticalLayout {
+        padding: 8px;
+        spacing: 6px;
+
+        HorizontalLayout {
+            alignment: space-between;
+            Text {
+                text: "Rotate";
+                color: Theme.text-main;
+                font-size: 12px;
+                font-weight: 600;
+                vertical-alignment: center;
+            }
+
+            Button {
+                text: "X";
+                width: 24px;
+                height: 24px;
+                clicked => {
+                    root.remove();
+                }
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 6px;
+            Text {
+                text: "Angle:";
+                color: Theme.text-main.with-alpha(0.7);
+                font-size: 11px;
+                vertical-alignment: center;
+                width: 44px;
+            }
+
+            ComboBox {
+                model: ["90°", "180°", "270°", "Random"];
+                current-index: root.angle == RotateAngle.R90 ? 0 : root.angle == RotateAngle.R180 ? 1 : root.angle == RotateAngle.R270 ? 2 : 3;
+                selected(val) => {
+                    root.angle = val == "90°" ? RotateAngle.R90 : val == "180°" ? RotateAngle.R180 : val == "270°" ? RotateAngle.R270 : RotateAngle.Random;
+                    root.angle-changed(root.angle);
+                }
+            }
+        }
+    }
+}
+
+export component AddStepMenu inherits Rectangle {
+    callback add-rotate();
+    property <bool> open: false;
+    height: 28px;
+
+    VerticalLayout {
+        Button {
+            text: "Add step";
+            height: 28px;
+            clicked => {
+                root.open = !root.open;
+            }
+        }
+
+        if root.open: Rectangle {
+            background: Theme.surface;
+            border-width: 1px;
+            border-color: Theme.border;
+            drop-shadow-blur: 10px;
+            drop-shadow-color: #00000077;
+            Button {
+                text: "Rotate";
+                width: parent.width;
+                clicked => {
+                    root.open = false;
+                    root.add-rotate();
+                }
+            }
+        }
+    }
+}
+
+export component PipelinePanel inherits Rectangle {
+    in-out property <[PipelineStep]> steps;
+    callback request-add-step(PipelineStepKind);
+    callback request-remove-step(int);
+    callback request-update-rotate(int, RotateAngle);
+    callback run-pipeline();
+
+    VerticalLayout {
+        padding: 10px;
+        spacing: 8px;
+
+        Text {
+            text: "Pipeline";
+            color: Theme.text-main;
+            font-size: 14px;
+            font-weight: 700;
+        }
+
+        AddStepMenu {
+            add-rotate => {
+                root.request-add-step(PipelineStepKind.Rotate);
+            }
+        }
+
+        ScrollView {
+            vertical-stretch: 1;
+            VerticalLayout {
+                spacing: 6px;
+                alignment: start;
+                for step[i] in root.steps: RotateStepCard {
+                    angle: step.rotate-angle;
+                    remove => {
+                        root.request-remove-step(i);
+                    }
+                    angle-changed(a) => {
+                        root.request-update-rotate(i, a);
+                    }
+                }
+            }
+        }
+
+        Button {
+            text: "Save";
+            height: 34px;
+            primary: true;
+            clicked => {
+                root.run-pipeline();
+            }
+        }
     }
 }

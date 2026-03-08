@@ -9,6 +9,7 @@ fn main() {
         .filter_module("tracing", log::LevelFilter::Warn)
         .filter_module("zbus", log::LevelFilter::Warn)
         .filter_module("sctk", log::LevelFilter::Warn)
+        .filter_module("luminous::image_loader", log::LevelFilter::Info)
         .init();
 
     log::info!("Starting with {} worker threads", config.threads);
