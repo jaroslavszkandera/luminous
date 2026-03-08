@@ -19,12 +19,10 @@ const THUMB_FILTER: FilterType = FilterType::Triangle;
 
 pub type ReadyHook = Option<Arc<dyn Fn(usize) + Send + Sync>>;
 
-#[inline]
 fn placeholder() -> SharedPixelBuffer<Rgba8Pixel> {
     SharedPixelBuffer::<Rgba8Pixel>::new(1, 1)
 }
 
-#[inline]
 fn to_pixel_buffer(img: image::DynamicImage) -> SharedPixelBuffer<Rgba8Pixel> {
     let rgba = img.into_rgba8();
     SharedPixelBuffer::clone_from_slice(rgba.as_raw(), rgba.width(), rgba.height())
@@ -41,7 +39,10 @@ pub struct ImageLoader {
     pub plugin_manager: Arc<PluginManager>,
 
     active_window: Arc<Mutex<HashSet<usize>>>,
+    thumb_epoch: Arc<AtomicUsize>,
     next_full_token: Arc<AtomicUsize>,
+    window_epoch: Arc<AtomicUsize>,
+
     cache_dir: Option<PathBuf>,
     bucket_resolution: AtomicU32,
 
@@ -76,7 +77,9 @@ impl ImageLoader {
             pool: Arc::new(pool),
             active_idx: Arc::new(AtomicUsize::new(0)),
             active_window: Arc::new(Mutex::new(HashSet::new())),
+            thumb_epoch: Arc::new(AtomicUsize::new(0)),
             next_full_token: Arc::new(AtomicUsize::new(0)),
+            window_epoch: Arc::new(AtomicUsize::new(0)),
             window_size,
             cache_dir,
             bucket_resolution: AtomicU32::new(0),
@@ -97,10 +100,12 @@ impl ImageLoader {
 
     pub fn set_bucket_resolution(&self, resolution: u32) {
         self.bucket_resolution.store(resolution, Ordering::Relaxed);
+        self.thumb_epoch.fetch_add(1, Ordering::Relaxed);
         self.thumb_cache.clear();
     }
 
     pub fn clear_thumbs(&self) {
+        self.thumb_epoch.fetch_add(1, Ordering::Relaxed);
         self.thumb_cache.clear();
     }
 
@@ -146,7 +151,8 @@ impl ImageLoader {
     where
         F: Fn(MainWindow, usize, Image) + Send + 'static,
     {
-        if self.bucket_resolution.load(Ordering::Relaxed) == 0 {
+        let res = self.bucket_resolution.load(Ordering::Relaxed);
+        if res == 0 {
             return Some(placeholder());
         }
 
@@ -156,14 +162,26 @@ impl ImageLoader {
 
         let path = self.paths.get(index)?.clone();
         let cache_clone = self.thumb_cache.clone();
-        let res = self.bucket_resolution.load(Ordering::Relaxed);
         let cache_path = Self::disk_cache_path(self.cache_dir.as_ref(), &path, res);
         let plugin_manager = self.plugin_manager.clone();
         let on_ready = self.on_thumb_ready.clone();
 
+        let my_epoch = self.thumb_epoch.load(Ordering::Relaxed);
+        let epoch_counter = self.thumb_epoch.clone();
+
         self.pool.spawn(move || {
+            if epoch_counter.load(Ordering::Relaxed) != my_epoch {
+                debug!("Thumb job cancelled (epoch mismatch) index={index}");
+                return;
+            }
+
             let t = Instant::now();
             let buffer = Self::decode_thumb(&path, &plugin_manager, &cache_path, res);
+
+            if epoch_counter.load(Ordering::Relaxed) != my_epoch {
+                debug!("Thumb job discarded after decode (epoch mismatch) index={index}");
+                return;
+            }
 
             debug!(
                 "Thumb ({res}px) {:?} {:.1}ms",
@@ -218,6 +236,14 @@ impl ImageLoader {
         let on_ready = self.on_full_ready.clone();
 
         self.pool.spawn(move || {
+            let latest = token_counter.load(Ordering::Relaxed);
+            if my_token + 1 < latest {
+                debug!(
+                    "Full job skipped before decode index={index} token={my_token} latest={latest}"
+                );
+                return;
+            }
+
             let t = Instant::now();
             let buffer = Self::decode_full(&path, &plugin_manager);
 
@@ -234,7 +260,7 @@ impl ImageLoader {
 
             let latest = token_counter.load(Ordering::Relaxed);
             if my_token + 1 < latest {
-                debug!("Skipping stale UI update index={index} token={my_token} latest={latest}");
+                debug!("Full UI update skipped index={index} token={my_token} latest={latest}");
                 return;
             }
 
@@ -252,6 +278,8 @@ impl ImageLoader {
         if self.paths.is_empty() {
             return;
         }
+
+        self.window_epoch.fetch_add(1, Ordering::Relaxed);
 
         {
             let mut active = self.active_window.lock().unwrap();
@@ -286,7 +314,13 @@ impl ImageLoader {
         let active_window = self.active_window.clone();
         let plugin_manager = self.plugin_manager.clone();
 
+        let my_epoch = self.window_epoch.load(Ordering::Relaxed);
+        let window_epoch = self.window_epoch.clone();
+
         self.pool.spawn(move || {
+            if window_epoch.load(Ordering::Relaxed) != my_epoch {
+                return;
+            }
             if !active_window.lock().unwrap().contains(&index) {
                 return;
             }
@@ -334,7 +368,7 @@ impl ImageLoader {
         });
 
         let Some(img) = dynamic else {
-            return to_pixel_buffer(image::DynamicImage::new_rgba8(1, 1));
+            return placeholder();
         };
 
         let (w, h) = (img.width(), img.height());
