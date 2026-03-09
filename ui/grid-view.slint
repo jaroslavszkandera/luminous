@@ -161,6 +161,8 @@ export component GridView inherits Rectangle {
                 init => {
                     root.update_visible_rows();
                 }
+                // FIX: Adjustment of the window causes too many updates.
+                // Ideally visible rows would be updated once the window is finished updating.
                 changed height => {
                     root.update_visible_rows();
                 }
