@@ -3,6 +3,7 @@ import json
 import logging as log
 import os
 import socket
+import struct
 import sys
 from multiprocessing import resource_tracker, shared_memory
 from time import time
@@ -12,7 +13,37 @@ import torch
 from segment_anything import SamPredictor, sam_model_registry
 
 HOST = "127.0.0.1"
-PORT = 50021  # Dynamiclly set port?
+PORT = 50021  # Dynamically set port?
+
+
+def recv_msg(conn: socket.socket) -> dict[str, any] | None:
+    try:
+        msg_len_bytes = conn.recv(4)
+        if not msg_len_bytes:
+            return None
+        msg_len = struct.unpack(">I", msg_len_bytes)[0]
+
+        chunks: list[bytes] = []
+        bytes_recv = 0
+        while bytes_recv < msg_len:
+            chunk = conn.recv(min(msg_len - bytes_recv, 4096))
+            if chunk == b"":
+                raise RuntimeError("Socket connection broken")
+            chunks.append(chunk)
+            bytes_recv += len(chunk)
+        return json.loads(b"".join(chunks))
+    except (ConnectionResetError, RuntimeError):
+        return None
+
+
+def send_resp(conn: socket.socket, status: str, message: str | None = None) -> None:
+    resp = {"status": status}
+    if message:
+        resp["message"] = message
+
+    payload = json.dumps(resp).encode("utf-8")
+    header = struct.pack(">I", len(payload))
+    conn.sendall(header + payload)
 
 
 def open_shm(name: str) -> shared_memory.SharedMemory:
@@ -23,7 +54,7 @@ def open_shm(name: str) -> shared_memory.SharedMemory:
     return shm
 
 
-def handle_set_image(cmd: dict, predictor: SamPredictor) -> tuple[int, int]:
+def handle_set_image(cmd: dict[str, any], predictor: SamPredictor) -> tuple[int, int]:
     log.debug(inspect.stack()[0][3])
     (w, h) = cmd["width"], cmd["height"]  # TODO: , cmd["channels"]
     shm = open_shm(cmd["shm_name"])
@@ -38,7 +69,7 @@ def handle_set_image(cmd: dict, predictor: SamPredictor) -> tuple[int, int]:
 
 
 def handle_click(
-    cmd: dict,
+    cmd: dict[str, any],
     predictor: SamPredictor,
     img_w: int,
     img_h: int,
@@ -54,7 +85,7 @@ def handle_click(
 
 
 def handle_rect_select(
-    cmd: dict,
+    cmd: dict[str, any],
     predictor: SamPredictor,
     img_w: int,
     img_h: int,
@@ -123,60 +154,53 @@ def main():
             log.info(f"Host connected from {addr}")
 
             with conn:
-                buf = ""
                 while True:
-                    chunk = conn.recv(4096)
-                    if not chunk:
+                    cmd = recv_msg(conn)
+                    if cmd is None:
                         log.info("Host disconnected.")
                         break
-                    buf += chunk.decode("utf-8")
 
-                    # TODO: Switch to length + payload
-                    while "\n" in buf:
-                        line, buf = buf.split("\n", 1)
-                        if not line.strip():
-                            continue
+                    try:
+                        action = cmd.get("action")
 
-                        try:
-                            cmd = json.loads(line)
-                            action = cmd.get("action")
+                        if action == "ping":
+                            log.debug("ping -> ok")
+                            send_resp(conn, "ok")
 
-                            if action == "ping":
-                                conn.sendall(b"OK")
+                        elif action == "shutdown":
+                            log.debug("shutdown -> ok")
+                            send_resp(conn, "ok")
+                            return
 
-                            elif action == "shutdown":
-                                conn.sendall(b"OK")
-                                return
+                        elif action == "set_image":
+                            log.debug("set_image -> ok")
+                            curr_img_w, curr_img_h = handle_set_image(cmd, predictor)
+                            send_resp(conn, "ok")
 
-                            elif action == "set_image":
-                                curr_img_w, curr_img_h = handle_set_image(
-                                    cmd, predictor
-                                )
-                                conn.sendall(b"OK")
+                        elif action in ["click", "rect_select"]:
+                            if not _embedding_ready(predictor):
+                                log.warn("click or rect_select -> busy")
+                                send_resp(conn, "busy", "Embedding not computed")
+                                continue
 
-                            elif action == "click":
-                                if not _embedding_ready(predictor):
-                                    conn.sendall(b"BY")
-                                    continue
+                            if action == "click":
                                 handle_click(cmd, predictor, curr_img_w, curr_img_h)
-                                conn.sendall(b"OK")
-
-                            elif action == "rect_select":
-                                if not _embedding_ready(predictor):
-                                    conn.sendall(b"BY")
-                                    continue
+                                log.debug("click -> ok")
+                            else:
                                 handle_rect_select(
                                     cmd, predictor, curr_img_w, curr_img_h
                                 )
-                                conn.sendall(b"OK")
+                                log.debug("rect -> ok")
 
-                            else:
-                                log.error(f"Unknown action: {action!r}")
-                                conn.sendall(b"ER")
+                            send_resp(conn, "ok")
 
-                        except Exception as exc:
-                            log.error(f"Error processing command: {exc}")
-                            conn.sendall(b"ER")
+                        else:
+                            log.error(f"Unknown action: {action}")
+                            send_resp(conn, "error", f"Unknown action: {action}")
+
+                    except Exception as e:
+                        log.error(f"Processing error: {e}")
+                        send_resp(conn, "error", str(e))
 
     finally:
         log.info("SAM daemon exiting...")

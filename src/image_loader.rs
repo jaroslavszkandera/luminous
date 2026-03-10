@@ -388,6 +388,7 @@ impl ImageLoader {
         to_pixel_buffer(resized)
     }
 
+    // TODO: encode_full for all formats in context menu
     fn decode_full(path: &Path, plugin_manager: &PluginManager) -> SharedPixelBuffer<Rgba8Pixel> {
         if let Some(buf) = plugin_manager.decode(path) {
             return buf;

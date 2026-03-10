@@ -1,5 +1,5 @@
 use dlopen2::wrapper::{Container, WrapperApi};
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use shared_memory::{Shmem, ShmemConf};
 use slint::{Rgba8Pixel, SharedPixelBuffer};
@@ -59,7 +59,7 @@ pub enum PluginCapability {
     Unknown,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 struct IpcCmd<'a> {
     action: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -72,6 +72,14 @@ struct IpcCmd<'a> {
     x: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     y: Option<u32>,
+}
+
+#[derive(Deserialize, Debug)]
+#[serde(tag = "status", rename_all = "lowercase")]
+pub enum IpcResponse {
+    Ok,
+    Busy,
+    Error { message: String },
 }
 
 // Seems so sketchy, is there better way to do this?
@@ -149,6 +157,28 @@ impl InteractiveDaemon {
         daemon
     }
 
+    fn send_msg(stream: &mut TcpStream, cmd: &IpcCmd) -> Result<(), Box<dyn std::error::Error>> {
+        debug!("Send: {:?}", cmd);
+        let payload = serde_json::to_vec(cmd)?;
+        let len = (payload.len() as u32).to_be_bytes();
+        stream.write_all(&len)?;
+        stream.write_all(&payload)?;
+        Ok(())
+    }
+
+    fn recv_msg(stream: &mut TcpStream) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+        debug!("Recv: attempting to read payload len prefix");
+        let mut len_buf = [0u8; 4];
+        stream.read_exact(&mut len_buf)?;
+        let len = u32::from_be_bytes(len_buf) as usize;
+        debug!("Recv: payload len prefix: {len}, attempting to read payload");
+
+        let mut payload = vec![0u8; len];
+        stream.read_exact(&mut payload)?;
+        debug!("Recv: payload read successfully");
+        Ok(payload)
+    }
+
     fn send_image(
         stream: &mut TcpStream,
         active_shm: &Mutex<Option<ActiveShmem>>,
@@ -179,21 +209,22 @@ impl InteractiveDaemon {
             y: None,
         };
 
-        let mut payload = serde_json::to_string(&cmd)?;
-        payload.push('\n');
-        stream.write_all(payload.as_bytes())?;
+        Self::send_msg(stream, &cmd)?;
+        let resp: IpcResponse = serde_json::from_slice(&Self::recv_msg(stream)?)?;
+        match resp {
+            IpcResponse::Ok => {
+                *active_shm.lock().unwrap() = Some(ActiveShmem {
+                    img: ShmemWrapper(img_mem),
+                    mask: ShmemWrapper(mask_mem),
+                    width,
+                    height,
+                });
 
-        let mut ack = [0u8; 2];
-        stream.read_exact(&mut ack)?;
-
-        *active_shm.lock().unwrap() = Some(ActiveShmem {
-            img: ShmemWrapper(img_mem),
-            mask: ShmemWrapper(mask_mem),
-            width,
-            height,
-        });
-
-        Ok(())
+                Ok(())
+            }
+            IpcResponse::Busy => Err("Daemon is busy processing another request".into()),
+            IpcResponse::Error { message } => Err(format!("Daemon error: {}", message).into()),
+        }
     }
 
     pub fn set_interactive_image(&self, buffer: &SharedPixelBuffer<Rgba8Pixel>) {
@@ -210,7 +241,14 @@ impl InteractiveDaemon {
     // FIX: communication will stop working if click request is send when image is being sent
     pub fn interactive_click(&self, x: u32, y: u32) -> Option<SharedPixelBuffer<Rgba8Pixel>> {
         debug!("Interative click requested: [{},{}]", x, y);
-        let shm_guard = self.active_shm.lock().unwrap();
+        let shm_guard = self
+            .active_shm
+            .try_lock()
+            .map_err(|e| {
+                warn!("Active SHM busy: {:?}", e);
+                e
+            })
+            .ok()?;
         let active = shm_guard.as_ref().or_else(|| {
             error!("Click received but no active image SHM found in daemon");
             None
@@ -225,42 +263,56 @@ impl InteractiveDaemon {
             y: Some(y),
         };
 
-        let mut stream_guard = self.stream.lock().unwrap();
-        let s = stream_guard.as_mut().or_else(|| {
+        let mut stream_guard = self
+            .stream
+            .try_lock()
+            .map_err(|e| {
+                warn!("TCP stream busy: {:?}", e);
+                e
+            })
+            .ok()?;
+        let stream = stream_guard.as_mut().or_else(|| {
             error!("Daemon stream not connected");
             None
         })?;
 
-        let mut payload = serde_json::to_string(&cmd).ok()?;
-        payload.push('\n');
-        if let Err(e) = s.write_all(payload.as_bytes()) {
+        if let Err(e) = Self::send_msg(stream, &cmd) {
             error!("Failed to send click to daemon: {}", e);
             return None;
         }
 
-        let mut ack = [0u8; 2];
-        if let Err(e) = s.read_exact(&mut ack) {
-            error!("Daemon failed to ACK click: {}", e);
-            return None;
-        }
+        let resp_bytes = Self::recv_msg(stream).ok()?;
+        let resp: IpcResponse = serde_json::from_slice(&resp_bytes).ok()?;
+        match resp {
+            IpcResponse::Ok => {
+                debug!("ICP response is okay, setting mask");
+                let w = active.width;
+                let h = active.height;
+                let size = (w * h) as usize;
+                let mask_data = unsafe { std::slice::from_raw_parts(active.mask.0.as_ptr(), size) };
 
-        let w = active.width;
-        let h = active.height;
-        let size = (w * h) as usize;
-        let mask_data = unsafe { std::slice::from_raw_parts(active.mask.0.as_ptr(), size) };
+                let mut raw_bytes = Vec::with_capacity(size * 4);
+                for &val in mask_data.iter() {
+                    if val > 0 {
+                        raw_bytes.extend_from_slice(&[255, 0, 0, 128]);
+                    } else {
+                        raw_bytes.extend_from_slice(&[0, 0, 0, 0]);
+                    }
+                }
 
-        let mut raw_bytes = Vec::with_capacity(size * 4);
-        for &val in mask_data.iter() {
-            if val > 0 {
-                raw_bytes.extend_from_slice(&[255, 0, 0, 128]);
-            } else {
-                raw_bytes.extend_from_slice(&[0, 0, 0, 0]);
+                Some(SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
+                    &raw_bytes, w, h,
+                ))
+            }
+            IpcResponse::Busy => {
+                error!("Daemon is busy processing another request");
+                return None;
+            }
+            IpcResponse::Error { message } => {
+                error!("Daemon error: {}", message);
+                return None;
             }
         }
-
-        Some(SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
-            &raw_bytes, w, h,
-        ))
     }
 }
 
