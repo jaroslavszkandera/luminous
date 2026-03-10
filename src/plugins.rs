@@ -60,18 +60,18 @@ pub enum PluginCapability {
 }
 
 #[derive(Serialize, Debug)]
-struct IpcCmd<'a> {
-    action: &'a str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    shm_name: Option<&'a str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    width: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    height: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    x: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    y: Option<u32>,
+#[serde(tag = "action", rename_all = "snake_case")]
+pub enum IpcCmd {
+    SetImage {
+        shm_name: String,
+        width: u32,
+        height: u32,
+    },
+    Click {
+        shm_name: String,
+        x: u32,
+        y: u32,
+    },
 }
 
 #[derive(Deserialize, Debug)]
@@ -200,13 +200,10 @@ impl InteractiveDaemon {
             );
         }
 
-        let cmd = IpcCmd {
-            action: "set_image",
-            shm_name: Some(img_mem.get_os_id()),
-            width: Some(width),
-            height: Some(height),
-            x: None,
-            y: None,
+        let cmd = IpcCmd::SetImage {
+            shm_name: img_mem.get_os_id().into(),
+            width,
+            height,
         };
 
         Self::send_msg(stream, &cmd)?;
@@ -254,13 +251,10 @@ impl InteractiveDaemon {
             None
         })?;
 
-        let cmd = IpcCmd {
-            action: "click",
-            shm_name: Some(active.mask.0.get_os_id()),
-            width: None,
-            height: None,
-            x: Some(x),
-            y: Some(y),
+        let cmd = IpcCmd::Click {
+            shm_name: active.mask.0.get_os_id().into(),
+            x,
+            y,
         };
 
         let mut stream_guard = self
