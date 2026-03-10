@@ -202,6 +202,8 @@ def main():
                         log.error(f"Processing error: {e}")
                         send_resp(conn, "error", str(e))
 
+    except (OSError, KeyboardInterrupt) as e:
+        log.error(f"Error: {e}")
     finally:
         log.info("SAM daemon exiting...")
 
