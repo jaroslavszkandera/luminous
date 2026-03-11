@@ -12,7 +12,7 @@ use fs_scan::ScanResult;
 use image_loader::ImageLoader;
 use image_processing::{batch_save_images, save_image};
 use pipeline::{StepFactory, run_pipeline_on_selection};
-use plugins::PluginManager;
+use plugins::{IpcStatus, PluginManager};
 
 use log::{debug, info};
 use slint::{Image, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, VecModel};
@@ -352,6 +352,7 @@ impl AppController {
         loader.pool.spawn(move || {
             if let Some(plugin) = plugin_manager.get_interactive_plugin() {
                 if let Some(buf) = curr_active_buffer {
+                    // FIX: Hangs image loading when moved too many images.
                     plugin.set_interactive_image(&buf);
                 }
             }
@@ -681,9 +682,29 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
 
     let c = controller.clone();
     main_window.on_request_segmentation(move |x, y| {
-        debug!("Segmentation [{x},{y}]");
         c.borrow().handle_segmentation(x as u32, y as u32);
     });
+
+    let ui_weak = controller.clone().borrow().window_weak.clone();
+    if let Some(plugin) = controller
+        .clone()
+        .borrow()
+        .loader
+        .plugin_manager
+        .get_interactive_plugin()
+    {
+        plugin.on_status_change(move |status| {
+            let _ = ui_weak.upgrade_in_event_loop(move |ui| {
+                let status_str = match status {
+                    IpcStatus::Ready => "Ready",
+                    IpcStatus::Busy => "Processing...",
+                    IpcStatus::Error => "Error",
+                    IpcStatus::Init => "Initializing...",
+                };
+                ui.set_plugin_status(status_str.into());
+            });
+        })
+    }
 
     main_window.on_quit_app(move || {
         let _ = slint::quit_event_loop();

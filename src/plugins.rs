@@ -10,7 +10,7 @@ use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 
 // Expected ABI for shared libs
 #[repr(C)]
@@ -82,6 +82,14 @@ pub enum IpcResponse {
     Error { message: String },
 }
 
+#[derive(Clone)]
+pub enum IpcStatus {
+    Init,
+    Busy,
+    Ready,
+    Error,
+}
+
 // Seems so sketchy, is there better way to do this?
 pub struct ShmemWrapper(pub Shmem);
 unsafe impl Send for ShmemWrapper {}
@@ -100,12 +108,25 @@ pub struct InteractiveDaemon {
     process: Mutex<Option<Child>>,
     active_shm: Arc<Mutex<Option<ActiveShmem>>>,
     pending_image: Arc<Mutex<Option<SharedPixelBuffer<Rgba8Pixel>>>>,
+    status: Arc<RwLock<IpcStatus>>,
+    on_status_change: Arc<Mutex<Option<Box<dyn Fn(IpcStatus) + Send + Sync>>>>,
 }
 
 impl InteractiveDaemon {
     pub fn new(manifest: &PluginManifest, dir_path: &Path) -> Arc<Self> {
         let port = manifest.daemon_port.unwrap_or(50051);
         let mut process = None;
+        let daemon = Arc::new(Self {
+            manifest_name: manifest.name.clone(),
+            stream: Arc::new(Mutex::new(None)),
+            process: Mutex::new(None),
+            active_shm: Arc::new(Mutex::new(None)),
+            pending_image: Arc::new(Mutex::new(None)),
+            status: Arc::new(RwLock::new(IpcStatus::Init)),
+            on_status_change: Arc::new(Mutex::new(None)),
+        });
+        // FIX: Callback on_status_change is not yet initialized
+        // daemon.set_status(IpcStatus::Init);
 
         if let Some(interpreter) = &manifest.interpreter {
             let parts: Vec<&str> = interpreter.split_whitespace().collect();
@@ -126,35 +147,46 @@ impl InteractiveDaemon {
                     .ok();
             }
         }
-
-        let daemon = Arc::new(Self {
-            manifest_name: manifest.name.clone(),
-            stream: Arc::new(Mutex::new(None)),
-            process: Mutex::new(process),
-            active_shm: Arc::new(Mutex::new(None)),
-            pending_image: Arc::new(Mutex::new(None)),
-        });
+        *daemon.process.lock().unwrap() = process;
 
         let stream_clone = daemon.stream.clone();
         let pending_clone = daemon.pending_image.clone();
         let active_shm_clone = daemon.active_shm.clone();
+        let daemon_clone = daemon.clone();
 
         std::thread::spawn(move || {
             for _ in 0..20 {
                 if let Ok(mut s) = TcpStream::connect(("127.0.0.1", port)) {
                     info!("Successfully connected to daemon on port {}", port);
                     if let Some(img) = pending_clone.lock().unwrap().take() {
-                        let _ = Self::send_image(&mut s, &active_shm_clone, &img);
+                        let _ = Self::send_image(&daemon_clone, &mut s, &active_shm_clone, &img);
                     }
                     *stream_clone.lock().unwrap() = Some(s);
                     return;
                 }
                 std::thread::sleep(std::time::Duration::from_millis(500));
             }
+            daemon_clone.set_status(IpcStatus::Error);
             error!("Failed to connect to daemon after 10 seconds.");
         });
 
         daemon
+    }
+
+    pub fn on_status_change<F>(&self, callback: F)
+    where
+        F: Fn(IpcStatus) + Send + Sync + 'static,
+    {
+        *self.on_status_change.lock().unwrap() = Some(Box::new(callback));
+    }
+
+    fn set_status(&self, new_status: IpcStatus) {
+        {
+            *self.status.write().unwrap() = new_status.clone();
+        }
+        if let Some(callback) = self.on_status_change.lock().unwrap().as_ref() {
+            callback(new_status);
+        }
     }
 
     fn send_msg(stream: &mut TcpStream, cmd: &IpcCmd) -> Result<(), Box<dyn std::error::Error>> {
@@ -180,10 +212,12 @@ impl InteractiveDaemon {
     }
 
     fn send_image(
+        &self,
         stream: &mut TcpStream,
         active_shm: &Mutex<Option<ActiveShmem>>,
         buffer: &SharedPixelBuffer<Rgba8Pixel>,
     ) -> Result<(), Box<dyn std::error::Error>> {
+        self.set_status(IpcStatus::Busy);
         let width = buffer.width();
         let height = buffer.height();
         let size = (width * height * 4) as usize;
@@ -217,18 +251,26 @@ impl InteractiveDaemon {
                     height,
                 });
 
+                self.set_status(IpcStatus::Ready);
                 Ok(())
             }
-            IpcResponse::Busy => Err("Daemon is busy processing another request".into()),
-            IpcResponse::Error { message } => Err(format!("Daemon error: {}", message).into()),
+            IpcResponse::Busy => {
+                self.set_status(IpcStatus::Busy);
+                Err("Daemon is busy processing another request".into())
+            }
+            IpcResponse::Error { message } => {
+                self.set_status(IpcStatus::Error);
+                Err(format!("Daemon error: {}", message).into())
+            }
         }
     }
 
     pub fn set_interactive_image(&self, buffer: &SharedPixelBuffer<Rgba8Pixel>) {
         let mut stream_guard = self.stream.lock().unwrap();
         if let Some(s) = stream_guard.as_mut() {
-            if let Err(e) = Self::send_image(s, &self.active_shm, buffer) {
+            if let Err(e) = Self::send_image(&self, s, &self.active_shm, buffer) {
                 error!("Daemon image sync failed: {}", e);
+                return;
             }
         } else {
             *self.pending_image.lock().unwrap() = Some(buffer.clone());
@@ -242,6 +284,7 @@ impl InteractiveDaemon {
             .try_lock()
             .map_err(|e| {
                 warn!("Active SHM busy: {:?}", e);
+                self.set_status(IpcStatus::Busy);
                 e
             })
             .ok()?;
@@ -260,6 +303,7 @@ impl InteractiveDaemon {
             .stream
             .try_lock()
             .map_err(|e| {
+                self.set_status(IpcStatus::Busy);
                 warn!("TCP stream busy: {:?}", e);
                 e
             })
@@ -293,15 +337,18 @@ impl InteractiveDaemon {
                     }
                 }
 
+                self.set_status(IpcStatus::Ready);
                 Some(SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
                     &raw_bytes, w, h,
                 ))
             }
             IpcResponse::Busy => {
+                self.set_status(IpcStatus::Busy);
                 error!("Daemon is busy processing another request");
                 return None;
             }
             IpcResponse::Error { message } => {
+                self.set_status(IpcStatus::Error);
                 error!("Daemon error: {}", message);
                 return None;
             }
@@ -515,6 +562,15 @@ impl Plugin {
             daemon.interactive_click(x, y)
         } else {
             None
+        }
+    }
+
+    pub fn on_status_change<F>(&self, callback: F)
+    where
+        F: Fn(IpcStatus) + Send + Sync + 'static,
+    {
+        if let PluginBackend::Daemon(daemon) = &self.backend {
+            daemon.on_status_change(callback);
         }
     }
     // --- IPC Methods ---

@@ -5,9 +5,6 @@ export component SidePanel inherits Rectangle {
     in-out property <length> side_width: 240px;
     in property <bool> is_visible: true;
 
-    min-width: 150px;
-    max-width: 500px;
-
     width: is_visible ? side_width : 0px;
     background: Theme.border;
     clip: true;
@@ -19,7 +16,7 @@ export component SidePanel inherits Rectangle {
         moved => {
             if (self.pressed) {
                 let new_width = root.side_width - (self.mouse-x - self.pressed-x);
-                root.side_width = Math.max(root.min_width, Math.min(root.max_width, new_width));
+                root.side_width = Math.max(150px, Math.min(500px, new_width));
             }
         }
     }

@@ -1,5 +1,7 @@
 import { Theme } from "theme.slint";
 import { ImgFmt } from "common.slint";
+import { SidePanel } from "side-panel.slint";
+import { Button } from "std-widgets.slint";
 
 export enum MouseModeFull {
     select,
@@ -13,7 +15,9 @@ export component FullView inherits TouchArea {
     in property <string> curr_image_name;
     in property <int> total_images;
     in property <bool> timer_running: false;
+
     in property <image> mask_overlay;
+    in property <string> plugin_status;
 
     callback request_next_image();
     callback request_prev_image();
@@ -23,14 +27,12 @@ export component FullView inherits TouchArea {
     callback request_segmentation(int, int);
     callback save_with_format(ImgFmt);
 
-    width: 100%;
-    height: 100%;
     property <string> display_coords: "0,0";
     property <float> zoom_scale: 1.0;
     property <length> last_coords_x;
     property <length> last_coords_y;
 
-    property <MouseModeFull> mouse_mode_full: MouseModeFull.segment; // TESTING
+    property <MouseModeFull> mouse_mode_full: MouseModeFull.segment;
     mouse-cursor: (mouse_mode_full == MouseModeFull.select) ? crosshair : (mouse_mode_full == MouseModeFull.drag && self.pressed && zoom_scale > 1.0) ? grabbing : (mouse_mode_full == MouseModeFull.drag && zoom_scale > 1.0) ? grab : default;
 
     property <length> start_drag_x;
@@ -44,6 +46,9 @@ export component FullView inherits TouchArea {
     property <length> selection_width;
     property <length> selection_height;
 
+    property <bool> panel_visible: true;
+    property <length> side_panel_width: 240px;
+
     coords_timer := Timer {
         interval: 60ms;
         running: root.timer_running;
@@ -55,12 +60,14 @@ export component FullView inherits TouchArea {
                 let img_h = root.current_image.height;
 
                 if (img_w > 0 && img_h > 0) {
-                    let scale = Math.min(img.width / img_w, img.height / img_h);
+                    let rel_mouse_x = root.mouse-x - rect_img.x;
+                    let rel_mouse_y = root.mouse-y - rect_img.y;
+                    let scale = Math.min(rect_img.width / img_w, rect_img.height / img_h) * zoom_scale;
                     let visual_img_x = img.x + (img.width - img_w * scale) / 2;
                     let visual_img_y = img.y + (img.height - img_h * scale) / 2;
 
-                    let x = clamp(Math.round((root.last_coords_x - visual_img_x) / scale), 0, img_w);
-                    let y = clamp(Math.round((root.last_coords_y - visual_img_y) / scale), 0, img_h);
+                    let x = clamp(Math.round((rel_mouse_x - visual_img_x) / scale), 0, img_w);
+                    let y = clamp(Math.round((rel_mouse_y - visual_img_y) / scale), 0, img_h);
 
                     root.display_coords = x + "," + y;
                 }
@@ -80,8 +87,8 @@ export component FullView inherits TouchArea {
 
     public function reset_zoom() {
         zoom_scale = 1;
-        img.width = root.width;
-        img.height = root.height;
+        img.width = rect_img.width;
+        img.height = rect_img.height;
         img.x = 0;
         img.y = 0;
     }
@@ -89,35 +96,30 @@ export component FullView inherits TouchArea {
     function zoom(scale_delta: float, center_x: length, center_y: length) {
         let old_scale = zoom_scale;
         let new_scale = clamp(zoom_scale * scale_delta, 1, 10.0);
-
         if (old_scale == new_scale) {
             return;
         }
+        let rel_center_x = center_x - rect_img.x;
+        let rel_center_y = center_y - rect_img.y;
+
         zoom_scale = new_scale;
         let ratio = new_scale / old_scale;
 
-        if (img.width == 0px || img.width == root.width) {
-            img.width = rect_img.width;
-            img.height = rect_img.height;
-            img.x = 0px;
-            img.y = 0px;
-        }
         img.width = img.width * ratio;
         img.height = img.height * ratio;
-        img.x = center_x - (center_x - img.x) * ratio;
-        img.y = center_y - (center_y - img.y) * ratio;
+        img.x = rel_center_x - (rel_center_x - img.x) * ratio;
+        img.y = rel_center_y - (rel_center_y - img.y) * ratio;
     }
 
     function zoom_to_selection() {
-        let scale_x = root.width / selection_width;
-        let scale_y = root.height / selection_height;
+        let scale_x = rect_img.width / selection_width;
+        let scale_y = rect_img.height / selection_height;
         let zoom_factor = Math.min(scale_x, scale_y);
 
-        let center_x = selection_x + selection_width / 2;
-        let center_y = selection_y + selection_height / 2;
+        let center_x = selection_x + selection_width / 2 + rect_img.x;
+        let center_y = selection_y + selection_height / 2 + rect_img.y;
 
         zoom(zoom_factor, center_x, center_y);
-
         selection_width = 0px;
         selection_height = 0px;
     }
@@ -141,11 +143,14 @@ export component FullView inherits TouchArea {
                 let img_w = root.current_image.width;
                 let img_h = root.current_image.height;
                 if (img_w > 0 && img_h > 0) {
-                    let scale = Math.min(img.width / img_w, img.height / img_h);
+                    let rel_mouse_x = root.mouse-x - rect_img.x;
+                    let rel_mouse_y = root.mouse-y - rect_img.y;
+
+                    let scale = Math.min(rect_img.width / img_w, rect_img.height / img_h) * zoom_scale;
                     let visual_img_x = img.x + (img.width - img_w * scale) / 2;
                     let visual_img_y = img.y + (img.height - img_h * scale) / 2;
-                    let orig_x = clamp(Math.round((root.mouse-x - visual_img_x) / scale), 0, img_w);
-                    let orig_y = clamp(Math.round((root.mouse-y - visual_img_y) / scale), 0, img_h);
+                    let orig_x = clamp(Math.round((rel_mouse_x - visual_img_x) / scale), 0, img_w);
+                    let orig_y = clamp(Math.round((rel_mouse_y - visual_img_y) / scale), 0, img_h);
                     root.request_segmentation(orig_x, orig_y);
                 }
             }
@@ -158,8 +163,8 @@ export component FullView inherits TouchArea {
             img.y = root.start_img_y + (root.mouse-y - root.start_drag_y);
         }
         if (is_selecting) {
-            selection_x = Math.min(root.mouse-x, root.start_drag_x);
-            selection_y = Math.min(root.mouse-y, root.start_drag_y);
+            selection_x = Math.min(root.mouse-x, root.start_drag_x) - rect_img.x;
+            selection_y = Math.min(root.mouse-y, root.start_drag_y) - rect_img.y;
             selection_width = Math.abs(root.mouse-x - root.start_drag_x);
             selection_height = Math.abs(root.mouse-y - root.start_drag_y);
         }
@@ -180,121 +185,143 @@ export component FullView inherits TouchArea {
         accept
     }
 
-    double-clicked => {
-        root.exit_full_view();
-        reset_zoom();
-    }
+    HorizontalLayout {
+        rect_img := Rectangle {
+            horizontal-stretch: 1;
+            clip: true;
 
-    rect_img := Rectangle {
-        img := Image {
-            source: root.current_image;
-            image-fit: contain;
-            width: 100%;
-            height: 100%;
-            x: 0px;
-            y: 0px;
-        }
-
-        mask := Image {
-            source: root.mask_overlay;
-            image-fit: contain;
-            width: img.width;
-            height: img.height;
-            x: img.x;
-            y: img.y;
-        }
-
-        Rectangle {
-            height: 16px;
-            y: parent.height - self.height;
-            width: 100%;
-            background: Theme.overlay;
-            Text {
-                x: 5px;
-                color: Theme.text-main;
-                text: (curr_image_index + 1) + "/" + root.total_images;
+            img := Image {
+                source: root.current_image;
+                image-fit: contain;
+                width: parent.width;
+                height: parent.height;
+                x: 0px;
+                y: 0px;
             }
 
-            Text {
-                color: Theme.text-main;
-                horizontal-alignment: center;
-                vertical-alignment: center;
-                text: curr_image_name;
+            mask := Image {
+                source: root.mask_overlay;
+                image-fit: contain;
+                width: img.width;
+                height: img.height;
+                x: img.x;
+                y: img.y;
             }
 
-            Text {
-                x: parent.width - self.width - 5px;
-                color: Theme.text-main;
-                text: "[x,y]=[" + display_coords + "]";
+            Rectangle {
+                height: 16px;
+                y: parent.height - self.height;
+                width: parent.width;
+                background: Theme.overlay;
+                Text {
+                    x: 5px;
+                    color: Theme.text-main;
+                    text: (curr_image_index + 1) + "/" + root.total_images;
+                }
+
+                Text {
+                    color: Theme.text-main;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                    text: curr_image_name;
+                }
+
+                Text {
+                    x: parent.width - self.width - 5px;
+                    color: Theme.text-main;
+                    text: "[x,y]=[" + display_coords + "]";
+                }
             }
-        }
 
-        Rectangle {
-            x: root.selection_x;
-            y: root.selection_y;
-            width: root.selection_width;
-            height: root.selection_height;
-            visible: root.is_selecting || (root.selection_width > 0px && mouse_mode_full == MouseModeFull.select);
-            background: Theme.primary-semi;
-            border-color: Theme.primary;
-            border-width: 1px;
-        }
+            Rectangle {
+                x: root.selection_x;
+                y: root.selection_y;
+                width: root.selection_width;
+                height: root.selection_height;
+                visible: root.is_selecting || (root.selection_width > 0px && mouse_mode_full == MouseModeFull.select);
+                background: Theme.primary-semi;
+                border-color: Theme.primary;
+                border-width: 1px;
+            }
 
-        ContextMenuArea {
-            Menu {
-                MenuItem {
-                    title: @tr("Rotate +90");
-                    activated => {
-                        root.rotate_plus_90();
-                    }
-                }
-
-                MenuItem {
-                    title: @tr("Rotate -90");
-                    activated => {
-                        root.rotate_minus_90();
-                    }
-                }
-
-                MenuItem {
-                    title: @tr("Reset zoom");
-                    activated => {
-                        root.reset_zoom();
-                    }
-                }
-
-                // TODO: Add more formats
+            ContextMenuArea {
                 Menu {
-                    title: @tr("Save with format");
                     MenuItem {
-                        title: @tr("png");
+                        title: @tr("Rotate +90");
                         activated => {
-                            root.save_with_format(ImgFmt.png);
+                            root.rotate_plus_90();
                         }
                     }
 
                     MenuItem {
-                        title: @tr("jpeg");
+                        title: @tr("Rotate -90");
                         activated => {
-                            root.save_with_format(ImgFmt.jpeg);
+                            root.rotate_minus_90();
                         }
                     }
 
                     MenuItem {
-                        title: @tr("webp");
+                        title: @tr("Reset zoom");
                         activated => {
-                            root.save_with_format(ImgFmt.webp);
+                            root.reset_zoom();
+                        }
+                    }
+
+                    // TODO: Add more formats
+                    Menu {
+                        title: @tr("Save with format");
+                        MenuItem {
+                            title: @tr("png");
+                            activated => {
+                                root.save_with_format(ImgFmt.png);
+                            }
+                        }
+
+                        MenuItem {
+                            title: @tr("jpeg");
+                            activated => {
+                                root.save_with_format(ImgFmt.jpeg);
+                            }
+                        }
+
+                        MenuItem {
+                            title: @tr("webp");
+                            activated => {
+                                root.save_with_format(ImgFmt.webp);
+                            }
                         }
                     }
                 }
             }
         }
-    }
 
-    changed height => {
-        reset_zoom();
-    }
-    changed width => {
-        reset_zoom();
+        side_panel := SidePanel {
+            is_visible: root.panel_visible;
+            side_width <=> root.side_panel_width;
+            sam-widget := Rectangle {
+                height: 48px;
+                border-color: Theme.surface.darker(10%);
+                border-radius: 6px;
+                border-width: 1px;
+
+                VerticalLayout {
+                    Text {
+                        color: white;
+                        text: "SAM state: " + root.plugin_status;
+                    }
+
+                    HorizontalLayout {
+                        height: 24px;
+                        Button {
+                            text: "click";
+                        }
+
+                        Button {
+                            text: "rect";
+                        }
+                    }
+                }
+            }
+        }
     }
 }

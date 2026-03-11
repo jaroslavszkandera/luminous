@@ -67,7 +67,9 @@ export component MainWindow inherits Window {
     in-out property <bool> is_fullscreen: false;
     in-out property <int> grid_cols: 5;
     in-out property <int> selected_count: 0;
+
     in property <image> mask_overlay;
+    in property <string> plugin_status: "Initializing...";
 
     public function return_focus() {
         key-handler.focus();
@@ -194,6 +196,7 @@ export component MainWindow inherits Window {
         curr_image_name: root.curr_image_name;
         total_images: root.grid_model.length;
         mask_overlay: root.mask_overlay;
+        plugin_status: root.plugin_status;
 
         request_next_image => {
             root.request_next_image();
