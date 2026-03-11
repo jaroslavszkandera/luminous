@@ -433,38 +433,6 @@ impl Plugin {
     }
 
     // --- Shared library methods
-    pub fn decode(&self, path: &Path) -> Option<SharedPixelBuffer<Rgba8Pixel>> {
-        if !self
-            .manifest
-            .capabilities
-            .contains(&PluginCapability::Decoder)
-        {
-            error!("Plugin '{}' does not support decoding", self.manifest.name);
-            return None;
-        }
-
-        if let PluginBackend::SharedLib(container) = &self.backend {
-            let c_path = CString::new(path.to_str()?).ok()?;
-            let ffi_buffer = unsafe { container.load_image(c_path.as_ptr()) };
-
-            if ffi_buffer.data.is_null() {
-                return None;
-            }
-
-            let pixel_slice =
-                unsafe { std::slice::from_raw_parts(ffi_buffer.data, ffi_buffer.len) };
-            let buffer = SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
-                pixel_slice,
-                ffi_buffer.width,
-                ffi_buffer.height,
-            );
-
-            unsafe { container.free_image(ffi_buffer) };
-            return Some(buffer);
-        }
-        None
-    }
-
     pub fn decode_dynamic(&self, path: &Path) -> Option<image::DynamicImage> {
         if !self
             .manifest
@@ -480,22 +448,41 @@ impl Plugin {
             let ffi_buffer = unsafe { container.load_image(c_path.as_ptr()) };
 
             if ffi_buffer.data.is_null() {
+                error!("Received null FFI buffer");
                 return None;
             }
 
             let pixel_slice =
                 unsafe { std::slice::from_raw_parts(ffi_buffer.data, ffi_buffer.len) };
-            let buffer = image::RgbaImage::from_raw(
+
+            let (l, w, h, c) = (
+                ffi_buffer.len,
                 ffi_buffer.width,
                 ffi_buffer.height,
-                pixel_slice.to_vec(),
-            )
-            .map(image::DynamicImage::ImageRgba8);
+                ffi_buffer.channels,
+            );
+            debug!("pixel_slice loaded: len={l}, {w}x{h}x{c}");
+            let dim_len = (w * h * c) as usize;
+            if l != dim_len {
+                error!("Image size and dimensions mismatch ({l} != {dim_len})");
+                return None;
+            }
+            let img = match ffi_buffer.channels {
+                1 => image::ImageBuffer::<image::Luma<u8>, _>::from_raw(w, h, pixel_slice.to_vec())
+                    .map(image::DynamicImage::ImageLuma8),
+                3 => image::ImageBuffer::<image::Rgb<u8>, _>::from_raw(w, h, pixel_slice.to_vec())
+                    .map(image::DynamicImage::ImageRgb8),
+                4 => image::ImageBuffer::<image::Rgba<u8>, _>::from_raw(w, h, pixel_slice.to_vec())
+                    .map(image::DynamicImage::ImageRgba8),
+                _ => None,
+            };
 
             unsafe { container.free_image(ffi_buffer) };
-            return buffer;
+            return img;
+        } else {
+            error!("PluginBackend is not of type SharedLibrary");
+            None
         }
-        None
     }
 
     pub fn encode(&self, path: &Path, buffer: &SharedPixelBuffer<Rgba8Pixel>) -> bool {
@@ -698,13 +685,12 @@ impl PluginManager {
     }
 
     pub fn decode(&self, path: &Path) -> Option<SharedPixelBuffer<Rgba8Pixel>> {
-        let ext = path.extension()?.to_str()?.to_lowercase();
-        if let Some(plugin) = self.plugins.get(&ext) {
-            debug!("Using plugin '{}' for {:?}", plugin.manifest.name, path);
-            plugin.decode(path)
-        } else {
-            None
-        }
+        let rgba = self.decode_dynamic(path)?.to_rgba8();
+        Some(SharedPixelBuffer::clone_from_slice(
+            rgba.as_raw(),
+            rgba.width(),
+            rgba.height(),
+        ))
     }
 
     pub fn decode_dynamic(&self, path: &Path) -> Option<image::DynamicImage> {
@@ -713,6 +699,8 @@ impl PluginManager {
             debug!("Using plugin '{}' for {:?}", plugin.manifest.name, path);
             plugin.decode_dynamic(path)
         } else {
+            // NOTE: Too much log...
+            // error!("No plugins that have support for file extension {:?}", path);
             None
         }
     }

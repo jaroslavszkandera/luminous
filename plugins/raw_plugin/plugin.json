@@ -1,0 +1,6 @@
+{
+  "name": "Raw image plugin",
+  "version": "0.1.0",
+  "extensions": ["arw"],
+  "capabilities": ["decoder"]
+}

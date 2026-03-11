@@ -1,0 +1,11 @@
+[package]
+name = "raw_plugin"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+bayer = "0.1.5"
+rawloader = "0.37.1"
