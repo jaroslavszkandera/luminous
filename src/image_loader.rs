@@ -4,7 +4,7 @@ use image::imageops::FilterType;
 use log::{debug, error, warn};
 use rayon::ThreadPool;
 use sha2::{Digest, Sha256};
-use slint::{Image, Rgba8Pixel, SharedPixelBuffer, Weak};
+use slint::{Image, Rgba8Pixel, SharedPixelBuffer};
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -12,12 +12,12 @@ use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use crate::MainWindow;
 use crate::plugins::PluginManager;
 
 const THUMB_FILTER: FilterType = FilterType::Triangle;
 
-pub type ReadyHook = Option<Arc<dyn Fn(usize) + Send + Sync>>;
+pub type ImageReadyFn = Arc<dyn Fn(usize, SharedPixelBuffer<Rgba8Pixel>) + Send + Sync>;
+pub type ImageReadyHook = Option<ImageReadyFn>;
 
 fn placeholder() -> SharedPixelBuffer<Rgba8Pixel> {
     SharedPixelBuffer::<Rgba8Pixel>::new(1, 1)
@@ -46,8 +46,8 @@ pub struct ImageLoader {
     cache_dir: Option<PathBuf>,
     bucket_resolution: AtomicU32,
 
-    on_thumb_ready: ReadyHook,
-    on_full_ready: ReadyHook,
+    on_thumb_ready: ImageReadyHook,
+    on_full_ready: ImageReadyHook,
 }
 
 impl ImageLoader {
@@ -89,13 +89,18 @@ impl ImageLoader {
         }
     }
 
-    pub fn set_ready_hooks(
-        &mut self,
-        on_thumb: impl Fn(usize) + Send + Sync + 'static,
-        on_full: impl Fn(usize) + Send + Sync + 'static,
-    ) {
-        self.on_thumb_ready = Some(Arc::new(on_thumb));
-        self.on_full_ready = Some(Arc::new(on_full));
+    pub fn on_thumb_ready<F>(&mut self, f: F)
+    where
+        F: Fn(usize, SharedPixelBuffer<Rgba8Pixel>) + Send + Sync + 'static,
+    {
+        self.on_thumb_ready = Some(Arc::new(f));
+    }
+
+    pub fn on_full_ready<F>(&mut self, f: F)
+    where
+        F: Fn(usize, SharedPixelBuffer<Rgba8Pixel>) + Send + Sync + 'static,
+    {
+        self.on_full_ready = Some(Arc::new(f));
     }
 
     pub fn set_bucket_resolution(&self, resolution: u32) {
@@ -142,15 +147,7 @@ impl ImageLoader {
     }
 
     // source: https://github.com/slint-ui/slint/discussions/5140
-    pub fn load_grid_thumb<F>(
-        &self,
-        index: usize,
-        ui_handle: Weak<MainWindow>,
-        on_loaded: F,
-    ) -> Option<SharedPixelBuffer<Rgba8Pixel>>
-    where
-        F: Fn(MainWindow, usize, Image) + Send + 'static,
-    {
+    pub fn load_grid_thumb(&self, index: usize) -> Option<SharedPixelBuffer<Rgba8Pixel>> {
         let res = self.bucket_resolution.load(Ordering::Relaxed);
         if res == 0 {
             return Some(placeholder());
@@ -191,26 +188,14 @@ impl ImageLoader {
 
             cache_clone.insert(index, buffer.clone());
             if let Some(h) = &on_ready {
-                h(index);
+                h(index, buffer);
             }
-
-            let _ = ui_handle.upgrade_in_event_loop(move |ui| {
-                on_loaded(ui, index, Image::from_rgba8(buffer));
-            });
         });
 
         None
     }
 
-    pub fn load_full_progressive<F>(
-        &self,
-        index: usize,
-        ui_handle: Weak<MainWindow>,
-        on_loaded: F,
-    ) -> Image
-    where
-        F: Fn(MainWindow, Image) + Send + 'static,
-    {
+    pub fn load_full_progressive(&self, index: usize) -> Image {
         let my_token = self.next_full_token.fetch_add(1, Ordering::Relaxed);
         self.active_idx.store(index, Ordering::Relaxed);
 
@@ -254,9 +239,6 @@ impl ImageLoader {
             );
 
             cache_clone.insert(index, buffer.clone());
-            if let Some(h) = &on_ready {
-                h(index);
-            }
 
             let latest = token_counter.load(Ordering::Relaxed);
             if my_token + 1 < latest {
@@ -264,11 +246,9 @@ impl ImageLoader {
                 return;
             }
 
-            let _ = ui_handle.upgrade_in_event_loop(move |ui| {
-                if index == ui.get_curr_image_index() as usize {
-                    on_loaded(ui, Image::from_rgba8(buffer));
-                }
-            });
+            if let Some(h) = &on_ready {
+                h(index, buffer);
+            }
         });
 
         backup

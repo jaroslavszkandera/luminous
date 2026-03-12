@@ -40,14 +40,51 @@ impl AppController {
         config: &Config,
         window: &MainWindow,
     ) -> Self {
+        let window_weak = window.as_weak();
+
+        let mut loader = ImageLoader::new(
+            scan.paths.clone(),
+            config.threads,
+            config.window_size,
+            plugin_manager,
+        );
+
+        let weak_thumb = window_weak.clone();
+        loader.on_thumb_ready(move |index, buffer| {
+            let _ = weak_thumb.upgrade_in_event_loop(move |ui| {
+                let img = Image::from_rgba8(buffer);
+                let m = ui.get_grid_model();
+                if let Some(mut item) = m.row_data(index) {
+                    item.image = img.clone();
+                    m.set_row_data(index, item);
+                }
+                let vm = ui.get_visible_grid_model();
+                for i in 0..vm.row_count() {
+                    if let Some(mut v) = vm.row_data(i) {
+                        if v.index == index as i32 {
+                            v.image = img;
+                            vm.set_row_data(i, v);
+                            break;
+                        }
+                    }
+                }
+            });
+        });
+
+        let weak_full = window_weak.clone();
+        loader.on_full_ready(move |index, buffer| {
+            let _ = weak_full.upgrade_in_event_loop(move |ui| {
+                let img = Image::from_rgba8(buffer);
+                if index == ui.get_curr_image_index() as usize {
+                    ui.set_full_view_image(img);
+                    ui.set_mask_overlay(Image::default());
+                }
+            });
+        });
+
         let total = scan.paths.len();
         Self {
-            loader: Arc::new(ImageLoader::new(
-                scan.paths.clone(),
-                config.threads,
-                config.window_size,
-                plugin_manager,
-            )),
+            loader: Arc::new(loader),
             scan,
             active_grid_indices: HashSet::new(),
             filtered_indices: (0..total).collect(),
@@ -96,27 +133,7 @@ impl AppController {
             self.active_grid_indices.insert(row);
 
             let abs_idx = self.filtered_indices[row];
-            let weak = self.window_weak.clone();
-
-            match self
-                .loader
-                .load_grid_thumb(abs_idx, weak, move |ui, _, img| {
-                    let m = ui.get_grid_model();
-                    if let Some(mut item) = m.row_data(row) {
-                        item.image = img.clone();
-                        m.set_row_data(row, item);
-                    }
-                    let vm = ui.get_visible_grid_model();
-                    for i in 0..vm.row_count() {
-                        if let Some(mut v) = vm.row_data(i) {
-                            if v.index == row as i32 {
-                                v.image = img;
-                                vm.set_row_data(i, v);
-                                break;
-                            }
-                        }
-                    }
-                }) {
+            match self.loader.load_grid_thumb(abs_idx) {
                 Some(buf) => cached_updates.push((row, buf)),
                 None => {}
             }
@@ -148,14 +165,7 @@ impl AppController {
         let weak = self.window_weak.clone();
         let loader = self.loader.clone();
 
-        let loader_cb = loader.clone();
-        let on_loaded = move |ui: MainWindow, img: Image| {
-            ui.set_full_view_image(img);
-            ui.set_mask_overlay(Image::default());
-            Self::notify_interactive_plugin(&loader_cb);
-        };
-
-        let display_img = loader.load_full_progressive(index, weak.clone(), on_loaded);
+        let display_img = loader.load_full_progressive(index);
 
         if let Some(ui) = weak.upgrade() {
             ui.set_full_view_image(display_img);
