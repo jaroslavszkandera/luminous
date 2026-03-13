@@ -31,6 +31,8 @@ export component SidePanel inherits Rectangle {
 
 export enum PipelineStepKind {
     Rotate,
+    GaussianBlur,
+    Brighten,
 }
 
 export enum RotateAngle {
@@ -44,12 +46,17 @@ export struct PipelineStep {
     kind: PipelineStepKind,
     rotate-angle: RotateAngle,
     blur-sigma: float,
+    brighten-value: int,
 }
 
-export component RotateStepCard inherits Rectangle {
-    in-out property <RotateAngle> angle: RotateAngle.R90;
+component CloseButton inherits Button {
+    height: 20px;
+    text: "\u{1F5D9}";
+}
+
+component StepCard inherits Rectangle {
+    in property <string> title;
     callback remove();
-    callback angle-changed(RotateAngle);
 
     height: 76px;
     border-radius: 6px;
@@ -62,75 +69,143 @@ export component RotateStepCard inherits Rectangle {
         spacing: 6px;
 
         HorizontalLayout {
-            alignment: space-between;
+            spacing: 6px;
             Text {
-                text: "Rotate";
+                text: root.title;
                 color: Theme.text-main;
                 font-size: 12px;
                 font-weight: 600;
                 vertical-alignment: center;
+                horizontal-stretch: 1;
             }
 
-            Button {
-                text: "X";
-                width: 24px;
-                height: 24px;
+            CloseButton {
                 clicked => {
                     root.remove();
                 }
             }
         }
 
-        HorizontalLayout {
-            spacing: 6px;
-            Text {
-                text: "Angle:";
-                color: Theme.text-main.with-alpha(0.7);
-                font-size: 11px;
-                vertical-alignment: center;
-                width: 44px;
-            }
+        @children
+    }
+}
 
-            ComboBox {
-                model: ["90°", "180°", "270°", "Random"];
-                current-index: root.angle == RotateAngle.R90 ? 0 : root.angle == RotateAngle.R180 ? 1 : root.angle == RotateAngle.R270 ? 2 : 3;
-                selected(val) => {
-                    root.angle = val == "90°" ? RotateAngle.R90 : val == "180°" ? RotateAngle.R180 : val == "270°" ? RotateAngle.R270 : RotateAngle.Random;
-                    root.angle-changed(root.angle);
+export component RotateStepCard inherits StepCard {
+    title: "Rotate";
+    in-out property <RotateAngle> angle: RotateAngle.R90;
+    callback angle-changed(RotateAngle);
+
+    HorizontalLayout {
+        spacing: 6px;
+        Text {
+            text: "Angle";
+            color: Theme.text-main;
+            font-size: 12px;
+            vertical-alignment: center;
+            width: 44px;
+        }
+
+        ComboBox {
+            model: ["90°", "180°", "270°", "Random"];
+            current-index: root.angle == RotateAngle.R90 ? 0 : root.angle == RotateAngle.R180 ? 1 : root.angle == RotateAngle.R270 ? 2 : 3;
+            selected(val) => {
+                root.angle = val == "90°" ? RotateAngle.R90 : val == "180°" ? RotateAngle.R180 : val == "270°" ? RotateAngle.R270 : RotateAngle.Random;
+                root.angle-changed(root.angle);
+            }
+        }
+    }
+}
+
+export component GaussianBlurStepCard inherits StepCard {
+    title: "Gaussian Blur";
+    in-out property <float> sigma: 1.0;
+    callback sigma-changed(float);
+
+    HorizontalLayout {
+        spacing: 6px;
+        Text {
+            text: "Sigma:";
+            color: Theme.text-main;
+            font-size: 12px;
+            vertical-alignment: center;
+            width: 44px;
+        }
+
+        LineEdit {
+            text: root.sigma;
+            input-type: number;
+            placeholder-text: "1.0";
+            edited(val) => {
+                let f = val.to-float();
+                if (f > 0.0) {
+                    root.sigma = f;
+                    root.sigma-changed(f);
                 }
             }
+        }
+
+        Text {
+            text: "px";
+            color: Theme.text-main;
+            font-size: 10px;
+            vertical-alignment: center;
+        }
+    }
+}
+
+export component BrightenStepCard inherits StepCard {
+    title: "Brighten";
+    in-out property <int> value: 10;
+    callback brighten-changed(int);
+
+    HorizontalLayout {
+        spacing: 6px;
+        Text {
+            text: "Value:";
+            color: Theme.text-main;
+            font-size: 12px;
+            vertical-alignment: center;
+            width: 44px;
+        }
+
+        LineEdit {
+            text: root.value;
+            input-type: number;
+            placeholder-text: "10";
+            edited(val) => {
+                let v = val.to-float();
+                root.value = v;
+                root.brighten-changed(root.value);
+            }
+        }
+
+        Text {
+            text: "(-255 - 255)";
+            color: Theme.text-main;
+            font-size: 9px;
+            vertical-alignment: center;
         }
     }
 }
 
 export component AddStepMenu inherits Rectangle {
     callback add-rotate();
-    property <bool> open: false;
+    callback add-gaussian-blur();
+    callback add-brighten();
+
     height: 28px;
 
-    VerticalLayout {
-        Button {
-            text: "Add step";
-            height: 28px;
-            clicked => {
-                root.open = !root.open;
+    ComboBox {
+        model: ["Add step", "Rotate", "Brighten", "Gaussian Blur"];
+        selected(val) => {
+            if (val == "Rotate") {
+                root.add-rotate();
+            } else if (val == "Brighten") {
+                root.add-brighten();
+            } else if (val == "Gaussian Blur") {
+                root.add-gaussian-blur();
             }
-        }
-
-        if root.open: Rectangle {
-            background: Theme.surface;
-            border-width: 1px;
-            border-color: Theme.border;
-            drop-shadow-blur: 10px;
-            drop-shadow-color: #00000077;
-            Button {
-                text: "Rotate";
-                width: parent.width;
-                clicked => {
-                    root.open = false;
-                    root.add-rotate();
-                }
-            }
+            self.current-index = 0;
         }
     }
 }
@@ -140,37 +215,62 @@ export component PipelinePanel inherits Rectangle {
     callback request-add-step(PipelineStepKind);
     callback request-remove-step(int);
     callback request-update-rotate(int, RotateAngle);
+    callback request-update-sigma(int, float);
+    callback request-update-brighten(int, int);
     callback run-pipeline();
 
     VerticalLayout {
-        padding: 10px;
-        spacing: 8px;
-
-        Text {
+        pipeline-text := Text {
             text: "Pipeline";
             color: Theme.text-main;
             font-size: 14px;
             font-weight: 700;
         }
 
-        AddStepMenu {
+        add-step-menu := AddStepMenu {
             add-rotate => {
                 root.request-add-step(PipelineStepKind.Rotate);
+            }
+            add-gaussian-blur => {
+                root.request-add-step(PipelineStepKind.GaussianBlur);
+            }
+            add-brighten => {
+                root.request-add-step(PipelineStepKind.Brighten);
             }
         }
 
         ScrollView {
-            vertical-stretch: 1;
+            viewport-height: steps.length * 76px;
             VerticalLayout {
-                spacing: 6px;
-                alignment: start;
-                for step[i] in root.steps: RotateStepCard {
-                    angle: step.rotate-angle;
-                    remove => {
-                        root.request-remove-step(i);
+                for step[i] in root.steps: Rectangle {
+                    if step.kind == PipelineStepKind.Rotate: RotateStepCard {
+                        angle: step.rotate-angle;
+                        remove => {
+                            root.request-remove-step(i);
+                        }
+                        angle-changed(a) => {
+                            root.request-update-rotate(i, a);
+                        }
                     }
-                    angle-changed(a) => {
-                        root.request-update-rotate(i, a);
+
+                    if step.kind == PipelineStepKind.GaussianBlur: GaussianBlurStepCard {
+                        sigma: step.blur-sigma;
+                        remove => {
+                            root.request-remove-step(i);
+                        }
+                        sigma-changed(s) => {
+                            root.request-update-sigma(i, s);
+                        }
+                    }
+
+                    if step.kind == PipelineStepKind.Brighten: BrightenStepCard {
+                        value: step.brighten-value;
+                        remove => {
+                            root.request-remove-step(i);
+                        }
+                        brighten-changed(v) => {
+                            root.request-update-brighten(i, v);
+                        }
                     }
                 }
             }

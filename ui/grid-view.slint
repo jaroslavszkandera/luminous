@@ -40,6 +40,7 @@ export component GridView inherits Rectangle {
     callback pipeline_remove_step(int);
     callback pipeline_update_rotate(int, RotateAngle);
     callback pipeline_update_sigma(int, float);
+    callback pipeline_update_brighten(int, int);
     callback pipeline_run();
 
     public function focus_search() {
@@ -316,6 +317,12 @@ export component GridView inherits Rectangle {
                     }
                     request-update-rotate(i, a) => {
                         root.pipeline_update_rotate(i, a);
+                    }
+                    request-update-sigma(i, s) => {
+                        root.pipeline_update_sigma(i, s);
+                    }
+                    request-update-brighten(i, b) => {
+                        root.pipeline_update_brighten(i, b);
                     }
                     run-pipeline() => {
                         root.pipeline_run();

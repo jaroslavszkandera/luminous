@@ -22,6 +22,8 @@ impl StepFactory {
             steps: HashMap::new(),
         };
         f.register(PipelineStepKind::Rotate, RotateStep);
+        f.register(PipelineStepKind::GaussianBlur, GaussianBlurStep);
+        f.register(PipelineStepKind::Brighten, BrightenStep);
         f
     }
 
@@ -85,6 +87,28 @@ fn resolve_random_angle(angle: RotateAngle) -> RotateAngle {
         0 => RotateAngle::R90,
         1 => RotateAngle::R180,
         _ => RotateAngle::R270,
+    }
+}
+
+struct GaussianBlurStep;
+impl ProcessingStep for GaussianBlurStep {
+    fn name(&self) -> &'static str {
+        "GaussianBlur"
+    }
+
+    fn apply(&self, img: DynamicImage, params: &PipelineStep) -> DynamicImage {
+        img.blur(params.blur_sigma.max(0.1))
+    }
+}
+
+struct BrightenStep;
+impl ProcessingStep for BrightenStep {
+    fn name(&self) -> &'static str {
+        "Brighten"
+    }
+
+    fn apply(&self, img: DynamicImage, params: &PipelineStep) -> DynamicImage {
+        img.brighten(params.brighten_value)
     }
 }
 

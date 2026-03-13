@@ -562,16 +562,31 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
         let Some(ui) = c.borrow().window_weak.upgrade() else {
             return;
         };
-        let model = ui.get_pipeline_steps(); // ModelRc<PipelineStep>
+        let model = ui.get_pipeline_steps();
         let vec_model = model
             .as_any()
             .downcast_ref::<VecModel<PipelineStep>>()
             .expect("pipeline_steps must be a VecModel");
 
-        let new_step = PipelineStep {
-            kind,
-            rotate_angle: RotateAngle::R90,
-            blur_sigma: 1.0,
+        let new_step = match kind {
+            PipelineStepKind::Rotate => PipelineStep {
+                kind,
+                rotate_angle: RotateAngle::R90,
+                blur_sigma: 0.0,
+                brighten_value: 0,
+            },
+            PipelineStepKind::GaussianBlur => PipelineStep {
+                kind,
+                rotate_angle: RotateAngle::R90,
+                blur_sigma: 1.0,
+                brighten_value: 0,
+            },
+            PipelineStepKind::Brighten => PipelineStep {
+                kind,
+                rotate_angle: RotateAngle::R90,
+                blur_sigma: 0.0,
+                brighten_value: 10,
+            },
         };
         vec_model.push(new_step);
     });
@@ -619,6 +634,22 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
             .expect("pipeline_steps must be a VecModel");
         if let Some(mut step) = vec_model.row_data(index as usize) {
             step.blur_sigma = sigma;
+            vec_model.set_row_data(index as usize, step);
+        }
+    });
+
+    let c = controller.clone();
+    main_window.on_pipeline_update_brighten(move |index, value| {
+        let Some(ui) = c.borrow().window_weak.upgrade() else {
+            return;
+        };
+        let model = ui.get_pipeline_steps();
+        let vec_model = model
+            .as_any()
+            .downcast_ref::<VecModel<PipelineStep>>()
+            .expect("pipeline_steps must be a VecModel");
+        if let Some(mut step) = vec_model.row_data(index as usize) {
+            step.brighten_value = value;
             vec_model.set_row_data(index as usize, step);
         }
     });

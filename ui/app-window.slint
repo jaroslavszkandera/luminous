@@ -51,6 +51,7 @@ export component MainWindow inherits Window {
     callback pipeline_remove_step(int);
     callback pipeline_update_rotate(int, RotateAngle);
     callback pipeline_update_sigma(int, float);
+    callback pipeline_update_brighten(int, int);
     callback pipeline_run();
 
     // App Callbacks
@@ -182,6 +183,9 @@ export component MainWindow inherits Window {
         }
         pipeline_update_sigma(i, s) => {
             root.pipeline_update_sigma(i, s);
+        }
+        pipeline_update_brighten(i, b) => {
+            root.pipeline_update_brighten(i,b);
         }
         pipeline_run() => {
             root.pipeline_run();
