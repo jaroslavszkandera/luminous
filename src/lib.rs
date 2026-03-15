@@ -204,7 +204,7 @@ impl AppController {
         }
     }
 
-    fn handle_rotate(&self, degrees: i32) {
+    fn handle_edit_op(&self, op: EditOp) {
         let Some(buffer) = self.loader.get_curr_active_buffer() else {
             return;
         };
@@ -212,27 +212,50 @@ impl AppController {
         let weak = self.window_weak.clone();
 
         self.loader.pool.spawn(move || {
-            let img = {
-                let bytes: &[u8] = bytemuck::cast_slice(buffer.as_slice());
+            let bytes: &[u8] = bytemuck::cast_slice(buffer.as_slice());
+            let Some(rgba) =
                 image::RgbaImage::from_raw(buffer.width(), buffer.height(), bytes.to_vec())
+            else {
+                return;
             };
 
-            let Some(img) = img else { return };
+            let img = image::DynamicImage::ImageRgba8(rgba);
 
-            let rotated = match degrees {
-                90 => image::imageops::rotate90(&img),
-                -90 | 270 => image::imageops::rotate270(&img),
-                180 => image::imageops::rotate180(&img),
-                _ => img,
+            let mut save_to_cache = false;
+            let result = match op.kind {
+                EditOpKind::RotateCW => {
+                    save_to_cache = true;
+                    image::DynamicImage::ImageRgba8(image::imageops::rotate90(&img.to_rgba8()))
+                }
+                EditOpKind::RotateCCW => {
+                    save_to_cache = true;
+                    image::DynamicImage::ImageRgba8(image::imageops::rotate270(&img.to_rgba8()))
+                }
+                EditOpKind::FlipH => {
+                    save_to_cache = true;
+                    image::DynamicImage::ImageRgba8(image::imageops::flip_horizontal(
+                        &img.to_rgba8(),
+                    ))
+                }
+                EditOpKind::FlipV => {
+                    save_to_cache = true;
+                    image::DynamicImage::ImageRgba8(image::imageops::flip_vertical(&img.to_rgba8()))
+                }
+                EditOpKind::Brighten => img.brighten(op.int_val),
+                EditOpKind::Contrast => img.adjust_contrast(op.float_val),
             };
 
             let new_buf = SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
-                rotated.as_raw(),
-                rotated.width(),
-                rotated.height(),
+                result.to_rgba8().as_raw(),
+                result.width(),
+                result.height(),
             );
-            let active_idx = loader.active_idx.load(Ordering::Relaxed);
-            loader.cache_buffer(active_idx, new_buf.clone());
+
+            // Changing Brightness and Contrast is additive
+            if save_to_cache {
+                let active_idx = loader.active_idx.load(Ordering::Relaxed);
+                loader.cache_buffer(active_idx, new_buf.clone());
+            }
 
             let _ = weak.upgrade_in_event_loop(move |ui| {
                 ui.set_full_view_image(Image::from_rgba8(new_buf));
@@ -697,9 +720,9 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
     main_window.on_request_prev_image(move || c.borrow().handle_navigate(-1));
 
     let c = controller.clone();
-    main_window.on_rotate_plus_90(move || c.borrow().handle_rotate(90));
-    let c = controller.clone();
-    main_window.on_rotate_minus_90(move || c.borrow().handle_rotate(-90));
+    main_window.on_apply_edit(move |op| {
+        c.borrow().handle_edit_op(op);
+    });
 
     let c = controller.clone();
     main_window.on_save_with_format(move |format| {

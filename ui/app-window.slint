@@ -2,6 +2,7 @@ import { GridView, GridItem } from "grid-view.slint";
 import { FullView, MouseModeFull } from "full-view.slint";
 import { ImgFmt } from "common.slint";
 import { PipelineStep, PipelineStepKind, RotateAngle } from "side-panel.slint";
+import { EditOp, EditOpKind } from "edits-panel.slint";
 
 export enum ViewMode {
     full,
@@ -32,6 +33,7 @@ export component MainWindow inherits Window {
     callback rotate_plus_90();
     callback rotate_minus_90();
     callback request_segmentation(int, int);
+    callback apply_edit(EditOp);
     callback save_with_format(ImgFmt);
 
     // Grid view Callbacks
@@ -209,13 +211,16 @@ export component MainWindow inherits Window {
             root.request_prev_image();
         }
         rotate_plus_90 => {
-            root.rotate_plus_90();
+            root.apply_edit({ kind: EditOpKind.RotateCW, int_val: 0, float_val: 0 });
         }
         rotate_minus_90 => {
-            root.rotate_minus_90();
+            root.apply_edit({ kind: EditOpKind.RotateCCW, int_val: 0, float_val: 0 });
         }
         request_segmentation(x, y) => {
             root.request_segmentation(x, y);
+        }
+        apply_edit(op) => {
+            root.apply_edit(op);
         }
         save_with_format(image_format) => {
             root.save_with_format(image_format);

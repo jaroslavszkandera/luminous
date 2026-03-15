@@ -2,6 +2,7 @@ import { Theme } from "theme.slint";
 import { ImgFmt } from "common.slint";
 import { SidePanel } from "side-panel.slint";
 import { Button } from "std-widgets.slint";
+import { EditsPanel, EditOp } from "edits-panel.slint";
 
 export enum MouseModeFull {
     select,
@@ -26,6 +27,7 @@ export component FullView inherits TouchArea {
     callback exit_full_view();
     callback request_segmentation(int, int);
     callback save_with_format(ImgFmt);
+    callback apply_edit(EditOp);
 
     property <string> display_coords: "0,0";
     property <float> zoom_scale: 1.0;
@@ -298,28 +300,10 @@ export component FullView inherits TouchArea {
         side_panel := SidePanel {
             is_visible: root.panel_visible;
             side_width <=> root.side_panel_width;
-            sam-widget := Rectangle {
-                height: 48px;
-                border-color: Theme.surface.darker(10%);
-                border-radius: 6px;
-                border-width: 1px;
 
-                VerticalLayout {
-                    Text {
-                        color: white;
-                        text: "SAM state: " + root.plugin_status;
-                    }
-
-                    HorizontalLayout {
-                        height: 24px;
-                        Button {
-                            text: "click";
-                        }
-
-                        Button {
-                            text: "rect";
-                        }
-                    }
+            EditsPanel {
+                apply-edit(op) => {
+                    root.apply_edit(op);
                 }
             }
         }
