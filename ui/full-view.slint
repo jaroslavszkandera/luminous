@@ -1,7 +1,6 @@
-import { Theme } from "theme.slint";
 import { ImgFmt } from "common.slint";
 import { SidePanel } from "side-panel.slint";
-import { Button } from "std-widgets.slint";
+import { Button, Palette } from "std-widgets.slint";
 import { EditsPanel, EditOp } from "edits-panel.slint";
 
 export enum MouseModeFull {
@@ -34,7 +33,7 @@ export component FullView inherits TouchArea {
     property <length> last_coords_x;
     property <length> last_coords_y;
 
-    property <MouseModeFull> mouse_mode_full: MouseModeFull.segment;
+    property <MouseModeFull> mouse_mode_full: MouseModeFull.select;
     mouse-cursor: (mouse_mode_full == MouseModeFull.select) ? crosshair : (mouse_mode_full == MouseModeFull.drag && self.pressed && zoom_scale > 1.0) ? grabbing : (mouse_mode_full == MouseModeFull.drag && zoom_scale > 1.0) ? grab : default;
 
     property <length> start_drag_x;
@@ -214,15 +213,13 @@ export component FullView inherits TouchArea {
                 height: 16px;
                 y: parent.height - self.height;
                 width: parent.width;
-                background: Theme.overlay;
+                background: Palette.background.with-alpha(50%);
                 Text {
                     x: 5px;
-                    color: Theme.text-main;
                     text: (curr_image_index + 1) + "/" + root.total_images;
                 }
 
                 Text {
-                    color: Theme.text-main;
                     horizontal-alignment: center;
                     vertical-alignment: center;
                     text: curr_image_name;
@@ -230,7 +227,6 @@ export component FullView inherits TouchArea {
 
                 Text {
                     x: parent.width - self.width - 5px;
-                    color: Theme.text-main;
                     text: "[x,y]=[" + display_coords + "]";
                 }
             }
@@ -241,8 +237,8 @@ export component FullView inherits TouchArea {
                 width: root.selection_width;
                 height: root.selection_height;
                 visible: root.is_selecting || (root.selection_width > 0px && mouse_mode_full == MouseModeFull.select);
-                background: Theme.primary-semi;
-                border-color: Theme.primary;
+                background: Palette.accent-background.with-alpha(25%);
+                border-color: Palette.accent-background.with-alpha(75%);
                 border-width: 1px;
             }
 

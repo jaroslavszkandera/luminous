@@ -3,6 +3,7 @@ import { FullView, MouseModeFull } from "full-view.slint";
 import { ImgFmt } from "common.slint";
 import { PipelineStep, PipelineStepKind, RotateAngle } from "side-panel.slint";
 import { EditOp, EditOpKind } from "edits-panel.slint";
+import { Palette } from "std-widgets.slint";
 
 export enum ViewMode {
     full,
@@ -60,7 +61,7 @@ export component MainWindow inherits Window {
     callback quit_app();
 
     // State
-    in property <color> app_background: #000000;
+    in property <color> app_background: Palette.background;
     in property <[GridItem]> grid_model;
     in property <[GridItem]> visible_grid_model;
     in property <image> full_view_image;
