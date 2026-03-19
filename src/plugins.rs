@@ -1,3 +1,4 @@
+use core::option::Option;
 use dlopen2::wrapper::{Container, WrapperApi};
 use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
@@ -10,6 +11,7 @@ use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::mpsc::{self, SyncSender};
 use std::sync::{Arc, Mutex, RwLock};
 
 // Expected ABI for shared libs
@@ -72,6 +74,13 @@ pub enum IpcCmd {
         x: u32,
         y: u32,
     },
+    RectSelect {
+        shm_name: String,
+        x1: u32,
+        y1: u32,
+        x2: u32,
+        y2: u32,
+    },
 }
 
 #[derive(Deserialize, Debug)]
@@ -82,7 +91,7 @@ pub enum IpcResponse {
     Error { message: String },
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum IpcStatus {
     Init,
     Busy,
@@ -102,12 +111,33 @@ pub struct ActiveShmem {
     pub height: u32,
 }
 
+struct PendingImage {
+    buffer: SharedPixelBuffer<Rgba8Pixel>,
+    token: u32,
+}
+
+enum IpcRequest {
+    Click {
+        x: u32,
+        y: u32,
+        result_tx: mpsc::SyncSender<Option<SharedPixelBuffer<Rgba8Pixel>>>,
+    },
+    RectSelect {
+        x1: u32,
+        y1: u32,
+        x2: u32,
+        y2: u32,
+        result_tx: mpsc::SyncSender<Option<SharedPixelBuffer<Rgba8Pixel>>>,
+    },
+    ImagePending,
+}
+
 pub struct InteractiveDaemon {
     pub manifest_name: String,
-    stream: Arc<Mutex<Option<TcpStream>>>,
     process: Mutex<Option<Child>>,
-    active_shm: Arc<Mutex<Option<ActiveShmem>>>,
-    pending_image: Arc<Mutex<Option<SharedPixelBuffer<Rgba8Pixel>>>>,
+    tx: SyncSender<IpcRequest>,
+    pending_image: Arc<Mutex<Option<PendingImage>>>,
+    image_token: Arc<std::sync::atomic::AtomicU32>,
     status: Arc<RwLock<IpcStatus>>,
     on_status_change: Arc<Mutex<Option<Box<dyn Fn(IpcStatus) + Send + Sync>>>>,
 }
@@ -115,31 +145,24 @@ pub struct InteractiveDaemon {
 impl InteractiveDaemon {
     pub fn new(manifest: &PluginManifest, dir_path: &Path) -> Arc<Self> {
         let port = manifest.daemon_port.unwrap_or(50051);
-        let mut process = None;
-        let daemon = Arc::new(Self {
-            manifest_name: manifest.name.clone(),
-            stream: Arc::new(Mutex::new(None)),
-            process: Mutex::new(None),
-            active_shm: Arc::new(Mutex::new(None)),
-            pending_image: Arc::new(Mutex::new(None)),
-            status: Arc::new(RwLock::new(IpcStatus::Init)),
-            on_status_change: Arc::new(Mutex::new(None)),
-        });
-        // FIX: Callback on_status_change is not yet initialized
-        // daemon.set_status(IpcStatus::Init);
 
+        let (tx, rx) = mpsc::sync_channel::<IpcRequest>(1);
+
+        let status = Arc::new(RwLock::new(IpcStatus::Init));
+        let on_status_change: Arc<Mutex<Option<Box<dyn Fn(IpcStatus) + Send + Sync>>>> =
+            Arc::new(Mutex::new(None));
+        let pending_image: Arc<Mutex<Option<PendingImage>>> = Arc::new(Mutex::new(None));
+        let image_token = Arc::new(std::sync::atomic::AtomicU32::new(0));
+
+        let mut process = None;
         if let Some(interpreter) = &manifest.interpreter {
             let parts: Vec<&str> = interpreter.split_whitespace().collect();
-            if let Some((&cmd_exe, cmd_args)) = parts.split_first() {
-                let script_name = "main.py"; // tmp
-                info!(
-                    "Starting daemon process: {} {:?} {}",
-                    cmd_exe, cmd_args, script_name
-                );
-
-                process = Command::new(cmd_exe)
-                    .args(cmd_args)
-                    .arg(script_name)
+            if let Some((&exe, args)) = parts.split_first() {
+                let script = "main.py";
+                info!("Starting daemon: {} {:?} {}", exe, args, script);
+                process = Command::new(exe)
+                    .args(args)
+                    .arg(script)
                     .current_dir(dir_path)
                     .stdout(Stdio::inherit())
                     .stderr(Stdio::inherit())
@@ -147,27 +170,136 @@ impl InteractiveDaemon {
                     .ok();
             }
         }
-        *daemon.process.lock().unwrap() = process;
 
-        let stream_clone = daemon.stream.clone();
-        let pending_clone = daemon.pending_image.clone();
-        let active_shm_clone = daemon.active_shm.clone();
-        let daemon_clone = daemon.clone();
+        let daemon = Arc::new(Self {
+            manifest_name: manifest.name.clone(),
+            process: Mutex::new(process),
+            tx,
+            pending_image: pending_image.clone(),
+            image_token: image_token.clone(),
+            status: status.clone(),
+            on_status_change: on_status_change.clone(),
+        });
 
+        let status_thread = status.clone();
+        let on_status_thread = on_status_change.clone();
         std::thread::spawn(move || {
+            let set_status = |s: IpcStatus| {
+                *status_thread.write().unwrap() = s.clone();
+                if let Some(cb) = on_status_thread.lock().unwrap().as_ref() {
+                    cb(s);
+                }
+            };
+
+            let mut stream = None;
             for _ in 0..20 {
-                if let Ok(mut s) = TcpStream::connect(("127.0.0.1", port)) {
-                    info!("Successfully connected to daemon on port {}", port);
-                    if let Some(img) = pending_clone.lock().unwrap().take() {
-                        let _ = Self::send_image(&daemon_clone, &mut s, &active_shm_clone, &img);
+                match TcpStream::connect(("127.0.0.1", port)) {
+                    Ok(s) => {
+                        info!("Connected to daemon on port {port}");
+                        stream = Some(s);
+                        break;
                     }
-                    *stream_clone.lock().unwrap() = Some(s);
+                    Err(_) => std::thread::sleep(std::time::Duration::from_millis(500)),
+                }
+            }
+            let mut stream = match stream {
+                Some(s) => s,
+                None => {
+                    error!("Failed to connect to daemon after 10s");
+                    set_status(IpcStatus::Error);
                     return;
                 }
-                std::thread::sleep(std::time::Duration::from_millis(500));
+            };
+
+            debug!("Setting initial image");
+            if let Some(pending) = pending_image.lock().unwrap().take() {
+                set_status(IpcStatus::Busy);
+                let current_token = image_token.load(std::sync::atomic::Ordering::Acquire);
+                if pending.token == current_token {
+                    match Self::ipc_send_image(&mut stream, &pending.buffer) {
+                        Ok(_shm) => {
+                            debug!("Initial image set, ready!");
+                            set_status(IpcStatus::Ready)
+                        }
+                        Err(e) => {
+                            error!("Initial send_image failed: {e}");
+                            set_status(IpcStatus::Error);
+                        }
+                    }
+                } else {
+                    debug!(
+                        "Initial pending image superseded (token {} vs {}), skipping",
+                        pending.token, current_token
+                    );
+                    set_status(IpcStatus::Ready);
+                }
+            } else {
+                error!("Initial image is not present, not setting");
             }
-            daemon_clone.set_status(IpcStatus::Error);
-            error!("Failed to connect to daemon after 10 seconds.");
+
+            let mut active_shm: Option<ActiveShmem> = None;
+
+            while let Ok(req) = rx.recv() {
+                match req {
+                    IpcRequest::ImagePending => {
+                        let Some(pending) = pending_image.lock().unwrap().take() else {
+                            continue;
+                        };
+                        let current_token = image_token.load(std::sync::atomic::Ordering::Acquire);
+                        if pending.token < current_token {
+                            debug!(
+                                "Skipping stale embedding (token {} < {})",
+                                pending.token, current_token
+                            );
+                            continue;
+                        }
+                        set_status(IpcStatus::Busy);
+                        match Self::ipc_send_image(&mut stream, &pending.buffer) {
+                            Ok(shm) => {
+                                if pending.token
+                                    == image_token.load(std::sync::atomic::Ordering::Acquire)
+                                {
+                                    active_shm = Some(shm);
+                                    set_status(IpcStatus::Ready);
+                                } else {
+                                    debug!("Embedding finished but image changed, discarding SHM");
+                                    set_status(IpcStatus::Busy);
+                                }
+                            }
+                            Err(e) => {
+                                error!("send_image failed: {e}");
+                                set_status(IpcStatus::Error);
+                            }
+                        }
+                    }
+
+                    IpcRequest::Click { x, y, result_tx } => {
+                        let result = active_shm.as_ref().and_then(|shm| {
+                            Self::ipc_click(&mut stream, shm, x, y)
+                                .map_err(|e| error!("click failed: {e}"))
+                                .ok()
+                                .flatten()
+                        });
+                        let _ = result_tx.send(result);
+                    }
+
+                    IpcRequest::RectSelect {
+                        x1,
+                        y1,
+                        x2,
+                        y2,
+                        result_tx,
+                    } => {
+                        let result = active_shm.as_ref().and_then(|shm| {
+                            Self::ipc_rect_select(&mut stream, shm, x1, y1, x2, y2)
+                                .map_err(|e| error!("rect_select failed: {e}"))
+                                .ok()
+                                .flatten()
+                        });
+                        let _ = result_tx.send(result);
+                    }
+                }
+            }
         });
 
         daemon
@@ -180,178 +312,174 @@ impl InteractiveDaemon {
         *self.on_status_change.lock().unwrap() = Some(Box::new(callback));
     }
 
-    fn set_status(&self, new_status: IpcStatus) {
-        {
-            *self.status.write().unwrap() = new_status.clone();
-        }
-        if let Some(callback) = self.on_status_change.lock().unwrap().as_ref() {
-            callback(new_status);
+    pub fn status(&self) -> IpcStatus {
+        self.status.read().unwrap().clone()
+    }
+
+    pub fn set_interactive_image(&self, buffer: &SharedPixelBuffer<Rgba8Pixel>) -> bool {
+        let token = self
+            .image_token
+            .fetch_add(1, std::sync::atomic::Ordering::AcqRel)
+            + 1;
+        *self.pending_image.lock().unwrap() = Some(PendingImage {
+            buffer: buffer.clone(),
+            token,
+        });
+
+        match self.tx.try_send(IpcRequest::ImagePending) {
+            Ok(_) | Err(mpsc::TrySendError::Full(_)) => true,
+            Err(mpsc::TrySendError::Disconnected(_)) => {
+                error!("IPC thread disconnected");
+                false
+            }
         }
     }
 
+    pub fn interactive_click(&self, x: u32, y: u32) -> Option<SharedPixelBuffer<Rgba8Pixel>> {
+        let (result_tx, result_rx) = mpsc::sync_channel(1);
+        self.tx
+            .try_send(IpcRequest::Click { x, y, result_tx })
+            .map_err(|e| warn!("click enqueue failed: {e}"))
+            .ok()?;
+        result_rx.recv().ok().flatten()
+    }
+
+    pub fn interactive_rect_select(
+        &self,
+        x1: u32,
+        y1: u32,
+        x2: u32,
+        y2: u32,
+    ) -> Option<SharedPixelBuffer<Rgba8Pixel>> {
+        let (result_tx, result_rx) = mpsc::sync_channel(1);
+        self.tx
+            .try_send(IpcRequest::RectSelect {
+                x1,
+                y1,
+                x2,
+                y2,
+                result_tx,
+            })
+            .map_err(|e| warn!("rect_select enqueue failed: {e}"))
+            .ok()?;
+        result_rx.recv().ok().flatten()
+    }
+
     fn send_msg(stream: &mut TcpStream, cmd: &IpcCmd) -> Result<(), Box<dyn std::error::Error>> {
-        debug!("Send: {:?}", cmd);
+        debug!("IPC send: {:?}", cmd);
         let payload = serde_json::to_vec(cmd)?;
-        let len = (payload.len() as u32).to_be_bytes();
-        stream.write_all(&len)?;
+        stream.write_all(&(payload.len() as u32).to_be_bytes())?;
         stream.write_all(&payload)?;
         Ok(())
     }
 
     fn recv_msg(stream: &mut TcpStream) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-        debug!("Recv: attempting to read payload len prefix");
         let mut len_buf = [0u8; 4];
         stream.read_exact(&mut len_buf)?;
-        let len = u32::from_be_bytes(len_buf) as usize;
-        debug!("Recv: payload len prefix: {len}, attempting to read payload");
-
-        let mut payload = vec![0u8; len];
+        let mut payload = vec![0u8; u32::from_be_bytes(len_buf) as usize];
         stream.read_exact(&mut payload)?;
-        debug!("Recv: payload read successfully");
         Ok(payload)
     }
 
-    fn send_image(
-        &self,
+    fn ipc_send_image(
         stream: &mut TcpStream,
-        active_shm: &Mutex<Option<ActiveShmem>>,
         buffer: &SharedPixelBuffer<Rgba8Pixel>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        self.set_status(IpcStatus::Busy);
-        let width = buffer.width();
-        let height = buffer.height();
-        let size = (width * height * 4) as usize;
-        let mask_size = (width * height) as usize;
-
-        let img_mem = ShmemConf::new().size(size).create()?;
-        let mask_mem = ShmemConf::new().size(mask_size).create()?;
+    ) -> Result<ActiveShmem, Box<dyn std::error::Error>> {
+        let (w, h) = (buffer.width(), buffer.height());
+        let img_mem = ShmemConf::new().size((w * h * 4) as usize).create()?;
+        let mask_mem = ShmemConf::new().size((w * h) as usize).create()?;
 
         unsafe {
             std::ptr::copy_nonoverlapping(
                 buffer.as_slice().as_ptr() as *const u8,
                 img_mem.as_ptr(),
-                size,
+                (w * h * 4) as usize,
             );
         }
 
-        let cmd = IpcCmd::SetImage {
-            shm_name: img_mem.get_os_id().into(),
-            width,
-            height,
-        };
+        Self::send_msg(
+            stream,
+            &IpcCmd::SetImage {
+                shm_name: img_mem.get_os_id().into(),
+                width: w,
+                height: h,
+            },
+        )?;
 
-        Self::send_msg(stream, &cmd)?;
-        let resp: IpcResponse = serde_json::from_slice(&Self::recv_msg(stream)?)?;
-        match resp {
-            IpcResponse::Ok => {
-                *active_shm.lock().unwrap() = Some(ActiveShmem {
-                    img: ShmemWrapper(img_mem),
-                    mask: ShmemWrapper(mask_mem),
-                    width,
-                    height,
-                });
-
-                self.set_status(IpcStatus::Ready);
-                Ok(())
-            }
-            IpcResponse::Busy => {
-                self.set_status(IpcStatus::Busy);
-                Err("Daemon is busy processing another request".into())
-            }
-            IpcResponse::Error { message } => {
-                self.set_status(IpcStatus::Error);
-                Err(format!("Daemon error: {}", message).into())
-            }
+        match serde_json::from_slice::<IpcResponse>(&Self::recv_msg(stream)?)? {
+            IpcResponse::Ok => Ok(ActiveShmem {
+                img: ShmemWrapper(img_mem),
+                mask: ShmemWrapper(mask_mem),
+                width: w,
+                height: h,
+            }),
+            IpcResponse::Busy => Err("daemon busy".into()),
+            IpcResponse::Error { message } => Err(message.into()),
         }
     }
 
-    pub fn set_interactive_image(&self, buffer: &SharedPixelBuffer<Rgba8Pixel>) {
-        let mut stream_guard = self.stream.lock().unwrap();
-        if let Some(s) = stream_guard.as_mut() {
-            if let Err(e) = Self::send_image(&self, s, &self.active_shm, buffer) {
-                error!("Daemon image sync failed: {}", e);
-                return;
-            }
-        } else {
-            *self.pending_image.lock().unwrap() = Some(buffer.clone());
-        }
+    fn ipc_click(
+        stream: &mut TcpStream,
+        shm: &ActiveShmem,
+        x: u32,
+        y: u32,
+    ) -> Result<Option<SharedPixelBuffer<Rgba8Pixel>>, Box<dyn std::error::Error>> {
+        Self::send_msg(
+            stream,
+            &IpcCmd::Click {
+                shm_name: shm.mask.0.get_os_id().into(),
+                x,
+                y,
+            },
+        )?;
+        Self::read_mask_response(stream, shm)
     }
 
-    pub fn interactive_click(&self, x: u32, y: u32) -> Option<SharedPixelBuffer<Rgba8Pixel>> {
-        debug!("Interative click requested: [{},{}]", x, y);
-        let shm_guard = self
-            .active_shm
-            .try_lock()
-            .map_err(|e| {
-                warn!("Active SHM busy: {:?}", e);
-                self.set_status(IpcStatus::Busy);
-                e
-            })
-            .ok()?;
-        let active = shm_guard.as_ref().or_else(|| {
-            error!("Click received but no active image SHM found in daemon");
-            None
-        })?;
+    fn ipc_rect_select(
+        stream: &mut TcpStream,
+        shm: &ActiveShmem,
+        x1: u32,
+        y1: u32,
+        x2: u32,
+        y2: u32,
+    ) -> Result<Option<SharedPixelBuffer<Rgba8Pixel>>, Box<dyn std::error::Error>> {
+        Self::send_msg(
+            stream,
+            &IpcCmd::RectSelect {
+                shm_name: shm.mask.0.get_os_id().into(),
+                x1,
+                y1,
+                x2,
+                y2,
+            },
+        )?;
+        Self::read_mask_response(stream, shm)
+    }
 
-        let cmd = IpcCmd::Click {
-            shm_name: active.mask.0.get_os_id().into(),
-            x,
-            y,
-        };
-
-        let mut stream_guard = self
-            .stream
-            .try_lock()
-            .map_err(|e| {
-                self.set_status(IpcStatus::Busy);
-                warn!("TCP stream busy: {:?}", e);
-                e
-            })
-            .ok()?;
-        let stream = stream_guard.as_mut().or_else(|| {
-            error!("Daemon stream not connected");
-            None
-        })?;
-
-        if let Err(e) = Self::send_msg(stream, &cmd) {
-            error!("Failed to send click to daemon: {}", e);
-            return None;
-        }
-
-        let resp_bytes = Self::recv_msg(stream).ok()?;
-        let resp: IpcResponse = serde_json::from_slice(&resp_bytes).ok()?;
-        match resp {
+    fn read_mask_response(
+        stream: &mut TcpStream,
+        shm: &ActiveShmem,
+    ) -> Result<Option<SharedPixelBuffer<Rgba8Pixel>>, Box<dyn std::error::Error>> {
+        match serde_json::from_slice::<IpcResponse>(&Self::recv_msg(stream)?)? {
             IpcResponse::Ok => {
-                debug!("ICP response is okay, setting mask");
-                let w = active.width;
-                let h = active.height;
-                let size = (w * h) as usize;
-                let mask_data = unsafe { std::slice::from_raw_parts(active.mask.0.as_ptr(), size) };
-
-                let mut raw_bytes = Vec::with_capacity(size * 4);
-                for &val in mask_data.iter() {
-                    if val > 0 {
-                        raw_bytes.extend_from_slice(&[255, 0, 0, 128]);
+                let (w, h) = (shm.width, shm.height);
+                let mask_data =
+                    unsafe { std::slice::from_raw_parts(shm.mask.0.as_ptr(), (w * h) as usize) };
+                let mut rgba = Vec::with_capacity((w * h * 4) as usize);
+                for &v in mask_data {
+                    if v > 0 {
+                        rgba.extend_from_slice(&[255u8, 0, 0, 128]);
                     } else {
-                        raw_bytes.extend_from_slice(&[0, 0, 0, 0]);
+                        rgba.extend_from_slice(&[0u8, 0, 0, 0]);
                     }
                 }
-
-                self.set_status(IpcStatus::Ready);
-                Some(SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
-                    &raw_bytes, w, h,
-                ))
+                Ok(Some(SharedPixelBuffer::clone_from_slice(&rgba, w, h)))
             }
             IpcResponse::Busy => {
-                self.set_status(IpcStatus::Busy);
-                error!("Daemon is busy processing another request");
-                return None;
+                warn!("Daemon busy during prediction");
+                Ok(None)
             }
-            IpcResponse::Error { message } => {
-                self.set_status(IpcStatus::Error);
-                error!("Daemon error: {}", message);
-                return None;
-            }
+            IpcResponse::Error { message } => Err(message.into()),
         }
     }
 }
@@ -359,7 +487,7 @@ impl InteractiveDaemon {
 impl Drop for InteractiveDaemon {
     fn drop(&mut self) {
         if let Some(mut child) = self.process.lock().unwrap().take() {
-            info!("Shutting down daemon process for '{}'", self.manifest_name);
+            info!("Killing daemon '{}'", self.manifest_name);
             let _ = child.kill();
             let _ = child.wait();
         }
@@ -538,17 +666,31 @@ impl Plugin {
     // --- Shared library methods
 
     // --- IPC Methods ---
-    pub fn set_interactive_image(&self, buffer: &SharedPixelBuffer<Rgba8Pixel>) {
-        if let PluginBackend::Daemon(daemon) = &self.backend {
-            daemon.set_interactive_image(buffer);
+    /// Non-blocking; returns false if the daemon is already processing an image.
+    pub fn set_interactive_image(&self, buffer: &SharedPixelBuffer<Rgba8Pixel>) -> bool {
+        match &self.backend {
+            PluginBackend::Daemon(d) => d.set_interactive_image(buffer),
+            _ => false,
         }
     }
 
     pub fn interactive_click(&self, x: u32, y: u32) -> Option<SharedPixelBuffer<Rgba8Pixel>> {
-        if let PluginBackend::Daemon(daemon) = &self.backend {
-            daemon.interactive_click(x, y)
-        } else {
-            None
+        match &self.backend {
+            PluginBackend::Daemon(d) => d.interactive_click(x, y),
+            _ => None,
+        }
+    }
+
+    pub fn interactive_rect_select(
+        &self,
+        x1: u32,
+        y1: u32,
+        x2: u32,
+        y2: u32,
+    ) -> Option<SharedPixelBuffer<Rgba8Pixel>> {
+        match &self.backend {
+            PluginBackend::Daemon(d) => d.interactive_rect_select(x1, y1, x2, y2),
+            _ => None,
         }
     }
 
@@ -556,8 +698,8 @@ impl Plugin {
     where
         F: Fn(IpcStatus) + Send + Sync + 'static,
     {
-        if let PluginBackend::Daemon(daemon) = &self.backend {
-            daemon.on_status_change(callback);
+        if let PluginBackend::Daemon(d) = &self.backend {
+            d.on_status_change(callback);
         }
     }
     // --- IPC Methods ---

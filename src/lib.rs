@@ -14,7 +14,7 @@ use image_processing::{batch_save_images, save_image};
 use pipeline::{StepFactory, run_pipeline_on_selection};
 use plugins::{IpcStatus, PluginManager};
 
-use log::{debug, info};
+use log::{debug, error, info};
 use slint::{Image, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, VecModel};
 use std::cell::RefCell;
 use std::cmp;
@@ -176,6 +176,8 @@ impl AppController {
             }
             if loader.full_cache_contains(index) {
                 Self::notify_interactive_plugin(&loader);
+            } else {
+                error!("Does not contain, not setting");
             }
         }
 
