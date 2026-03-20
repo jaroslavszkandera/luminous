@@ -1,0 +1,231 @@
+import { GridView } from "grid-view.slint";
+import { FullView } from "full-view.slint";
+import { Palette } from "std-widgets.slint";
+import { ImgFmt, EditOp, GridItem, ViewMode } from "common.slint";
+import { PipelineStep, PipelineStepKind, RotateAngle } from "side-panel.slint";
+
+export { GridItem, ViewMode } from "common.slint";
+
+export component MainWindow inherits Window {
+    title: "Luminous";
+    background: app-background;
+    preferred-width: 1280px;
+    preferred-height: 720px;
+    full-screen: self.is-fullscreen;
+
+    // Bindings
+    in property <string> bind-quit;
+    in property <string> bind-fullscreen;
+    in property <string> bind-switch-view-mode;
+    in property <string> bind-reset-zoom;
+    in property <string> bind-grid-pg-dn;
+    in property <string> bind-grid-pg-up;
+    in property <string> bind-switch-mouse-mode;
+    in property <string> bind-toggle-side-panel;
+
+    // Full view Callbacks
+    callback request-next-image();
+    callback request-prev-image();
+    callback request-segmentation(int, int);
+    callback apply-edit(EditOp);
+    callback save-with-format(ImgFmt);
+
+    // Grid view Callbacks
+    callback request-grid-data(int, int);
+    callback image-selected(int);
+    callback bucket-resolution-changed(int);
+    callback search-submitted(string);
+    callback toggle-select-all(bool);
+    callback request-range-select(int, int);
+    callback print-selected-paths();
+    callback toggle-selection(int);
+    callback batch-save-with-format(ImgFmt);
+
+    // Pipeline
+    in-out property <[PipelineStep]> pipeline-steps;
+    callback pipeline-add-step(PipelineStepKind);
+    callback pipeline-remove-step(int);
+    callback pipeline-update-rotate(int, RotateAngle);
+    callback pipeline-update-sigma(int, float);
+    callback pipeline-update-brighten(int, int);
+    callback pipeline-run();
+
+    // App Callbacks
+    callback quit-app();
+
+    // State
+    in property <color> app-background: Palette.background;
+    in property <[GridItem]> grid-model;
+    in property <[GridItem]> visible-grid-model;
+    in property <image> full-view-image;
+    in-out property <int> curr-image-index: 0;
+    in property <string> curr-image-name;
+    in-out property <ViewMode> view-mode: ViewMode.grid;
+    in-out property <bool> is-fullscreen: false;
+    in-out property <int> grid-cols: 5;
+    in-out property <int> selected-count: 0;
+
+    in property <image> mask-overlay;
+    in property <string> plugin-status: "Initializing...";
+
+    public function return-focus() {
+        key-handler.focus();
+    }
+
+    forward-focus: key-handler;
+    key-handler := FocusScope {
+        key-pressed(event) => {
+            if (event.text == root.bind-quit) {
+                root.quit-app();
+                return accept;
+            }
+            if (event.text == root.bind-fullscreen) {
+                root.is-fullscreen = !root.is-fullscreen;
+                return accept;
+            }
+            if (event.text == root.bind-switch-view-mode) {
+                root.view-mode = root.view-mode == ViewMode.full ? ViewMode.grid : ViewMode.full;
+                full-ui.reset-zoom();
+                return accept;
+            }
+            if (root.view-mode == ViewMode.full) {
+                if (event.text == "h" || event.text == Key.LeftArrow) {
+                    full-ui.reset-zoom();
+                    root.request-prev-image();
+                    return accept;
+                }
+                if (event.text == "l" || event.text == Key.RightArrow) {
+                    full-ui.reset-zoom();
+                    root.request-next-image();
+                    return accept;
+                }
+                if (event.text == root.bind-reset-zoom) {
+                    full-ui.reset-zoom();
+                    return accept;
+                }
+                if (event.text == root.bind-switch-mouse-mode) {
+                    full-ui.toggle-mouse-mode();
+                    return accept;
+                }
+                if (event.text == root.bind-toggle-side-panel) {
+                    full-ui.panel-visible = !full-ui.panel-visible;
+                    return accept;
+                }
+            } else if (root.view-mode == ViewMode.grid) {
+                if (event.text == root.bind-grid-pg-dn) {
+                    grid-ui.page-down();
+                    return accept;
+                }
+                if (event.text == root.bind-grid-pg-up) {
+                    grid-ui.page-up();
+                    return accept;
+                }
+                if (event.text == "=" || event.text == "+") {
+                    grid-ui.update-grid-cols(grid-cols - 1);
+                    return accept;
+                }
+                if (event.text == "-" || event.text == "_") {
+                    grid-ui.update-grid-cols(grid-cols + 1);
+                    return accept;
+                }
+                if (event.text == "/") {
+                    grid-ui.focus-search();
+                    return accept;
+                }
+                if (event.text == root.bind-toggle-side-panel) {
+                    grid-ui.panel-visible = !grid-ui.panel-visible;
+                    return accept;
+                }
+            }
+            reject
+        }
+    }
+
+    grid-ui := GridView {
+        visible: root.view-mode == ViewMode.grid;
+        visible-model: root.visible-grid-model;
+        model: root.grid-model;
+        grid-cols <=> root.grid-cols;
+        forward-focus: key-handler;
+        selected-count <=> root.selected-count;
+        pipeline-steps <=> root.pipeline-steps;
+
+        request-grid-data(start, count) => {
+            root.request-grid-data(start, count);
+        }
+        bucket-resolution-changed(res) => {
+            root.bucket-resolution-changed(res);
+        }
+        image-selected(idx) => {
+            root.image-selected(idx);
+            root.view-mode = ViewMode.full;
+        }
+        search-submitted(query) => {
+            root.search-submitted(query);
+            root.return-focus();
+        }
+        toggle-select-all(select) => {
+            root.toggle-select-all(select);
+        }
+        request-range-select(start-idx, end-idx) => {
+            root.request-range-select(start-idx, end-idx);
+        }
+        print-selected-paths() => {
+            root.print-selected-paths();
+        }
+        toggle-selection(idx) => {
+            root.toggle-selection(idx);
+        }
+        batch-save-with-format(fmt) => {
+            root.batch-save-with-format(fmt);
+        }
+        pipeline-add-step(k) => {
+            root.pipeline-add-step(k);
+        }
+        pipeline-remove-step(i) => {
+            root.pipeline-remove-step(i);
+        }
+        pipeline-update-rotate(i, a) => {
+            root.pipeline-update-rotate(i, a);
+        }
+        pipeline-update-sigma(i, s) => {
+            root.pipeline-update-sigma(i, s);
+        }
+        pipeline-update-brighten(i, b) => {
+            root.pipeline-update-brighten(i, b);
+        }
+        pipeline-run() => {
+            root.pipeline-run();
+        }
+    }
+
+    full-ui := FullView {
+        visible: root.view-mode == ViewMode.full;
+        timer-running: root.view-mode == ViewMode.full;
+        current-image: root.full-view-image;
+        curr-image-index: root.curr-image-index;
+        curr-image-name: root.curr-image-name;
+        total-images: root.grid-model.length;
+        mask-overlay: root.mask-overlay;
+        plugin-status: root.plugin-status;
+
+        request-next-image => {
+            root.request-next-image();
+        }
+        request-prev-image => {
+            root.request-prev-image();
+        }
+        request-segmentation(x, y) => {
+            root.request-segmentation(x, y);
+        }
+        apply-edit(op) => {
+            root.apply-edit(op);
+        }
+        save-with-format(fmt) => {
+            root.save-with-format(fmt);
+        }
+        exit-full-view => {
+            root.view-mode = ViewMode.grid;
+        }
+    }
+}

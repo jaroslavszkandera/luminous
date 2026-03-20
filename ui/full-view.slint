@@ -1,7 +1,7 @@
-import { ImgFmt } from "common.slint";
+import { Palette } from "std-widgets.slint";
+import { ImgFmt, EditOp, EditOpKind } from "common.slint";
 import { SidePanel } from "side-panel.slint";
-import { Button, Palette } from "std-widgets.slint";
-import { EditsPanel, EditOp } from "edits-panel.slint";
+import { EditsPanel } from "edits-panel.slint";
 
 export enum MouseModeFull {
     select,
@@ -10,189 +10,173 @@ export enum MouseModeFull {
 }
 
 export component FullView inherits TouchArea {
-    in property <image> current_image;
-    in property <int> curr_image_index;
-    in property <string> curr_image_name;
-    in property <int> total_images;
-    in property <bool> timer_running: false;
+    in property <image> current-image;
+    in property <int> curr-image-index;
+    in property <string> curr-image-name;
+    in property <int> total-images;
+    in property <bool> timer-running: false;
+    in property <image> mask-overlay;
+    in property <string> plugin-status;
+    in-out property <bool> panel-visible: false;
 
-    in property <image> mask_overlay;
-    in property <string> plugin_status;
+    callback request-next-image();
+    callback request-prev-image();
+    callback exit-full-view();
+    callback request-segmentation(int, int);
+    callback save-with-format(ImgFmt);
+    callback apply-edit(EditOp);
 
-    callback request_next_image();
-    callback request_prev_image();
-    callback rotate_plus_90();
-    callback rotate_minus_90();
-    callback exit_full_view();
-    callback request_segmentation(int, int);
-    callback save_with_format(ImgFmt);
-    callback apply_edit(EditOp);
+    property <string> display-coords: "0,0";
+    property <float> zoom-scale: 1.0;
+    property <length> last-coords-x;
+    property <length> last-coords-y;
+    property <MouseModeFull> mouse-mode: MouseModeFull.select;
+    property <length> start-drag-x;
+    property <length> start-drag-y;
+    property <length> start-img-x;
+    property <length> start-img-y;
+    property <bool> is-selecting: mouse-mode == MouseModeFull.select && self.pressed;
+    property <length> selection-x;
+    property <length> selection-y;
+    property <length> selection-width;
+    property <length> selection-height;
+    property <length> side-panel-width: 240px;
 
-    property <string> display_coords: "0,0";
-    property <float> zoom_scale: 1.0;
-    property <length> last_coords_x;
-    property <length> last_coords_y;
+    mouse-cursor: mouse-mode == MouseModeFull.select ? crosshair : (mouse-mode == MouseModeFull.drag && self.pressed && zoom-scale > 1.0) ? grabbing : (mouse-mode == MouseModeFull.drag && zoom-scale > 1.0) ? grab : default;
 
-    property <MouseModeFull> mouse_mode_full: MouseModeFull.select;
-    mouse-cursor: (mouse_mode_full == MouseModeFull.select) ? crosshair : (mouse_mode_full == MouseModeFull.drag && self.pressed && zoom_scale > 1.0) ? grabbing : (mouse_mode_full == MouseModeFull.drag && zoom_scale > 1.0) ? grab : default;
-
-    property <length> start_drag_x;
-    property <length> start_drag_y;
-    property <length> start_img_x;
-    property <length> start_img_y;
-
-    property <bool> is_selecting: mouse_mode_full == MouseModeFull.select && self.pressed;
-    property <length> selection_x;
-    property <length> selection_y;
-    property <length> selection_width;
-    property <length> selection_height;
-
-    in-out property <bool> panel_visible: false;
-    property <length> side_panel_width: 240px;
-
-    coords_timer := Timer {
+    coords-timer := Timer {
         interval: 60ms;
-        running: root.timer_running;
+        running: root.timer-running;
         triggered => {
-            if (root.mouse-x != root.last_coords_x || root.mouse-y != root.last_coords_y) {
-                root.last_coords_x = root.mouse-x;
-                root.last_coords_y = root.mouse-y;
-                let img_w = root.current_image.width;
-                let img_h = root.current_image.height;
-
-                if (img_w > 0 && img_h > 0) {
-                    let rel_mouse_x = root.mouse-x - rect_img.x;
-                    let rel_mouse_y = root.mouse-y - rect_img.y;
-                    let scale = Math.min(rect_img.width / img_w, rect_img.height / img_h) * zoom_scale;
-                    let visual_img_x = img.x + (img.width - img_w * scale) / 2;
-                    let visual_img_y = img.y + (img.height - img_h * scale) / 2;
-
-                    let x = clamp(Math.round((rel_mouse_x - visual_img_x) / scale), 0, img_w);
-                    let y = clamp(Math.round((rel_mouse_y - visual_img_y) / scale), 0, img_h);
-
-                    root.display_coords = x + "," + y;
+            if (root.mouse-x != root.last-coords-x || root.mouse-y != root.last-coords-y) {
+                root.last-coords-x = root.mouse-x;
+                root.last-coords-y = root.mouse-y;
+                let img-w = root.current-image.width;
+                let img-h = root.current-image.height;
+                if (img-w > 0 && img-h > 0) {
+                    let rel-x = root.mouse-x - img-rect.x;
+                    let rel-y = root.mouse-y - img-rect.y;
+                    let scale = Math.min(img-rect.width / img-w, img-rect.height / img-h) * zoom-scale;
+                    let vis-x = img-el.x + (img-el.width - img-w * scale) / 2;
+                    let vis-y = img-el.y + (img-el.height - img-h * scale) / 2;
+                    let x = clamp(Math.round((rel-x - vis-x) / scale), 0, img-w);
+                    let y = clamp(Math.round((rel-y - vis-y) / scale), 0, img-h);
+                    root.display-coords = x + "," + y;
                 }
             }
         }
     }
 
-    public function toggle_mouse_mode() {
-        if (mouse_mode_full == MouseModeFull.select) {
-            mouse_mode_full = MouseModeFull.drag;
-        } else if (mouse_mode_full == MouseModeFull.drag) {
-            mouse_mode_full = MouseModeFull.segment;
+    public function toggle-mouse-mode() {
+        if (mouse-mode == MouseModeFull.select) {
+            mouse-mode = MouseModeFull.drag;
+        } else if (mouse-mode == MouseModeFull.drag) {
+            mouse-mode = MouseModeFull.segment;
         } else {
-            mouse_mode_full = MouseModeFull.select;
+            mouse-mode = MouseModeFull.select;
         }
     }
 
-    public function reset_zoom() {
-        zoom_scale = 1;
-        img.width = rect_img.width;
-        img.height = rect_img.height;
-        img.x = 0;
-        img.y = 0;
+    public function reset-zoom() {
+        zoom-scale = 1;
+        img-el.width = img-rect.width;
+        img-el.height = img-rect.height;
+        img-el.x = 0;
+        img-el.y = 0;
     }
 
-    function zoom(scale_delta: float, center_x: length, center_y: length) {
-        let old_scale = zoom_scale;
-        let new_scale = clamp(zoom_scale * scale_delta, 1, 10.0);
-        if (old_scale == new_scale) {
+    function zoom(scale-delta: float, center-x: length, center-y: length) {
+        let old-scale = zoom-scale;
+        let new-scale = clamp(zoom-scale * scale-delta, 1, 10.0);
+        if (old-scale == new-scale) {
             return;
         }
-        let rel_center_x = center_x - rect_img.x;
-        let rel_center_y = center_y - rect_img.y;
-
-        zoom_scale = new_scale;
-        let ratio = new_scale / old_scale;
-
-        img.width = img.width * ratio;
-        img.height = img.height * ratio;
-        img.x = rel_center_x - (rel_center_x - img.x) * ratio;
-        img.y = rel_center_y - (rel_center_y - img.y) * ratio;
+        let rel-x = center-x - img-rect.x;
+        let rel-y = center-y - img-rect.y;
+        let ratio = new-scale / old-scale;
+        zoom-scale = new-scale;
+        img-el.width = img-el.width * ratio;
+        img-el.height = img-el.height * ratio;
+        img-el.x = rel-x - (rel-x - img-el.x) * ratio;
+        img-el.y = rel-y - (rel-y - img-el.y) * ratio;
     }
 
-    function zoom_to_selection() {
-        let scale_x = rect_img.width / selection_width;
-        let scale_y = rect_img.height / selection_height;
-        let zoom_factor = Math.min(scale_x, scale_y);
-
-        let center_x = selection_x + selection_width / 2 + rect_img.x;
-        let center_y = selection_y + selection_height / 2 + rect_img.y;
-
-        zoom(zoom_factor, center_x, center_y);
-        selection_width = 0px;
-        selection_height = 0px;
+    function zoom-to-selection() {
+        let zoom-factor = Math.min(img-rect.width / selection-width, img-rect.height / selection-height);
+        let center-x = selection-x + selection-width / 2 + img-rect.x;
+        let center-y = selection-y + selection-height / 2 + img-rect.y;
+        zoom(zoom-factor, center-x, center-y);
+        selection-width = 0px;
+        selection-height = 0px;
     }
 
     pointer-event(event) => {
         if (event.button == PointerEventButton.left) {
             if (event.kind == PointerEventKind.down) {
-                root.start_drag_x = root.mouse-x;
-                root.start_drag_y = root.mouse-y;
-                root.start_img_x = img.x;
-                root.start_img_y = img.y;
-                if (mouse_mode_full == MouseModeFull.select) {
-                    selection_width = 0px;
-                    selection_height = 0px;
+                root.start-drag-x = root.mouse-x;
+                root.start-drag-y = root.mouse-y;
+                root.start-img-x = img-el.x;
+                root.start-img-y = img-el.y;
+                if (mouse-mode == MouseModeFull.select) {
+                    selection-width = 0px;
+                    selection-height = 0px;
                 }
-            } else if (event.kind == PointerEventKind.up && mouse_mode_full == MouseModeFull.select) {
-                if (selection_width > 5px && selection_height > 5px) {
-                    zoom_to_selection();
+            } else if (event.kind == PointerEventKind.up && mouse-mode == MouseModeFull.select) {
+                if (selection-width > 5px && selection-height > 5px) {
+                    zoom-to-selection();
                 }
-            } else if (event.kind == PointerEventKind.up && mouse_mode_full == MouseModeFull.segment) {
-                let img_w = root.current_image.width;
-                let img_h = root.current_image.height;
-                if (img_w > 0 && img_h > 0) {
-                    let rel_mouse_x = root.mouse-x - rect_img.x;
-                    let rel_mouse_y = root.mouse-y - rect_img.y;
-
-                    let scale = Math.min(rect_img.width / img_w, rect_img.height / img_h) * zoom_scale;
-                    let visual_img_x = img.x + (img.width - img_w * scale) / 2;
-                    let visual_img_y = img.y + (img.height - img_h * scale) / 2;
-                    let orig_x = clamp(Math.round((rel_mouse_x - visual_img_x) / scale), 0, img_w);
-                    let orig_y = clamp(Math.round((rel_mouse_y - visual_img_y) / scale), 0, img_h);
-                    root.request_segmentation(orig_x, orig_y);
+            } else if (event.kind == PointerEventKind.up && mouse-mode == MouseModeFull.segment) {
+                let img-w = root.current-image.width;
+                let img-h = root.current-image.height;
+                if (img-w > 0 && img-h > 0) {
+                    let rel-x = root.mouse-x - img-rect.x;
+                    let rel-y = root.mouse-y - img-rect.y;
+                    let scale = Math.min(img-rect.width / img-w, img-rect.height / img-h) * zoom-scale;
+                    let vis-x = img-el.x + (img-el.width - img-w * scale) / 2;
+                    let vis-y = img-el.y + (img-el.height - img-h * scale) / 2;
+                    let orig-x = clamp(Math.round((rel-x - vis-x) / scale), 0, img-w);
+                    let orig-y = clamp(Math.round((rel-y - vis-y) / scale), 0, img-h);
+                    root.request-segmentation(orig-x, orig-y);
                 }
             }
         }
     }
 
     moved => {
-        if (mouse_mode_full == MouseModeFull.drag && root.pressed && zoom_scale > 1.0) {
-            img.x = root.start_img_x + (root.mouse-x - root.start_drag_x);
-            img.y = root.start_img_y + (root.mouse-y - root.start_drag_y);
+        if (mouse-mode == MouseModeFull.drag && root.pressed && zoom-scale > 1.0) {
+            img-el.x = root.start-img-x + (root.mouse-x - root.start-drag-x);
+            img-el.y = root.start-img-y + (root.mouse-y - root.start-drag-y);
         }
-        if (is_selecting) {
-            selection_x = Math.min(root.mouse-x, root.start_drag_x) - rect_img.x;
-            selection_y = Math.min(root.mouse-y, root.start_drag_y) - rect_img.y;
-            selection_width = Math.abs(root.mouse-x - root.start_drag_x);
-            selection_height = Math.abs(root.mouse-y - root.start_drag_y);
+        if (is-selecting) {
+            selection-x = Math.min(root.mouse-x, root.start-drag-x) - img-rect.x;
+            selection-y = Math.min(root.mouse-y, root.start-drag-y) - img-rect.y;
+            selection-width = Math.abs(root.mouse-x - root.start-drag-x);
+            selection-height = Math.abs(root.mouse-y - root.start-drag-y);
         }
     }
 
     scroll-event(event) => {
-        let delta_up = event.delta-y > 0;
+        let scroll-up = event.delta-y > 0;
         if (event.modifiers.control) {
-            zoom(delta_up ? 1.1 : 0.9, root.mouse-x, root.mouse-y);
+            zoom(scroll-up ? 1.1 : 0.9, root.mouse-x, root.mouse-y);
         } else {
-            reset_zoom();
-            if (delta_up) {
-                root.request_prev_image();
+            reset-zoom();
+            if (scroll-up) {
+                root.request-prev-image();
             } else {
-                root.request_next_image();
+                root.request-next-image();
             }
         }
         accept
     }
 
     HorizontalLayout {
-        rect_img := Rectangle {
+        img-rect := Rectangle {
             horizontal-stretch: 1;
             clip: true;
 
-            img := Image {
-                source: root.current_image;
+            img-el := Image {
+                source: root.current-image;
                 image-fit: contain;
                 width: parent.width;
                 height: parent.height;
@@ -200,13 +184,13 @@ export component FullView inherits TouchArea {
                 y: 0px;
             }
 
-            mask := Image {
-                source: root.mask_overlay;
+            Image {
+                source: root.mask-overlay;
                 image-fit: contain;
-                width: img.width;
-                height: img.height;
-                x: img.x;
-                y: img.y;
+                width: img-el.width;
+                height: img-el.height;
+                x: img-el.x;
+                y: img-el.y;
             }
 
             Rectangle {
@@ -214,29 +198,30 @@ export component FullView inherits TouchArea {
                 y: parent.height - self.height;
                 width: parent.width;
                 background: Palette.background.with-alpha(50%);
+
                 Text {
                     x: 5px;
-                    text: (curr_image_index + 1) + "/" + root.total_images;
+                    text: (curr-image-index + 1) + "/" + root.total-images;
                 }
 
                 Text {
                     horizontal-alignment: center;
                     vertical-alignment: center;
-                    text: curr_image_name;
+                    text: curr-image-name;
                 }
 
                 Text {
                     x: parent.width - self.width - 5px;
-                    text: "[x,y]=[" + display_coords + "]";
+                    text: "[x,y]=[" + display-coords + "]";
                 }
             }
 
             Rectangle {
-                x: root.selection_x;
-                y: root.selection_y;
-                width: root.selection_width;
-                height: root.selection_height;
-                visible: root.is_selecting || (root.selection_width > 0px && mouse_mode_full == MouseModeFull.select);
+                x: root.selection-x;
+                y: root.selection-y;
+                width: root.selection-width;
+                height: root.selection-height;
+                visible: root.is-selecting || (root.selection-width > 0px && mouse-mode == MouseModeFull.select);
                 background: Palette.accent-background.with-alpha(25%);
                 border-color: Palette.accent-background.with-alpha(75%);
                 border-width: 1px;
@@ -247,45 +232,44 @@ export component FullView inherits TouchArea {
                     MenuItem {
                         title: @tr("Rotate +90");
                         activated => {
-                            root.rotate_plus_90();
+                            root.apply-edit({ kind: EditOpKind.RotateCW, int-val: 0, float-val: 0 });
                         }
                     }
 
                     MenuItem {
                         title: @tr("Rotate -90");
                         activated => {
-                            root.rotate_minus_90();
+                            root.apply-edit({ kind: EditOpKind.RotateCCW, int-val: 0, float-val: 0 });
                         }
                     }
 
                     MenuItem {
                         title: @tr("Reset zoom");
                         activated => {
-                            root.reset_zoom();
+                            root.reset-zoom();
                         }
                     }
 
-                    // TODO: Add more formats
                     Menu {
                         title: @tr("Save with format");
                         MenuItem {
                             title: @tr("png");
                             activated => {
-                                root.save_with_format(ImgFmt.png);
+                                root.save-with-format(ImgFmt.png);
                             }
                         }
 
                         MenuItem {
                             title: @tr("jpeg");
                             activated => {
-                                root.save_with_format(ImgFmt.jpeg);
+                                root.save-with-format(ImgFmt.jpeg);
                             }
                         }
 
                         MenuItem {
                             title: @tr("webp");
                             activated => {
-                                root.save_with_format(ImgFmt.webp);
+                                root.save-with-format(ImgFmt.webp);
                             }
                         }
                     }
@@ -293,13 +277,13 @@ export component FullView inherits TouchArea {
             }
         }
 
-        side_panel := SidePanel {
-            is_visible: root.panel_visible;
-            side_width <=> root.side_panel_width;
+        SidePanel {
+            is-visible: root.panel-visible;
+            side-width <=> root.side-panel-width;
 
             EditsPanel {
                 apply-edit(op) => {
-                    root.apply_edit(op);
+                    root.apply-edit(op);
                 }
             }
         }

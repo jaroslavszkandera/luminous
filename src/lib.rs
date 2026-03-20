@@ -818,4 +818,5 @@ fn setup_bindings(main_window: &MainWindow, config: &Config) {
     main_window.set_bind_reset_zoom(get_key("reset_zoom"));
     main_window.set_bind_grid_pg_dn(get_key("grid_page_down"));
     main_window.set_bind_grid_pg_up(get_key("grid_page_up"));
+    main_window.set_bind_toggle_side_panel(get_key("toggle_side_panel"));
 }

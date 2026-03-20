@@ -1,19 +1,5 @@
 import { SpinBox, Button } from "std-widgets.slint";
-
-export enum EditOpKind {
-    RotateCW,
-    RotateCCW,
-    FlipH,
-    FlipV,
-    Brighten,
-    Contrast,
-}
-
-export struct EditOp {
-    kind:      EditOpKind,
-    int_val:   int,
-    float_val: float,
-}
+import { EditOp, EditOpKind } from "common.slint";
 
 component EditRow inherits HorizontalLayout {
     in property <string> label;
@@ -34,8 +20,8 @@ component EditRow inherits HorizontalLayout {
 export component EditsPanel inherits Rectangle {
     callback apply-edit(EditOp);
 
-    out property <int> brightness <=> brightness_spin.value;
-    out property <int> contrast <=> contrast_spin.value;
+    out property <int> brightness <=> brightness-spin.value;
+    out property <int> contrast <=> contrast-spin.value;
 
     VerticalLayout {
         padding: 10px;
@@ -46,14 +32,14 @@ export component EditsPanel inherits Rectangle {
             Button {
                 text: "−90°";
                 clicked => {
-                    root.apply-edit({ kind: EditOpKind.RotateCCW, int_val: 0, float_val: 0 });
+                    root.apply-edit({ kind: EditOpKind.RotateCCW, int-val: 0, float-val: 0 });
                 }
             }
 
             Button {
                 text: "+90°";
                 clicked => {
-                    root.apply-edit({ kind: EditOpKind.RotateCW, int_val: 0, float_val: 0 });
+                    root.apply-edit({ kind: EditOpKind.RotateCW, int-val: 0, float-val: 0 });
                 }
             }
         }
@@ -63,38 +49,38 @@ export component EditsPanel inherits Rectangle {
             Button {
                 text: "Horizontal";
                 clicked => {
-                    root.apply-edit({ kind: EditOpKind.FlipH, int_val: 0, float_val: 0 });
+                    root.apply-edit({ kind: EditOpKind.FlipH, int-val: 0, float-val: 0 });
                 }
             }
 
             Button {
                 text: "Vertical";
                 clicked => {
-                    root.apply-edit({ kind: EditOpKind.FlipV, int_val: 0, float_val: 0 });
+                    root.apply-edit({ kind: EditOpKind.FlipV, int-val: 0, float-val: 0 });
                 }
             }
         }
 
         EditRow {
             label: "Brightness";
-            brightness_spin := SpinBox {
+            brightness-spin := SpinBox {
                 value: 0;
                 minimum: -255;
                 maximum: 255;
                 edited(v) => {
-                    root.apply-edit({ kind: EditOpKind.Brighten, int_val: v, float_val: 0 });
+                    root.apply-edit({ kind: EditOpKind.Brighten, int-val: v, float-val: 0 });
                 }
             }
         }
 
         EditRow {
             label: "Contrast";
-            contrast_spin := SpinBox {
+            contrast-spin := SpinBox {
                 value: 0;
                 minimum: -100;
                 maximum: 100;
                 edited(v) => {
-                    root.apply-edit({ kind: EditOpKind.Contrast, int_val: v, float_val: v / 100.0 });
+                    root.apply-edit({ kind: EditOpKind.Contrast, int-val: v, float-val: v / 100.0 });
                 }
             }
         }

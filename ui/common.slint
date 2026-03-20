@@ -1,6 +1,31 @@
+export enum ViewMode {
+    full,
+    grid,
+}
+
 export enum ImgFmt {
     png,
     jpeg,
     webp,
 }
 
+export enum EditOpKind {
+    RotateCW,
+    RotateCCW,
+    FlipH,
+    FlipV,
+    Brighten,
+    Contrast,
+}
+
+export struct EditOp {
+    kind: EditOpKind,
+    int-val: int,
+    float-val: float,
+}
+
+export struct GridItem {
+    image: image,
+    index: int,
+    selected: bool,
+}
