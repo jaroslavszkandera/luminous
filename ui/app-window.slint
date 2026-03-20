@@ -27,6 +27,7 @@ export component MainWindow inherits Window {
     in property <string> bind_grid_pg_dn;
     in property <string> bind_grid_pg_up;
     in property <string> bind_switch_mouse_mode;
+    in property <string> bind_toggle_side_pannel;
 
     // Full view Callbacks
     callback request_next_image();
@@ -113,6 +114,9 @@ export component MainWindow inherits Window {
                     full_ui.toggle_mouse_mode();
                     return accept;
                 }
+                if (event.text == root.bind_toggle_side_pannel) {
+                    full_ui.panel_visible = !full_ui.panel_visible;
+                }
             } else if (root.view_mode == ViewMode.grid) {
                 if (event.text == root.bind_grid_pg_dn) {
                     grid_ui.page_down();
@@ -131,6 +135,9 @@ export component MainWindow inherits Window {
                 if (event.text == "/") {
                     grid_ui.focus_search();
                     return accept;
+                }
+                if (event.text == root.bind_toggle_side_pannel) {
+                    grid_ui.panel_visible = !grid_ui.panel_visible;
                 }
             }
             reject

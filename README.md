@@ -21,6 +21,8 @@ cargo run --release -- ./path/to/your/images
 | Scroll        | Navigate Images                |
 | PgUp/PgDn     | Scroll Grid Up/Down            |
 | Right Click   | Context Menu                   |
+| /             | Search                         |
+| s             | Toggle Side Panel              |
 
 ## Configuration
 
@@ -31,13 +33,4 @@ The application automatically looks for a configuration file at the standard loc
 * Windows: `C:\Users\Username\AppData\Roaming\luminous\luminous.toml`
 * macOS: `~/Library/Application Support/luminous/luminous.toml`
 
-_TODO: Make an example config file..._
-
-## Roadmap
-
-- [ ] Right click context menu
-- [ ] Dynamic grid view
-- [ ] Multi select action
-- [ ] Footer
-- [ ] Side bar info/edit menu
-- [ ] Basic image editing
+Example configuration file with defaults: `examples/luminous.toml`.

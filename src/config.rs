@@ -167,6 +167,7 @@ impl Config {
         map.insert("grid_page_down".into(), "PageDown".into());
         map.insert("grid_page_up".into(), "PageUp".into());
         map.insert("reset_zoom".into(), "z".into());
+        map.insert("toggle_side_panel".into(), "s".into());
         map
     }
 

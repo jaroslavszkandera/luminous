@@ -47,7 +47,7 @@ export component FullView inherits TouchArea {
     property <length> selection_width;
     property <length> selection_height;
 
-    property <bool> panel_visible: true;
+    in-out property <bool> panel_visible: false;
     property <length> side_panel_width: 240px;
 
     coords_timer := Timer {

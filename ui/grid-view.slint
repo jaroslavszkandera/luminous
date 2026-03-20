@@ -32,7 +32,7 @@ export component GridView inherits Rectangle {
     callback toggle_selection(int);
     callback batch_save_with_format(ImgFmt);
 
-    property <bool> panel_visible: true;
+    in-out property <bool> panel_visible: false;
     in-out property <length> side_panel_width: 240px;
     in-out property <[PipelineStep]> pipeline_steps;
     callback pipeline_add_step(PipelineStepKind);
