@@ -5,5 +5,6 @@
   "interpreter": "uv run",
   "capabilities": ["interactive"],
   "extensions": [],
-  "daemon_port": 50021
+  "daemon_port": 50021,
+  "entry": "main.py"
 }

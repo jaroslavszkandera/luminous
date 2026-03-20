@@ -97,7 +97,9 @@ pub struct DaemonBackend {
 
 impl DaemonBackend {
     pub fn new(manifest: &PluginManifest, dir: &Path) -> Arc<Self> {
-        let port = manifest.daemon_port.unwrap_or(50051);
+        let port = manifest
+            .daemon_port
+            .expect("Missing daemon port should be handled by manifest parsing.");
         let (tx, rx) = mpsc::sync_channel::<WorkerRequest>(1);
 
         let status = Arc::new(RwLock::new(IpcStatus::Init));
@@ -109,10 +111,15 @@ impl DaemonBackend {
         let process = manifest.interpreter.as_ref().and_then(|interp| {
             let parts: Vec<&str> = interp.split_whitespace().collect();
             let (&exe, args) = parts.split_first()?;
-            info!("Starting daemon: {} {:?} {}", exe, args, manifest.entry);
+            info!("Starting daemon: {} {:?} {:?}", exe, args, manifest.entry);
             Command::new(exe)
                 .args(args)
-                .arg(&manifest.entry)
+                .arg(
+                    manifest
+                        .entry
+                        .as_ref()
+                        .expect("Missing daemon entry should be handled by manifest parsing."),
+                )
                 .current_dir(dir)
                 .stdout(Stdio::inherit())
                 .stderr(Stdio::inherit())
