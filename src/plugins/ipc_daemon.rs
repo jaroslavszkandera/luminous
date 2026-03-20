@@ -157,6 +157,7 @@ impl DaemonBackend {
                 }
             };
 
+            let mut active_shm: Option<ActiveShmem> = None;
             if let Some(pending) = pending_image.lock().unwrap().take() {
                 set_status(IpcStatus::Busy);
                 let current = image_token.load(std::sync::atomic::Ordering::Acquire);
@@ -164,7 +165,7 @@ impl DaemonBackend {
                     match ipc_send_image(&mut stream, &pending.buffer) {
                         Ok(shm) => {
                             debug!("Initial embedding ready");
-                            drop(shm);
+                            active_shm = Some(shm);
                             set_status(IpcStatus::Ready);
                         }
                         Err(e) => {
@@ -180,8 +181,6 @@ impl DaemonBackend {
             } else {
                 set_status(IpcStatus::Ready);
             }
-
-            let mut active_shm: Option<ActiveShmem> = None;
 
             while let Ok(req) = rx.recv() {
                 match req {
@@ -218,23 +217,41 @@ impl DaemonBackend {
                     }
 
                     WorkerRequest::Click { x, y, tx } => {
-                        let result = active_shm.as_ref().and_then(|shm| {
-                            ipc_click(&mut stream, shm, x, y)
-                                .map_err(|e| error!("click failed: {e}"))
-                                .ok()
-                                .flatten()
-                        });
-                        let _ = tx.send(result);
+                        debug!("click ({x},{y})");
+                        match &active_shm {
+                            None => {
+                                warn!("Click ignored: no active embedding (image not set yet)");
+                                let _ = tx.send(None);
+                            }
+                            Some(shm) => match ipc_click(&mut stream, shm, x, y) {
+                                Ok(result) => {
+                                    let _ = tx.send(result);
+                                }
+                                Err(e) => {
+                                    error!("click failed: {e}");
+                                    let _ = tx.send(None);
+                                }
+                            },
+                        }
                     }
 
                     WorkerRequest::RectSelect { x1, y1, x2, y2, tx } => {
-                        let result = active_shm.as_ref().and_then(|shm| {
-                            ipc_rect_select(&mut stream, shm, x1, y1, x2, y2)
-                                .map_err(|e| error!("rect_select failed: {e}"))
-                                .ok()
-                                .flatten()
-                        });
-                        let _ = tx.send(result);
+                        debug!("rect_select ({x1},{y1})-({x2},{y2})");
+                        match &active_shm {
+                            None => {
+                                warn!("RectSelect ignored: no active embedding");
+                                let _ = tx.send(None);
+                            }
+                            Some(shm) => match ipc_rect_select(&mut stream, shm, x1, y1, x2, y2) {
+                                Ok(result) => {
+                                    let _ = tx.send(result);
+                                }
+                                Err(e) => {
+                                    error!("rect_select failed: {e}");
+                                    let _ = tx.send(None);
+                                }
+                            },
+                        }
                     }
                 }
             }
@@ -279,6 +296,12 @@ impl Backend for DaemonBackend {
     }
 
     fn click(&self, x: u32, y: u32) -> Option<SharedPixelBuffer<Rgba8Pixel>> {
+        let status = self.status();
+        if status == IpcStatus::Busy {
+            warn!("Click ignored: daemon is busy");
+            return None;
+        }
+
         let (result_tx, result_rx) = mpsc::sync_channel(1);
         self.tx
             .try_send(WorkerRequest::Click {
@@ -298,6 +321,11 @@ impl Backend for DaemonBackend {
         x2: u32,
         y2: u32,
     ) -> Option<SharedPixelBuffer<Rgba8Pixel>> {
+        let status = self.status();
+        if status == IpcStatus::Busy {
+            warn!("Rectangle select ignored: daemon is busy");
+            return None;
+        }
         let (result_tx, result_rx) = mpsc::sync_channel(1);
         self.tx
             .try_send(WorkerRequest::RectSelect {

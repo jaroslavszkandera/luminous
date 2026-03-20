@@ -55,7 +55,7 @@ impl ImageLoader {
         paths: Vec<PathBuf>,
         workers: usize,
         window_size: usize,
-        plugin_manager: PluginManager,
+        plugin_manager: Arc<PluginManager>,
     ) -> Self {
         let cache_dir = ProjectDirs::from("", "", "luminous").and_then(|proj| {
             let dir = proj.cache_dir().join("thumbnails");
@@ -83,7 +83,7 @@ impl ImageLoader {
             window_size,
             cache_dir,
             bucket_resolution: AtomicU32::new(0),
-            plugin_manager: Arc::new(plugin_manager),
+            plugin_manager: plugin_manager,
             on_thumb_ready: None,
             on_full_ready: None,
         }

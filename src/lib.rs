@@ -14,7 +14,8 @@ use image_processing::{batch_save_images, save_image};
 use pipeline::{StepFactory, run_pipeline_on_selection};
 use plugins::{IpcStatus, PluginManager};
 
-use log::{debug, error, info};
+#[allow(unused_imports)]
+use log::{debug, error, info, warn};
 use slint::{Image, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, VecModel};
 use std::cell::RefCell;
 use std::cmp;
@@ -41,12 +42,12 @@ impl AppController {
         window: &MainWindow,
     ) -> Self {
         let window_weak = window.as_weak();
-
+        let plugin_manager = Arc::new(plugin_manager);
         let mut loader = ImageLoader::new(
             scan.paths.clone(),
             config.threads,
             config.window_size,
-            plugin_manager,
+            Arc::clone(&plugin_manager),
         );
 
         let weak_thumb = window_weak.clone();
@@ -72,7 +73,14 @@ impl AppController {
         });
 
         let weak_full = window_weak.clone();
+        let pm = Arc::clone(&plugin_manager);
         loader.on_full_ready(move |index, buffer| {
+            if let Some(plugin) = pm.get_interactive_plugin() {
+                let buf = buffer.clone();
+                std::thread::spawn(move || {
+                    plugin.set_interactive_image(&buf);
+                });
+            }
             let _ = weak_full.upgrade_in_event_loop(move |ui| {
                 let img = Image::from_rgba8(buffer);
                 if index == ui.get_curr_image_index() as usize {
@@ -176,8 +184,6 @@ impl AppController {
             }
             if loader.full_cache_contains(index) {
                 Self::notify_interactive_plugin(&loader);
-            } else {
-                error!("Does not contain, not setting");
             }
         }
 
@@ -349,15 +355,17 @@ impl AppController {
         let weak = self.window_weak.clone();
         let loader = self.loader.clone();
 
-        self.loader.pool.spawn(move || {
-            if let Some(plugin) = loader.plugin_manager.get_interactive_plugin() {
-                if let Some(mask) = plugin.interactive_click(x, y) {
-                    let _ = weak.upgrade_in_event_loop(move |ui| {
-                        ui.set_mask_overlay(Image::from_rgba8(mask));
-                    });
-                }
+        // self.loader.pool.spawn(move || {
+        if let Some(plugin) = loader.plugin_manager.get_interactive_plugin() {
+            if let Some(mask) = plugin.interactive_click(x, y) {
+                let _ = weak.upgrade_in_event_loop(move |ui| {
+                    ui.set_mask_overlay(Image::from_rgba8(mask));
+                });
+            } else {
+                warn!("Interactive click failed");
             }
-        });
+        }
+        // });
     }
 
     fn build_window_indices(&self, center: usize) -> Vec<usize> {
