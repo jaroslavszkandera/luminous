@@ -1,74 +1,68 @@
 import { Palette } from "std-widgets.slint";
 
+enum CornerSide { min, max }
+struct ImgRect { x: length, y: length, w: length, h: length}
+
 struct HandleDef {
     cursor: MouseCursor,
-    ax: float,  // 0.0 = controls min corner on x-axis, 1.0 = max corner
-    ay: float,
+    side-x: CornerSide,
+    side-y: CornerSide,
 }
 
 export component SelectRect inherits Rectangle {
-    // Must stay in sync with parent.
+    background: Palette.accent-background.with-alpha(25%);
+    border-color: Palette.accent-background.with-alpha(75%);
+    border-width: 1px;
+    visible: false;
+
     in property <length> img-offset-x;
     in property <length> img-offset-y;
     in property <float> img-scale;
 
-    in property <color> fill-color: Palette.accent-background.with-alpha(25%);
-    in property <color> rect-border-color: Palette.accent-background.with-alpha(75%);
-    in property <length> rect-border-width: 1px;
     in property <length> handle-size: 8px;
     in property <length> handle-touch-radius: 20px;
-    in property <color> handle-color: Palette.accent-background;
 
-    out property <float> sel-img-x: Math.min(corner-ax, corner-bx);
-    out property <float> sel-img-y: Math.min(corner-ay, corner-by);
-    out property <float> sel-img-w: Math.abs(corner-bx - corner-ax);
-    out property <float> sel-img-h: Math.abs(corner-by - corner-ay);
+    out property <ImgRect> selection: {
+        x: Math.min(anchor.x, opposite.x),
+        y: Math.min(anchor.y, opposite.y),
+        w: Math.abs(opposite.x - anchor.x),
+        h: Math.abs(opposite.y - anchor.y),
+    };
 
     callback confirmed();
     callback cancelled();
 
-    property <float> corner-ax; // first dragged
-    property <float> corner-ay;
-    property <float> corner-bx; // opposite corner
-    property <float> corner-by;
+    property <Point> anchor;
+    property <Point> opposite;
 
     property <int> active-handle: -1;
-    property <bool> dragging-rect: false;
-    property <float> drag-start-img-x;
-    property <float> drag-start-img-y;
-    property <float> drag-start-corner-ax;
-    property <float> drag-start-corner-ay;
-    property <float> drag-start-corner-bx;
-    property <float> drag-start-corner-by;
+    property <bool> dragging-body: false;
+    property <Point> drag-start-mouse;
+    property <Point> drag-start-anchor;
+    property <Point> drag-start-opposite;
 
-    function screen-to-img(sx: length, sy: length) -> {x: float, y: float} {
+    function screen-to-img(sx: length, sy: length) -> Point {
         return {
-            x: (sx - img-offset-x) / (img-scale * 1px),
-            y: (sy - img-offset-y) / (img-scale * 1px),
+            x: (sx - img-offset-x) / (img-scale),
+            y: (sy - img-offset-y) / (img-scale),
         };
     }
-    function img-to-screen-x(ix: float) -> length {
-        img-offset-x + ix * 1px * img-scale
+    function img-to-screen-x(ix: length) -> length {
+        img-offset-x + ix * img-scale
     }
-    function img-to-screen-y(iy: float) -> length {
-        img-offset-y + iy * 1px * img-scale
+    function img-to-screen-y(iy: length) -> length {
+        img-offset-y + iy * img-scale
     }
 
-    x: img-to-screen-x(Math.min(corner-ax, corner-bx));
-    y: img-to-screen-y(Math.min(corner-ay, corner-by));
-    width: Math.abs(corner-bx - corner-ax) * 1px * img-scale;
-    height: Math.abs(corner-by - corner-ay) * 1px * img-scale;
-    background: root.fill-color;
-    border-color: root.rect-border-color;
-    border-width: root.rect-border-width;
-    visible: false;
+    x: img-to-screen-x(Math.min(anchor.x, opposite.x));
+    y: img-to-screen-y(Math.min(anchor.y, opposite.y));
+    width: Math.abs(opposite.x - anchor.x) * img-scale;
+    height: Math.abs(opposite.y - anchor.y) * img-scale;
 
     public function show(screen-x: length, screen-y: length) {
         let p = screen-to-img(screen-x, screen-y);
-        corner-ax = p.x;
-        corner-ay = p.y;
-        corner-bx = p.x;
-        corner-by = p.y;
+        anchor = p;
+        opposite = p;
         self.visible = true;
     }
 
@@ -76,19 +70,15 @@ export component SelectRect inherits Rectangle {
         self.visible = false;
     }
 
-    public function update-selection(screen-ax: length, screen-ay: length, screen-bx: length, screen-by: length) {
-        let a = screen-to-img(screen-ax, screen-ay);
-        let b = screen-to-img(screen-bx, screen-by);
-        corner-ax = a.x;
-        corner-ay = a.y;
-        corner-bx = b.x;
-        corner-by = b.y;
+    public function update-selection(screen-anchor: {x: length, y: length}, screen-opposite: {x: length, y: length}) {
+        anchor = screen-to-img(screen-anchor.x,   screen-anchor.y);
+        opposite = screen-to-img(screen-opposite.x, screen-opposite.y);
     }
 
-    ta := TouchArea {
+    body-ta := TouchArea {
         width: 100%;
         height: 100%;
-        mouse-cursor: dragging-rect ? MouseCursor.grabbing : MouseCursor.move;
+        mouse-cursor: dragging-body ? MouseCursor.grabbing : MouseCursor.move;
 
         pointer-event(e) => {
             if (e.button == PointerEventButton.left && e.kind == PointerEventKind.down) {
@@ -96,48 +86,42 @@ export component SelectRect inherits Rectangle {
             }
             if (e.button == PointerEventButton.middle) {
                 if (e.kind == PointerEventKind.down) {
-                    let p = root.screen-to-img(self.mouse-x + root.x, self.mouse-y + root.y);
-                    root.drag-start-img-x = p.x;
-                    root.drag-start-img-y = p.y;
-                    root.drag-start-corner-ax = root.corner-ax;
-                    root.drag-start-corner-ay = root.corner-ay;
-                    root.drag-start-corner-bx = root.corner-bx;
-                    root.drag-start-corner-by = root.corner-by;
-                    root.dragging-rect = true;
+                    root.drag-start-mouse = root.screen-to-img(self.mouse-x + root.x, self.mouse-y + root.y);
+                    root.drag-start-anchor = root.anchor;
+                    root.drag-start-opposite = root.opposite;
+                    root.dragging-body = true;
                 } else if (e.kind == PointerEventKind.up) {
-                    root.dragging-rect = false;
+                    root.dragging-body = false;
                 }
             }
         }
 
         moved => {
-            if (root.dragging-rect) {
-                let p = root.screen-to-img(self.mouse-x + root.x, self.mouse-y + root.y);
-                let dx = p.x - root.drag-start-img-x;
-                let dy = p.y - root.drag-start-img-y;
-                root.corner-ax = root.drag-start-corner-ax + dx;
-                root.corner-ay = root.drag-start-corner-ay + dy;
-                root.corner-bx = root.drag-start-corner-bx + dx;
-                root.corner-by = root.drag-start-corner-by + dy;
+            if (!root.dragging-body) {
+                return;
             }
+            let mouse = root.screen-to-img(self.mouse-x + root.x, self.mouse-y + root.y);
+            let dx = mouse.x - root.drag-start-mouse.x;
+            let dy = mouse.y - root.drag-start-mouse.y;
+            root.anchor = { x: root.drag-start-anchor.x + dx, y: root.drag-start-anchor.y + dy };
+            root.opposite = { x: root.drag-start-opposite.x + dx, y: root.drag-start-opposite.y + dy };
         }
     }
 
-    // Index: 0=tl, 1=tr, 2=bl, 3=br (clockwise)
     for handle-def[i] in [
-        { cursor: MouseCursor.nwse-resize, ax: 0.0, ay: 0.0 },
-        { cursor: MouseCursor.nesw-resize, ax: 1.0, ay: 0.0 },
-        { cursor: MouseCursor.nesw-resize, ax: 0.0, ay: 1.0 },
-        { cursor: MouseCursor.se-resize, ax: 1.0, ay: 1.0 },
+        { cursor: MouseCursor.nwse-resize, side-x: CornerSide.min, side-y: CornerSide.min },
+        { cursor: MouseCursor.nesw-resize, side-x: CornerSide.max, side-y: CornerSide.min },
+        { cursor: MouseCursor.nesw-resize, side-x: CornerSide.min, side-y: CornerSide.max },
+        { cursor: MouseCursor.se-resize, side-x: CornerSide.max, side-y: CornerSide.max },
     ]: Rectangle {
-        property <length> hcx: handle-def.ax == 0.0 ? root.img-to-screen-x(Math.min(root.corner-ax, root.corner-bx)) : root.img-to-screen-x(Math.max(root.corner-ax, root.corner-bx));
-        property <length> hcy: handle-def.ay == 0.0 ? root.img-to-screen-y(Math.min(root.corner-ay, root.corner-by)) : root.img-to-screen-y(Math.max(root.corner-ay, root.corner-by));
+        property <length> corner-screen-x: handle-def.side-x == CornerSide.min ? root.img-to-screen-x(Math.min(root.anchor.x, root.opposite.x)) : root.img-to-screen-x(Math.max(root.anchor.x, root.opposite.x));
+        property <length> corner-screen-y: handle-def.side-y == CornerSide.min ? root.img-to-screen-y(Math.min(root.anchor.y, root.opposite.y)) : root.img-to-screen-y(Math.max(root.anchor.y, root.opposite.y));
 
-        x: hcx - root.x - root.handle-size / 2;
-        y: hcy - root.y - root.handle-size / 2;
+        x: corner-screen-x - root.x - root.handle-size / 2;
+        y: corner-screen-y - root.y - root.handle-size / 2;
         width: root.handle-size;
         height: root.handle-size;
-        background: root.handle-color;
+        background: Palette.accent-background;
 
         TouchArea {
             property <length> r: root.handle-touch-radius;
@@ -151,15 +135,9 @@ export component SelectRect inherits Rectangle {
                 if (e.button == PointerEventButton.left) {
                     if (e.kind == PointerEventKind.down) {
                         root.active-handle = i;
-                        let abs-x = self.mouse-x + parent.x + root.x;
-                        let abs-y = self.mouse-y + parent.y + root.y;
-                        let p = root.screen-to-img(abs-x, abs-y);
-                        root.drag-start-img-x = p.x;
-                        root.drag-start-img-y = p.y;
-                        root.drag-start-corner-ax = root.corner-ax;
-                        root.drag-start-corner-ay = root.corner-ay;
-                        root.drag-start-corner-bx = root.corner-bx;
-                        root.drag-start-corner-by = root.corner-by;
+                        root.drag-start-mouse = root.screen-to-img(self.mouse-x + parent.x + root.x, self.mouse-y + parent.y + root.y);
+                        root.drag-start-anchor = root.anchor;
+                        root.drag-start-opposite = root.opposite;
                     } else if (e.kind == PointerEventKind.up) {
                         root.active-handle = -1;
                     }
@@ -170,20 +148,18 @@ export component SelectRect inherits Rectangle {
                 if (root.active-handle != i) {
                     return;
                 }
-                let abs-x = self.mouse-x + parent.x + root.x;
-                let abs-y = self.mouse-y + parent.y + root.y;
-                let p = root.screen-to-img(abs-x, abs-y);
-                let dx = p.x - root.drag-start-img-x;
-                let dy = p.y - root.drag-start-img-y;
-                if (handle-def.ax == 1.0) {
-                    root.corner-bx = root.drag-start-corner-bx + dx;
+                let mouse = root.screen-to-img(self.mouse-x + parent.x + root.x, self.mouse-y + parent.y + root.y);
+                let dx = mouse.x - root.drag-start-mouse.x;
+                let dy = mouse.y - root.drag-start-mouse.y;
+                if (handle-def.side-x == CornerSide.max) {
+                    root.opposite = { x: root.drag-start-opposite.x + dx, y: root.opposite.y };
                 } else {
-                    root.corner-ax = root.drag-start-corner-ax + dx;
+                    root.anchor = { x: root.drag-start-anchor.x + dx, y: root.anchor.y };
                 }
-                if (handle-def.ay == 1.0) {
-                    root.corner-by = root.drag-start-corner-by + dy;
+                if (handle-def.side-y == CornerSide.max) {
+                    root.opposite = { x: root.opposite.x, y: root.drag-start-opposite.y + dy };
                 } else {
-                    root.corner-ay = root.drag-start-corner-ay + dy;
+                    root.anchor = { x: root.anchor.x, y: root.drag-start-anchor.y + dy };
                 }
             }
         }

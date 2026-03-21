@@ -93,15 +93,12 @@ export component FullView inherits TouchArea {
     }
 
     function zoom-to-selection() {
-        let sw = select-rect.sel-img-w;
-        let sh = select-rect.sel-img-h;
-        if (sw < 1.0 || sh < 1.0) {
+        if (select-rect.selection.w < 1px || select-rect.selection.h < 1px) {
             return;
         }
-        let cx = root.img-vis-x + (select-rect.sel-img-x + sw / 2) * 1px * root.img-render-scale + img-rect.x;
-        let cy = root.img-vis-y + (select-rect.sel-img-y + sh / 2) * 1px * root.img-render-scale + img-rect.y;
-        let zoom-factor = Math.min(img-rect.width / (sw * 1px * root.img-render-scale),
-                                   img-rect.height / (sh * 1px * root.img-render-scale));
+        let cx = root.img-vis-x + (select-rect.selection.x + select-rect.selection.w / 2) * root.img-render-scale + img-rect.x;
+        let cy = root.img-vis-y + (select-rect.selection.y + select-rect.selection.h / 2) * root.img-render-scale + img-rect.y;
+        let zoom-factor = Math.min(img-rect.width / (select-rect.selection.w * root.img-render-scale), img-rect.height / (select-rect.selection.h * root.img-render-scale));
         zoom(zoom-factor, cx, cy);
     }
 
@@ -132,7 +129,7 @@ export component FullView inherits TouchArea {
                 root.start-drag-y = root.mouse-y;
                 select-rect.show(root.mouse-x - img-rect.x, root.mouse-y - img-rect.y);
             } else if (event.kind == PointerEventKind.up) {
-                if (select-rect.sel-img-w < 2.0 || select-rect.sel-img-h < 2.0) {
+                if (select-rect.selection.w < 2px || select-rect.selection.h < 2px) {
                     if (mouse-mode == MouseModeFull.segment && root.current-image.width > 0) {
                         let coords = root.to-image-coords(root.mouse-x, root.mouse-y);
                         root.request-segmentation(coords.x, coords.y);
@@ -150,10 +147,8 @@ export component FullView inherits TouchArea {
         }
         if (root.pressed && !dragging && mouse-mode == MouseModeFull.default) {
             select-rect.update-selection(
-                root.start-drag-x - img-rect.x,
-                root.start-drag-y - img-rect.y,
-                root.mouse-x - img-rect.x,
-                root.mouse-y - img-rect.y,
+                { x: root.start-drag-x - img-rect.x, y: root.start-drag-y - img-rect.y },
+                { x: root.mouse-x - img-rect.x, y: root.mouse-y - img-rect.y },
             );
         }
     }
@@ -163,10 +158,10 @@ export component FullView inherits TouchArea {
         if (event.modifiers.control) {
             zoom(scroll-up ? 1.1 : 0.9, root.mouse-x, root.mouse-y);
         } else {
-            debug("zoom-scale:", zoom-scale);
             if (zoom-scale > 1) {
                 return reject;
             }
+            select-rect.cancelled();
             if (scroll-up) {
                 root.request-prev-image();
             } else {
@@ -228,7 +223,7 @@ export component FullView inherits TouchArea {
                 img-scale: root.img-render-scale;
 
                 confirmed => {
-                    if (select-rect.sel-img-w > 2.0 && select-rect.sel-img-h > 2.0) {
+                    if (select-rect.selection.w > 2px && select-rect.selection.h > 2px) {
                         root.zoom-to-selection();
                     }
                     select-rect.hide();
