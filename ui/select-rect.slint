@@ -1,0 +1,191 @@
+import { Palette } from "std-widgets.slint";
+
+struct HandleDef {
+    cursor: MouseCursor,
+    ax: float,  // 0.0 = controls min corner on x-axis, 1.0 = max corner
+    ay: float,
+}
+
+export component SelectRect inherits Rectangle {
+    // Must stay in sync with parent.
+    in property <length> img-offset-x;
+    in property <length> img-offset-y;
+    in property <float> img-scale;
+
+    in property <color> fill-color: Palette.accent-background.with-alpha(25%);
+    in property <color> rect-border-color: Palette.accent-background.with-alpha(75%);
+    in property <length> rect-border-width: 1px;
+    in property <length> handle-size: 8px;
+    in property <length> handle-touch-radius: 20px;
+    in property <color> handle-color: Palette.accent-background;
+
+    out property <float> sel-img-x: Math.min(corner-ax, corner-bx);
+    out property <float> sel-img-y: Math.min(corner-ay, corner-by);
+    out property <float> sel-img-w: Math.abs(corner-bx - corner-ax);
+    out property <float> sel-img-h: Math.abs(corner-by - corner-ay);
+
+    callback confirmed();
+    callback cancelled();
+
+    property <float> corner-ax; // first dragged
+    property <float> corner-ay;
+    property <float> corner-bx; // opposite corner
+    property <float> corner-by;
+
+    property <int> active-handle: -1;
+    property <bool> dragging-rect: false;
+    property <float> drag-start-img-x;
+    property <float> drag-start-img-y;
+    property <float> drag-start-corner-ax;
+    property <float> drag-start-corner-ay;
+    property <float> drag-start-corner-bx;
+    property <float> drag-start-corner-by;
+
+    function screen-to-img(sx: length, sy: length) -> {x: float, y: float} {
+        return {
+            x: (sx - img-offset-x) / (img-scale * 1px),
+            y: (sy - img-offset-y) / (img-scale * 1px),
+        };
+    }
+    function img-to-screen-x(ix: float) -> length {
+        img-offset-x + ix * 1px * img-scale
+    }
+    function img-to-screen-y(iy: float) -> length {
+        img-offset-y + iy * 1px * img-scale
+    }
+
+    x: img-to-screen-x(Math.min(corner-ax, corner-bx));
+    y: img-to-screen-y(Math.min(corner-ay, corner-by));
+    width: Math.abs(corner-bx - corner-ax) * 1px * img-scale;
+    height: Math.abs(corner-by - corner-ay) * 1px * img-scale;
+    background: root.fill-color;
+    border-color: root.rect-border-color;
+    border-width: root.rect-border-width;
+    visible: false;
+
+    public function show(screen-x: length, screen-y: length) {
+        let p = screen-to-img(screen-x, screen-y);
+        corner-ax = p.x;
+        corner-ay = p.y;
+        corner-bx = p.x;
+        corner-by = p.y;
+        self.visible = true;
+    }
+
+    public function hide() {
+        self.visible = false;
+    }
+
+    public function update-selection(screen-ax: length, screen-ay: length, screen-bx: length, screen-by: length) {
+        let a = screen-to-img(screen-ax, screen-ay);
+        let b = screen-to-img(screen-bx, screen-by);
+        corner-ax = a.x;
+        corner-ay = a.y;
+        corner-bx = b.x;
+        corner-by = b.y;
+    }
+
+    ta := TouchArea {
+        width: 100%;
+        height: 100%;
+        mouse-cursor: dragging-rect ? MouseCursor.grabbing : MouseCursor.move;
+
+        pointer-event(e) => {
+            if (e.button == PointerEventButton.left && e.kind == PointerEventKind.down) {
+                root.confirmed();
+            }
+            if (e.button == PointerEventButton.middle) {
+                if (e.kind == PointerEventKind.down) {
+                    let p = root.screen-to-img(self.mouse-x + root.x, self.mouse-y + root.y);
+                    root.drag-start-img-x = p.x;
+                    root.drag-start-img-y = p.y;
+                    root.drag-start-corner-ax = root.corner-ax;
+                    root.drag-start-corner-ay = root.corner-ay;
+                    root.drag-start-corner-bx = root.corner-bx;
+                    root.drag-start-corner-by = root.corner-by;
+                    root.dragging-rect = true;
+                } else if (e.kind == PointerEventKind.up) {
+                    root.dragging-rect = false;
+                }
+            }
+        }
+
+        moved => {
+            if (root.dragging-rect) {
+                let p = root.screen-to-img(self.mouse-x + root.x, self.mouse-y + root.y);
+                let dx = p.x - root.drag-start-img-x;
+                let dy = p.y - root.drag-start-img-y;
+                root.corner-ax = root.drag-start-corner-ax + dx;
+                root.corner-ay = root.drag-start-corner-ay + dy;
+                root.corner-bx = root.drag-start-corner-bx + dx;
+                root.corner-by = root.drag-start-corner-by + dy;
+            }
+        }
+    }
+
+    // Index: 0=tl, 1=tr, 2=bl, 3=br (clockwise)
+    for handle-def[i] in [
+        { cursor: MouseCursor.nwse-resize, ax: 0.0, ay: 0.0 },
+        { cursor: MouseCursor.nesw-resize, ax: 1.0, ay: 0.0 },
+        { cursor: MouseCursor.nesw-resize, ax: 0.0, ay: 1.0 },
+        { cursor: MouseCursor.se-resize, ax: 1.0, ay: 1.0 },
+    ]: Rectangle {
+        property <length> hcx: handle-def.ax == 0.0 ? root.img-to-screen-x(Math.min(root.corner-ax, root.corner-bx)) : root.img-to-screen-x(Math.max(root.corner-ax, root.corner-bx));
+        property <length> hcy: handle-def.ay == 0.0 ? root.img-to-screen-y(Math.min(root.corner-ay, root.corner-by)) : root.img-to-screen-y(Math.max(root.corner-ay, root.corner-by));
+
+        x: hcx - root.x - root.handle-size / 2;
+        y: hcy - root.y - root.handle-size / 2;
+        width: root.handle-size;
+        height: root.handle-size;
+        background: root.handle-color;
+
+        TouchArea {
+            property <length> r: root.handle-touch-radius;
+            x: (root.handle-size - 2 * r) / 2;
+            y: (root.handle-size - 2 * r) / 2;
+            width: 2 * r;
+            height: 2 * r;
+            mouse-cursor: handle-def.cursor;
+
+            pointer-event(e) => {
+                if (e.button == PointerEventButton.left) {
+                    if (e.kind == PointerEventKind.down) {
+                        root.active-handle = i;
+                        let abs-x = self.mouse-x + parent.x + root.x;
+                        let abs-y = self.mouse-y + parent.y + root.y;
+                        let p = root.screen-to-img(abs-x, abs-y);
+                        root.drag-start-img-x = p.x;
+                        root.drag-start-img-y = p.y;
+                        root.drag-start-corner-ax = root.corner-ax;
+                        root.drag-start-corner-ay = root.corner-ay;
+                        root.drag-start-corner-bx = root.corner-bx;
+                        root.drag-start-corner-by = root.corner-by;
+                    } else if (e.kind == PointerEventKind.up) {
+                        root.active-handle = -1;
+                    }
+                }
+            }
+
+            moved => {
+                if (root.active-handle != i) {
+                    return;
+                }
+                let abs-x = self.mouse-x + parent.x + root.x;
+                let abs-y = self.mouse-y + parent.y + root.y;
+                let p = root.screen-to-img(abs-x, abs-y);
+                let dx = p.x - root.drag-start-img-x;
+                let dy = p.y - root.drag-start-img-y;
+                if (handle-def.ax == 1.0) {
+                    root.corner-bx = root.drag-start-corner-bx + dx;
+                } else {
+                    root.corner-ax = root.drag-start-corner-ax + dx;
+                }
+                if (handle-def.ay == 1.0) {
+                    root.corner-by = root.drag-start-corner-by + dy;
+                } else {
+                    root.corner-ay = root.drag-start-corner-ay + dy;
+                }
+            }
+        }
+    }
+}

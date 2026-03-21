@@ -2,6 +2,7 @@ import { Palette } from "std-widgets.slint";
 import { ImgFmt, EditOp, EditOpKind } from "common.slint";
 import { SidePanel } from "side-panel.slint";
 import { EditsPanel } from "edits-panel.slint";
+import { SelectRect } from "select-rect.slint";
 
 export enum MouseModeFull {
     default,
@@ -34,16 +35,16 @@ export component FullView inherits TouchArea {
     property <length> start-drag-y;
     property <length> start-img-x;
     property <length> start-img-y;
-    property <bool> selecting: self.pressed && root.mouse-x != root.start-drag-x && root.mouse-y != root.start-drag-y;
-    property <length> selection-x;
-    property <length> selection-y;
-    property <length> selection-width;
-    property <length> selection-height;
     property <length> side-panel-width: 240px;
     property <bool> dragging: false;
     property <float> pinch-initial-scale: 1.0;
 
-    mouse-cursor: (mouse-mode == MouseModeFull.segment) ? default : (root.dragging && zoom-scale > 1.0) ? grabbing : (zoom-scale > 1.0) ? grab : crosshair;
+    property <float> img-render-scale: (root.current-image.width > 0 && root.current-image.height > 0) ? Math.min(img-el.width / root.current-image.width, img-el.height / root.current-image.height) / 1px : 1.0;
+
+    property <length> img-vis-x: img-el.x + (img-el.width - root.current-image.width * 1px * img-render-scale) / 2;
+    property <length> img-vis-y: img-el.y + (img-el.height - root.current-image.height * 1px * img-render-scale) / 2;
+
+    mouse-cursor: (mouse-mode == MouseModeFull.segment) ? default : (root.dragging && zoom-scale > 1.0) ? grabbing : crosshair;
 
     coords-timer := Timer {
         interval: 60ms;
@@ -52,16 +53,11 @@ export component FullView inherits TouchArea {
             if (root.mouse-x != root.last-coords-x || root.mouse-y != root.last-coords-y) {
                 root.last-coords-x = root.mouse-x;
                 root.last-coords-y = root.mouse-y;
-                let img-w = root.current-image.width;
-                let img-h = root.current-image.height;
-                if (img-w > 0 && img-h > 0) {
+                if (root.current-image.width > 0 && root.current-image.height > 0) {
                     let rel-x = root.mouse-x - img-rect.x;
                     let rel-y = root.mouse-y - img-rect.y;
-                    let scale = Math.min(img-rect.width / img-w, img-rect.height / img-h) * zoom-scale;
-                    let vis-x = img-el.x + (img-el.width - img-w * scale) / 2;
-                    let vis-y = img-el.y + (img-el.height - img-h * scale) / 2;
-                    let x = clamp(Math.round((rel-x - vis-x) / scale), 0, img-w);
-                    let y = clamp(Math.round((rel-y - vis-y) / scale), 0, img-h);
+                    let x = clamp(Math.round((rel-x - root.img-vis-x) / (root.img-render-scale * 1px)), 0, root.current-image.width);
+                    let y = clamp(Math.round((rel-y - root.img-vis-y) / (root.img-render-scale * 1px)), 0, root.current-image.height);
                     root.display-coords = x + "," + y;
                 }
             }
@@ -69,11 +65,7 @@ export component FullView inherits TouchArea {
     }
 
     public function toggle-mouse-mode() {
-        if (mouse-mode == MouseModeFull.default) {
-            mouse-mode = MouseModeFull.segment;
-        } else {
-            mouse-mode = MouseModeFull.default;
-        }
+        mouse-mode = (mouse-mode == MouseModeFull.default) ? MouseModeFull.segment : MouseModeFull.default;
     }
 
     public function reset-zoom() {
@@ -101,12 +93,25 @@ export component FullView inherits TouchArea {
     }
 
     function zoom-to-selection() {
-        let zoom-factor = Math.min(img-rect.width / selection-width, img-rect.height / selection-height);
-        let center-x = selection-x + selection-width / 2 + img-rect.x;
-        let center-y = selection-y + selection-height / 2 + img-rect.y;
-        zoom(zoom-factor, center-x, center-y);
-        selection-width = 0px;
-        selection-height = 0px;
+        let sw = select-rect.sel-img-w;
+        let sh = select-rect.sel-img-h;
+        if (sw < 1.0 || sh < 1.0) {
+            return;
+        }
+        let cx = root.img-vis-x + (select-rect.sel-img-x + sw / 2) * 1px * root.img-render-scale + img-rect.x;
+        let cy = root.img-vis-y + (select-rect.sel-img-y + sh / 2) * 1px * root.img-render-scale + img-rect.y;
+        let zoom-factor = Math.min(img-rect.width / (sw * 1px * root.img-render-scale),
+                                   img-rect.height / (sh * 1px * root.img-render-scale));
+        zoom(zoom-factor, cx, cy);
+    }
+
+    function to-image-coords(screen-x: length, screen-y: length) -> {x: int, y: int} {
+        let rel-x = screen-x - img-rect.x;
+        let rel-y = screen-y - img-rect.y;
+        return {
+            x: clamp(Math.round((rel-x - root.img-vis-x) / (root.img-render-scale * 1px)), 0, root.current-image.width),
+            y: clamp(Math.round((rel-y - root.img-vis-y) / (root.img-render-scale * 1px)), 0, root.current-image.height),
+        };
     }
 
     pointer-event(event) => {
@@ -125,39 +130,31 @@ export component FullView inherits TouchArea {
             if (event.kind == PointerEventKind.down) {
                 root.start-drag-x = root.mouse-x;
                 root.start-drag-y = root.mouse-y;
-                selection-width = 0px;
-                selection-height = 0px;
+                select-rect.show(root.mouse-x - img-rect.x, root.mouse-y - img-rect.y);
             } else if (event.kind == PointerEventKind.up) {
-                if (selection-width > 5px && selection-height > 5px && mouse-mode == MouseModeFull.default) {
-                    zoom-to-selection();
-                } else if ((selection-width <= 5px || selection-height <= 5px) && mouse-mode == MouseModeFull.segment) {
-                    let img-w = root.current-image.width;
-                    let img-h = root.current-image.height;
-                    if (img-w > 0 && img-h > 0) {
-                        let rel-x = root.mouse-x - img-rect.x;
-                        let rel-y = root.mouse-y - img-rect.y;
-                        let scale = Math.min(img-rect.width / img-w, img-rect.height / img-h) * zoom-scale;
-                        let vis-x = img-el.x + (img-el.width - img-w * scale) / 2;
-                        let vis-y = img-el.y + (img-el.height - img-h * scale) / 2;
-                        let orig-x = clamp(Math.round((rel-x - vis-x) / scale), 0, img-w);
-                        let orig-y = clamp(Math.round((rel-y - vis-y) / scale), 0, img-h);
-                        root.request-segmentation(orig-x, orig-y);
+                if (select-rect.sel-img-w < 2.0 || select-rect.sel-img-h < 2.0) {
+                    if (mouse-mode == MouseModeFull.segment && root.current-image.width > 0) {
+                        let coords = root.to-image-coords(root.mouse-x, root.mouse-y);
+                        root.request-segmentation(coords.x, coords.y);
                     }
+                    select-rect.hide();
                 }
             }
         }
     }
 
     moved => {
-        if (dragging == true && zoom-scale > 1.0) {
+        if (dragging && zoom-scale > 1.0) {
             img-el.x = root.start-img-x + (root.mouse-x - root.start-drag-x);
             img-el.y = root.start-img-y + (root.mouse-y - root.start-drag-y);
         }
-        if (selecting && mouse-mode == MouseModeFull.default) {
-            selection-x = Math.min(root.mouse-x, root.start-drag-x) - img-rect.x;
-            selection-y = Math.min(root.mouse-y, root.start-drag-y) - img-rect.y;
-            selection-width = Math.abs(root.mouse-x - root.start-drag-x);
-            selection-height = Math.abs(root.mouse-y - root.start-drag-y);
+        if (root.pressed && !dragging && mouse-mode == MouseModeFull.default) {
+            select-rect.update-selection(
+                root.start-drag-x - img-rect.x,
+                root.start-drag-y - img-rect.y,
+                root.mouse-x - img-rect.x,
+                root.mouse-y - img-rect.y,
+            );
         }
     }
 
@@ -165,8 +162,11 @@ export component FullView inherits TouchArea {
         let scroll-up = event.delta-y > 0;
         if (event.modifiers.control) {
             zoom(scroll-up ? 1.1 : 0.9, root.mouse-x, root.mouse-y);
-        } else if (zoom-scale == 1) { // floating point exact comparison, really?
-            reset-zoom(); // not needed?
+        } else {
+            debug("zoom-scale:", zoom-scale);
+            if (zoom-scale > 1) {
+                return reject;
+            }
             if (scroll-up) {
                 root.request-prev-image();
             } else {
@@ -222,15 +222,20 @@ export component FullView inherits TouchArea {
                 }
             }
 
-            Rectangle {
-                x: root.selection-x;
-                y: root.selection-y;
-                width: root.selection-width;
-                height: root.selection-height;
-                visible: root.selecting && root.mouse-mode == MouseModeFull.default;
-                background: Palette.accent-background.with-alpha(25%);
-                border-color: Palette.accent-background.with-alpha(75%);
-                border-width: 1px;
+            select-rect := SelectRect {
+                img-offset-x: root.img-vis-x;
+                img-offset-y: root.img-vis-y;
+                img-scale: root.img-render-scale;
+
+                confirmed => {
+                    if (select-rect.sel-img-w > 2.0 && select-rect.sel-img-h > 2.0) {
+                        root.zoom-to-selection();
+                    }
+                    select-rect.hide();
+                }
+                cancelled => {
+                    select-rect.hide();
+                }
             }
 
             ContextMenuArea {
@@ -286,7 +291,6 @@ export component FullView inherits TouchArea {
         SidePanel {
             is-visible: root.panel-visible;
             side-width <=> root.side-panel-width;
-
             EditsPanel {
                 apply-edit(op) => {
                     root.apply-edit(op);
