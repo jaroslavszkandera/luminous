@@ -351,21 +351,31 @@ impl AppController {
         }
     }
 
-    fn handle_segmentation(&self, x: u32, y: u32) {
+    fn handle_segmentation(&self, x1: i32, y1: i32, x2: i32, y2: i32) {
         let weak = self.window_weak.clone();
         let loader = self.loader.clone();
 
-        // self.loader.pool.spawn(move || {
         if let Some(plugin) = loader.plugin_manager.get_interactive_plugin() {
-            if let Some(mask) = plugin.interactive_click(x, y) {
-                let _ = weak.upgrade_in_event_loop(move |ui| {
-                    ui.set_mask_overlay(Image::from_rgba8(mask));
-                });
+            if x2 < 0 || y2 < 0 {
+                if let Some(mask) = plugin.interactive_click(x1 as u32, y1 as u32) {
+                    let _ = weak.upgrade_in_event_loop(move |ui| {
+                        ui.set_mask_overlay(Image::from_rgba8(mask));
+                    });
+                } else {
+                    warn!("Interactive click failed");
+                }
             } else {
-                warn!("Interactive click failed");
+                if let Some(mask) =
+                    plugin.interactive_rect_select(x1 as u32, y1 as u32, x2 as u32, y2 as u32)
+                {
+                    let _ = weak.upgrade_in_event_loop(move |ui| {
+                        ui.set_mask_overlay(Image::from_rgba8(mask));
+                    });
+                } else {
+                    warn!("Interactive select failed");
+                }
             }
         }
-        // });
     }
 
     fn build_window_indices(&self, center: usize) -> Vec<usize> {
@@ -762,12 +772,8 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
 
     let c = controller.clone();
     main_window.on_request_segmentation(move |x1, y1, x2, y2| {
-        debug!("on_request_segmentation");
-        if x2 < 0 && y2 < 0 {
-            c.borrow().handle_segmentation(x1 as u32, y1 as u32);
-        } else {
-            debug!("Rectangle select: {x1} {y1} {x2} {y2}");
-        }
+        c.borrow()
+            .handle_segmentation(x1 as i32, y1 as i32, x2 as i32, y2 as i32);
     });
 
     let ui_weak = controller.clone().borrow().window_weak.clone();
