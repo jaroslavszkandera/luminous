@@ -47,14 +47,14 @@ export component EditsPanel inherits Rectangle {
         EditRow {
             label: "Flip";
             Button {
-                text: "Horizontal";
+                text: "H";
                 clicked => {
                     root.apply-edit({ kind: EditOpKind.FlipH, int-val: 0, float-val: 0 });
                 }
             }
 
             Button {
-                text: "Vertical";
+                text: "V";
                 clicked => {
                     root.apply-edit({ kind: EditOpKind.FlipV, int-val: 0, float-val: 0 });
                 }

@@ -112,7 +112,7 @@ export component SelectRect inherits Rectangle {
         { cursor: MouseCursor.nwse-resize, side-x: CornerSide.min, side-y: CornerSide.min },
         { cursor: MouseCursor.nesw-resize, side-x: CornerSide.max, side-y: CornerSide.min },
         { cursor: MouseCursor.nesw-resize, side-x: CornerSide.min, side-y: CornerSide.max },
-        { cursor: MouseCursor.se-resize, side-x: CornerSide.max, side-y: CornerSide.max },
+        { cursor: MouseCursor.nwse-resize, side-x: CornerSide.max, side-y: CornerSide.max },
     ]: Rectangle {
         property <length> corner-screen-x: handle-def.side-x == CornerSide.min ? root.img-to-screen-x(Math.min(root.anchor.x, root.opposite.x)) : root.img-to-screen-x(Math.max(root.anchor.x, root.opposite.x));
         property <length> corner-screen-y: handle-def.side-y == CornerSide.min ? root.img-to-screen-y(Math.min(root.anchor.y, root.opposite.y)) : root.img-to-screen-y(Math.max(root.anchor.y, root.opposite.y));

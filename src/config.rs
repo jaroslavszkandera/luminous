@@ -163,7 +163,6 @@ impl Config {
         map.insert("quit".into(), "q".into());
         map.insert("toggle_fullscreen".into(), "f".into());
         map.insert("switch_view_mode".into(), "Escape".into());
-        map.insert("switch_mouse_mode".into(), "m".into());
         map.insert("grid_page_down".into(), "PageDown".into());
         map.insert("grid_page_up".into(), "PageUp".into());
         map.insert("reset_zoom".into(), "z".into());

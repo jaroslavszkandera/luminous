@@ -20,13 +20,12 @@ export component MainWindow inherits Window {
     in property <string> bind-reset-zoom;
     in property <string> bind-grid-pg-dn;
     in property <string> bind-grid-pg-up;
-    in property <string> bind-switch-mouse-mode;
     in property <string> bind-toggle-side-panel;
 
     // Full view Callbacks
     callback request-next-image();
     callback request-prev-image();
-    callback request-segmentation(int, int);
+    callback request-segmentation(int, int, int, int);
     callback apply-edit(EditOp);
     callback save-with-format(ImgFmt);
 
@@ -101,10 +100,6 @@ export component MainWindow inherits Window {
                 }
                 if (event.text == root.bind-reset-zoom) {
                     full-ui.reset-zoom();
-                    return accept;
-                }
-                if (event.text == root.bind-switch-mouse-mode) {
-                    full-ui.toggle-mouse-mode();
                     return accept;
                 }
                 if (event.text == root.bind-toggle-side-panel) {
@@ -199,6 +194,11 @@ export component MainWindow inherits Window {
         }
     }
 
+    // Plugins
+    // callback run(bool);
+    // callback interactive-text-submitted(string);
+    // callback update-run-state();
+
     full-ui := FullView {
         visible: root.view-mode == ViewMode.full;
         timer-running: root.view-mode == ViewMode.full;
@@ -215,8 +215,9 @@ export component MainWindow inherits Window {
         request-prev-image => {
             root.request-prev-image();
         }
-        request-segmentation(x, y) => {
-            root.request-segmentation(x, y);
+        request-segmentation(x1, y1, x2, y2) => {
+            debug("request-segmentation");
+            root.request-segmentation(x1, y1, x2, y2);
         }
         apply-edit(op) => {
             root.apply-edit(op);
@@ -227,5 +228,16 @@ export component MainWindow inherits Window {
         exit-full-view => {
             root.view-mode = ViewMode.grid;
         }
+        // Plugins
+        // run(control) => {
+        //     run(control);
+        // }
+        // interactive-text-submitted(txt) => {
+        //     interactive-text-submitted(txt);
+        //     root.return-focus();
+        // }
+        // update-run-state() => {
+        //     update-run-state();
+        // }
     }
 }

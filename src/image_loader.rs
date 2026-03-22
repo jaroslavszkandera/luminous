@@ -38,6 +38,7 @@ pub struct ImageLoader {
     pub window_size: usize,
     pub plugin_manager: Arc<PluginManager>,
 
+    // TODO: load from the closest requested token for better results
     active_window: Arc<Mutex<HashSet<usize>>>,
     thumb_epoch: Arc<AtomicUsize>,
     next_full_token: Arc<AtomicUsize>,

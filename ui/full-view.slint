@@ -3,11 +3,9 @@ import { ImgFmt, EditOp, EditOpKind } from "common.slint";
 import { SidePanel } from "side-panel.slint";
 import { EditsPanel } from "edits-panel.slint";
 import { SelectRect } from "select-rect.slint";
+import { InteractivePlugin } from "plugins.slint";
 
-export enum MouseModeFull {
-    default,
-    segment,
-}
+// TODO: global singleton
 
 export component FullView inherits TouchArea {
     in property <image> current-image;
@@ -17,20 +15,27 @@ export component FullView inherits TouchArea {
     in property <bool> timer-running: false;
     in property <image> mask-overlay;
     in property <string> plugin-status;
-    in-out property <bool> panel-visible: false;
+    in-out property <bool> panel-visible: true; // TMP: testing
 
     callback request-next-image();
     callback request-prev-image();
     callback exit-full-view();
-    callback request-segmentation(int, int);
+    callback request-segmentation(int, int, int, int);
     callback save-with-format(ImgFmt);
     callback apply-edit(EditOp);
+
+    // Plugins
+    // TODO: make it better
+    // callback run(bool);
+    // callback interactive-text-submitted(string);
+    // callback update-run-state();
+    in-out property <bool> click-active;
+    in-out property <bool> select-active;
 
     property <string> display-coords: "0,0";
     property <float> zoom-scale: 1.0;
     property <length> last-coords-x;
     property <length> last-coords-y;
-    property <MouseModeFull> mouse-mode: MouseModeFull.default;
     property <length> start-drag-x;
     property <length> start-drag-y;
     property <length> start-img-x;
@@ -44,7 +49,7 @@ export component FullView inherits TouchArea {
     property <length> img-vis-x: img-el.x + (img-el.width - root.current-image.width * 1px * img-render-scale) / 2;
     property <length> img-vis-y: img-el.y + (img-el.height - root.current-image.height * 1px * img-render-scale) / 2;
 
-    mouse-cursor: (mouse-mode == MouseModeFull.segment) ? default : (root.dragging && zoom-scale > 1.0) ? grabbing : crosshair;
+    mouse-cursor: (root.dragging && zoom-scale > 1.0) ? grabbing : crosshair;
 
     coords-timer := Timer {
         interval: 60ms;
@@ -62,10 +67,6 @@ export component FullView inherits TouchArea {
                 }
             }
         }
-    }
-
-    public function toggle-mouse-mode() {
-        mouse-mode = (mouse-mode == MouseModeFull.default) ? MouseModeFull.segment : MouseModeFull.default;
     }
 
     public function reset-zoom() {
@@ -130,9 +131,17 @@ export component FullView inherits TouchArea {
                 select-rect.show(root.mouse-x - img-rect.x, root.mouse-y - img-rect.y);
             } else if (event.kind == PointerEventKind.up) {
                 if (select-rect.selection.w < 2px || select-rect.selection.h < 2px) {
-                    if (mouse-mode == MouseModeFull.segment && root.current-image.width > 0) {
+                    if root.current-image.width > 0 {
                         let coords = root.to-image-coords(root.mouse-x, root.mouse-y);
-                        root.request-segmentation(coords.x, coords.y);
+                        if interactive-plugin.click-active {
+                            debug("click send");
+                            root.request-segmentation(coords.x, coords.y, -1, -1);
+                        } else if interactive-plugin.select-active && coords.x != coords.x + select-rect.selection.w / 1px {
+                            debug("select send");
+                            select-rect.confirmed();
+                        } else {
+                            debug("nothing send");
+                        }
                     }
                     select-rect.hide();
                 }
@@ -145,7 +154,7 @@ export component FullView inherits TouchArea {
             img-el.x = root.start-img-x + (root.mouse-x - root.start-drag-x);
             img-el.y = root.start-img-y + (root.mouse-y - root.start-drag-y);
         }
-        if (root.pressed && !dragging && mouse-mode == MouseModeFull.default) {
+        if (root.pressed && !dragging) {
             select-rect.update-selection(
                 { x: root.start-drag-x - img-rect.x, y: root.start-drag-y - img-rect.y },
                 { x: root.mouse-x - img-rect.x, y: root.mouse-y - img-rect.y },
@@ -224,7 +233,12 @@ export component FullView inherits TouchArea {
 
                 confirmed => {
                     if (select-rect.selection.w > 2px && select-rect.selection.h > 2px) {
-                        root.zoom-to-selection();
+                        if interactive-plugin.select-active {
+                            let r = select-rect.selection;
+                            root.request-segmentation(r.x / 1px, r.y / 1px, (r.x + r.w) / 1px, (r.y + r.h) / 1px);
+                        } else {
+                            root.zoom-to-selection();
+                        }
                     }
                     select-rect.hide();
                 }
@@ -286,9 +300,27 @@ export component FullView inherits TouchArea {
         SidePanel {
             is-visible: root.panel-visible;
             side-width <=> root.side-panel-width;
-            EditsPanel {
-                apply-edit(op) => {
-                    root.apply-edit(op);
+            VerticalLayout {
+                padding: 5px;
+                EditsPanel {
+                    apply-edit(op) => {
+                        root.apply-edit(op);
+                    }
+                }
+
+                interactive-plugin := InteractivePlugin {
+                    click-active: root.click-active;
+                    select-active: root.select-active;
+                    // run(control) => {
+                    //     run(control);
+                    // }
+                    // interactive-text-submitted(txt) => {
+                    //     interactive-text-submitted(txt);
+                    // }
+                    // update-run-state() => {
+                    //     update-run-state();
+                    //     self.update-run-state-react();
+                    // }
                 }
             }
         }

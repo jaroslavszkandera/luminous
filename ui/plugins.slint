@@ -1,0 +1,118 @@
+import { Palette, Button, LineEdit } from "std-widgets.slint";
+
+enum PluginControl {
+    Start,
+    Starting,
+    Stop,
+    Stopping,
+}
+export component InteractivePlugin inherits Rectangle {
+    property <string> label: "Interactive";
+    property <string> status: "Unknown";
+    property <bool> running: false;
+    property <bool> enable-control: control == PluginControl.Start || control == PluginControl.Stop;
+    in-out property <bool> click-active: false;
+    in-out property <bool> select-active: false;
+    property <PluginControl> control;
+
+    height: 120px;
+    background: Palette.background.brighter(10%);
+    border-width: 1px;
+    border-color: Palette.accent-background;
+    border-radius: 3px;
+
+    callback interactive-text-submitted(string);
+    callback click-active-changed();
+    callback select-active-changed();
+    callback update-run-state();
+    callback run(bool);
+
+    // tmp simulate
+    public function update-run-state-react() {
+        if control == PluginControl.Starting {
+            control = PluginControl.Stop;
+            running = true;
+        } else if control == PluginControl.Stopping {
+            control = PluginControl.Start;
+            running = false;
+        }
+    }
+
+    function plugin-control-string(control: PluginControl) -> string {
+        return control == PluginControl.Start ? "Start" : control == PluginControl.Starting ? "Starting" : control == PluginControl.Stop ? "Stop" : control == PluginControl.Stopping ? "Stopping" : "";
+    }
+
+    VerticalLayout {
+        HorizontalLayout {
+            VerticalLayout {
+                Text {
+                    text: label;
+                }
+
+                Text {
+                    text: "Status: " + status;
+                }
+            }
+
+            Button {
+                text: plugin-control-string(control);
+                checked: running;
+                enabled: enable-control;
+                clicked => {
+                    control = control == PluginControl.Start ? PluginControl.Starting : PluginControl.Stopping;
+                    if (control == PluginControl.Starting) {
+                        run(true);
+                    } else {
+                        run(false);
+                    }
+                    update-run-state(); // tmp simulate
+                }
+            }
+        }
+
+        HorizontalLayout {
+            Button {
+                text: "click";
+                checked: click-active;
+                clicked => {
+                    click-active = !click-active;
+                    if (click-active) {
+                        select-active = false;
+                    }
+                    debug("click-active", click-active, "select-active", select-active);
+                }
+            }
+
+            Button {
+                text: "select";
+                checked: select-active;
+                clicked => {
+                    select-active = !select-active;
+                    if (select-active) {
+                        click-active = false;
+                    }
+                    debug("click-active", click-active, "select-active", select-active);
+                }
+            }
+        }
+
+        LineEdit {
+            placeholder-text: "Enter text here";
+            accepted(text) => {
+                debug("Accepted: ", text);
+                interactive-text-submitted(text);
+                self.clear-focus()
+            }
+
+            key-pressed(event) => {
+                if (event.text == Key.Escape) {
+                    self.text = "";
+                    interactive-text-submitted("");
+                    self.clear-focus();
+                    return accept;
+                }
+                reject
+            }
+        }
+    }
+}

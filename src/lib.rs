@@ -754,9 +754,20 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
         .unwrap();
     });
 
+    // TODO:
+    // let c = controller.clone();
+    // main_window.on_interactive_text_submitted(move |txt| {
+    //     c.borrow().handle_segmentation(txt as string);
+    // });
+
     let c = controller.clone();
-    main_window.on_request_segmentation(move |x, y| {
-        c.borrow().handle_segmentation(x as u32, y as u32);
+    main_window.on_request_segmentation(move |x1, y1, x2, y2| {
+        debug!("on_request_segmentation");
+        if x2 < 0 && y2 < 0 {
+            c.borrow().handle_segmentation(x1 as u32, y1 as u32);
+        } else {
+            debug!("Rectangle select: {x1} {y1} {x2} {y2}");
+        }
     });
 
     let ui_weak = controller.clone().borrow().window_weak.clone();
@@ -814,7 +825,6 @@ fn setup_bindings(main_window: &MainWindow, config: &Config) {
     main_window.set_bind_quit(get_key("quit"));
     main_window.set_bind_fullscreen(get_key("toggle_fullscreen"));
     main_window.set_bind_switch_view_mode(get_key("switch_view_mode"));
-    main_window.set_bind_switch_mouse_mode(get_key("switch_mouse_mode"));
     main_window.set_bind_reset_zoom(get_key("reset_zoom"));
     main_window.set_bind_grid_pg_dn(get_key("grid_page_down"));
     main_window.set_bind_grid_pg_up(get_key("grid_page_up"));

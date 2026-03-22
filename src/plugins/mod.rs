@@ -14,6 +14,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 pub trait Backend: Send + Sync {
+    fn start(&self) {}
+    fn stop(&self) {}
     fn decode(&self, _path: &Path) -> Option<image::DynamicImage> {
         None
     }
@@ -51,6 +53,14 @@ impl Plugin {
             BackendKind::SharedLib => Box::new(SharedLibBackend::new(&manifest, &dir)?),
         };
         Some(Self { manifest, backend })
+    }
+
+    pub fn start(&self) {
+        self.backend.start();
+    }
+
+    pub fn stop(&self) {
+        self.backend.stop();
     }
 
     pub fn version_compatible(&self) -> bool {
