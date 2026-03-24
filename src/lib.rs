@@ -53,13 +53,14 @@ impl AppController {
         let weak_thumb = window_weak.clone();
         loader.on_thumb_ready(move |index, buffer| {
             let _ = weak_thumb.upgrade_in_event_loop(move |ui| {
+                let gv = ui.global::<GridViewState>();
                 let img = Image::from_rgba8(buffer);
-                let m = ui.get_grid_model();
+                let m = gv.get_model();
                 if let Some(mut item) = m.row_data(index) {
                     item.image = img.clone();
                     m.set_row_data(index, item);
                 }
-                let vm = ui.get_visible_grid_model();
+                let vm = gv.get_visible_model();
                 for i in 0..vm.row_count() {
                     if let Some(mut v) = vm.row_data(i) {
                         if v.index == index as i32 {
@@ -102,12 +103,12 @@ impl AppController {
     }
 
     fn handle_grid_request(&mut self, start: usize, count: usize) {
-        let ui = match self.window_weak.upgrade() {
-            Some(ui) => ui,
-            None => return,
+        let Some(ui) = self.window_weak.upgrade() else {
+            return;
         };
+        let gv = ui.global::<GridViewState>();
 
-        let model = ui.get_grid_model();
+        let model = gv.get_model();
         let total = model.row_count();
         let end = cmp::min(start + count, total);
 
@@ -127,7 +128,7 @@ impl AppController {
         self.loader.prune_grid_thumbs(start, count);
 
         let visible: Vec<GridItem> = (start..end).filter_map(|i| model.row_data(i)).collect();
-        ui.set_visible_grid_model(ModelRc::from(Rc::from(VecModel::from(visible))));
+        gv.set_visible_model(ModelRc::from(Rc::from(VecModel::from(visible))));
 
         let visible_range = keep_start..=keep_end;
         self.active_grid_indices
@@ -150,7 +151,7 @@ impl AppController {
         if cached_updates.is_empty() {
             return;
         }
-        let vm = ui.get_visible_grid_model();
+        let vm = gv.get_visible_model();
         for (row, buf) in cached_updates {
             let img = Image::from_rgba8(buf);
             if let Some(mut item) = model.row_data(row) {
@@ -318,8 +319,9 @@ impl AppController {
             })
             .collect();
 
-        ui.set_selected_count(0);
-        ui.set_grid_model(Rc::new(VecModel::from(items)).into());
+        let gv = ui.global::<GridViewState>();
+        gv.set_selected_count(0);
+        gv.set_model(Rc::new(VecModel::from(items)).into());
 
         if let Some(&first) = self.filtered_indices.first() {
             self.handle_full_view_load(first);
@@ -331,7 +333,8 @@ impl AppController {
         let Some(ui) = self.window_weak.upgrade() else {
             return;
         };
-        let model = ui.get_grid_model();
+        let gv = ui.global::<GridViewState>();
+        let model = gv.get_model();
         let row = index as usize;
 
         let Some(mut item) = model.row_data(row) else {
@@ -340,9 +343,9 @@ impl AppController {
         item.selected = !item.selected;
         model.set_row_data(row, item.clone());
 
-        ui.set_selected_count(ui.get_selected_count() + if item.selected { 1 } else { -1 });
+        gv.set_selected_count(gv.get_selected_count() + if item.selected { 1 } else { -1 });
 
-        let vm = ui.get_visible_grid_model();
+        let vm = gv.get_visible_model();
         for i in 0..vm.row_count() {
             if let Some(mut v) = vm.row_data(i) {
                 if v.index == item.index {
@@ -416,7 +419,7 @@ impl AppController {
         let Some(ui) = self.window_weak.upgrade() else {
             return Vec::new();
         };
-        let model = ui.get_grid_model();
+        let model = ui.global::<GridViewState>().get_model();
         (0..model.row_count())
             .filter_map(|i| {
                 let item = model.row_data(i)?;
@@ -460,7 +463,9 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
             selected: false,
         })
         .collect();
-    main_window.set_grid_model(Rc::new(VecModel::from(grid_data)).into());
+    main_window
+        .global::<GridViewState>()
+        .set_model(Rc::new(VecModel::from(grid_data)).into());
 
     let scan_rc = Rc::new(scan);
     let app_controller = Rc::new(RefCell::new(AppController::new(

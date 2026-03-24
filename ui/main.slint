@@ -1,4 +1,4 @@
-import { GridView } from "grid-view.slint";
+import { GridView, GridViewState } from "grid-view.slint";
 import { FullView, FullViewState } from "full-view.slint";
 import { Palette } from "std-widgets.slint";
 import { ImgFmt, EditOp, GridItem, ViewMode } from "common.slint";
@@ -6,7 +6,7 @@ import { PipelineStep, PipelineStepKind, RotateAngle } from "side-panel.slint";
 
 export { GridItem, ViewMode } from "common.slint";
 export { FullViewState } from "full-view.slint";
-// TODO: export { GridViewState } from "grid-view.slint";
+export { GridViewState } from "grid-view.slint";
 
 
 export component MainWindow inherits Window {
@@ -16,41 +16,13 @@ export component MainWindow inherits Window {
     preferred-height: 720px;
     full-screen: self.is-fullscreen;
 
-    // Full view Callbacks
-    in property <image> mask-overlay;
-    in property <string> plugin-status: "Initializing...";
-
-    // Grid view Callbacks
-    callback request-grid-data(int, int);
-    callback image-selected(int);
-    callback bucket-resolution-changed(int);
-    callback search-submitted(string);
-    callback toggle-select-all(bool);
-    callback request-range-select(int, int);
-    callback print-selected-paths();
-    callback toggle-selection(int);
-    callback batch-save-with-format(ImgFmt);
-
-    // Pipeline
-    in-out property <[PipelineStep]> pipeline-steps;
-    callback pipeline-add-step(PipelineStepKind);
-    callback pipeline-remove-step(int);
-    callback pipeline-update-rotate(int, RotateAngle);
-    callback pipeline-update-sigma(int, float);
-    callback pipeline-update-brighten(int, int);
-    callback pipeline-run();
-
     // App Callbacks
     callback quit-app();
 
-    // State
+    // App State
     in property <color> app-background: Palette.background;
-    in property <[GridItem]> grid-model;
-    in property <[GridItem]> visible-grid-model;
     in-out property <ViewMode> view-mode: ViewMode.grid;
     in-out property <bool> is-fullscreen: false;
-    in-out property <int> grid-cols: 5;
-    in-out property <int> selected-count: 0;
 
     // Bindings
     in property <string> bind-quit;
@@ -110,11 +82,11 @@ export component MainWindow inherits Window {
                     return accept;
                 }
                 if (event.text == "=" || event.text == "+") {
-                    grid-ui.update-grid-cols(grid-cols - 1);
+                    grid-ui.update-grid-cols(GridViewState.grid-cols - 1);
                     return accept;
                 }
                 if (event.text == "-" || event.text == "_") {
-                    grid-ui.update-grid-cols(grid-cols + 1);
+                    grid-ui.update-grid-cols(GridViewState.grid-cols + 1);
                     return accept;
                 }
                 if (event.text == "/") {
@@ -130,41 +102,23 @@ export component MainWindow inherits Window {
         }
     }
 
+    // ----- Grid view -----
+    callback batch-save-with-format(ImgFmt);
+
+    // Pipeline
+    in-out property <[PipelineStep]> pipeline-steps;
+    callback pipeline-add-step(PipelineStepKind);
+    callback pipeline-remove-step(int);
+    callback pipeline-update-rotate(int, RotateAngle);
+    callback pipeline-update-sigma(int, float);
+    callback pipeline-update-brighten(int, int);
+    callback pipeline-run();
+
     grid-ui := GridView {
         visible: root.view-mode == ViewMode.grid;
-        visible-model: root.visible-grid-model;
-        model: root.grid-model;
-        grid-cols <=> root.grid-cols;
         forward-focus: key-handler;
-        selected-count <=> root.selected-count;
         pipeline-steps <=> root.pipeline-steps;
 
-        request-grid-data(start, count) => {
-            root.request-grid-data(start, count);
-        }
-        bucket-resolution-changed(res) => {
-            root.bucket-resolution-changed(res);
-        }
-        image-selected(idx) => {
-            root.image-selected(idx);
-            root.view-mode = ViewMode.full;
-        }
-        search-submitted(query) => {
-            root.search-submitted(query);
-            root.return-focus();
-        }
-        toggle-select-all(select) => {
-            root.toggle-select-all(select);
-        }
-        request-range-select(start-idx, end-idx) => {
-            root.request-range-select(start-idx, end-idx);
-        }
-        print-selected-paths() => {
-            root.print-selected-paths();
-        }
-        toggle-selection(idx) => {
-            root.toggle-selection(idx);
-        }
         batch-save-with-format(fmt) => {
             root.batch-save-with-format(fmt);
         }
@@ -188,6 +142,10 @@ export component MainWindow inherits Window {
         }
     }
 
+    // ----- Full view -----
+    in property <image> mask-overlay;
+    in property <string> plugin-status: "Initializing...";
+
     // Plugins
     // callback run(bool);
     // callback interactive-text-submitted(string);
@@ -196,7 +154,7 @@ export component MainWindow inherits Window {
     full-ui := FullView {
         visible: root.view-mode == ViewMode.full;
         timer-running: root.view-mode == ViewMode.full;
-        total-images: root.grid-model.length;
+        total-images: GridViewState.model.length;
         mask-overlay: root.mask-overlay;
         plugin-status: root.plugin-status;
 

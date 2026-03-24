@@ -8,16 +8,11 @@ import {
     RotateAngle,
 } from "side-panel.slint";
 
-export component GridView inherits Rectangle {
+export global GridViewState {
     in property <[GridItem]> model;
     in property <[GridItem]> visible-model;
     in-out property <int> grid-cols: 5;
     in-out property <int> selected-count: 0;
-    in-out property <bool> panel-visible: false;
-    in-out property <length> side-panel-width: 240px;
-    in-out property <[PipelineStep]> pipeline-steps;
-
-    property <int> last-clicked-index: -1;
 
     callback request-grid-data(int, int);
     callback image-selected(int);
@@ -27,6 +22,15 @@ export component GridView inherits Rectangle {
     callback request-range-select(int, int);
     callback print-selected-paths();
     callback toggle-selection(int);
+}
+
+export component GridView inherits Rectangle {
+    in-out property <bool> panel-visible: false;
+    in-out property <length> side-panel-width: 240px;
+    in-out property <[PipelineStep]> pipeline-steps;
+
+    property <int> last-clicked-index: -1;
+
     callback batch-save-with-format(ImgFmt);
     callback pipeline-add-step(PipelineStepKind);
     callback pipeline-remove-step(int);
@@ -62,12 +66,12 @@ export component GridView inherits Rectangle {
             let buffer-rows = 5;
             let start-index = Math.max(0, (start-row - buffer-rows) * cols);
             let total-count = (screen-rows + (buffer-rows * 2)) * cols;
-            root.request-grid-data(start-index, total-count);
+            GridViewState.request-grid-data(start-index, total-count);
         }
     }
 
     public function update-grid-cols(cols: int) {
-        root.grid-cols = clamp(cols, 2, 20);
+        GridViewState.grid-cols = clamp(cols, 2, 20);
         scroll-area.sync-bucket-resolution();
         update-visible-rows();
     }
@@ -83,10 +87,10 @@ export component GridView inherits Rectangle {
                 spacing: 30px;
 
                 Button {
-                    text: selected-count > 0 ? selected-count + "/" + model.length : model.length;
+                    text: GridViewState.selected-count > 0 ? GridViewState.selected-count + "/" + GridViewState.model.length : GridViewState.model.length;
                     clicked => {
-                        root.toggle-select-all(selected-count > 0);
-                        root.selected-count = selected-count > 0 ? 0 : model.length;
+                        GridViewState.toggle-select-all(GridViewState.selected-count > 0);
+                        GridViewState.selected-count = GridViewState.selected-count > 0 ? 0 : GridViewState.model.length;
                     }
                 }
 
@@ -94,13 +98,13 @@ export component GridView inherits Rectangle {
                     placeholder-text: "Search";
                     font-size: 16px;
                     accepted(text) => {
-                        root.search-submitted(self.text);
+                        GridViewState.search-submitted(self.text);
                         self.clear-focus();
                     }
                     key-pressed(event) => {
                         if (event.text == Key.Escape) {
                             self.text = "";
-                            root.search-submitted("");
+                            GridViewState.search-submitted("");
                             self.clear-focus();
                             return accept;
                         }
@@ -140,7 +144,7 @@ export component GridView inherits Rectangle {
                     let new-res = bucket-resolution(grid-container.item-size);
                     if (new-res != grid-container.curr-bucket-res) {
                         grid-container.curr-bucket-res = new-res;
-                        root.bucket-resolution-changed(new-res);
+                        GridViewState.bucket-resolution-changed(new-res);
                     }
                 }
 
@@ -159,16 +163,16 @@ export component GridView inherits Rectangle {
                 }
 
                 grid-touch := TouchArea {
-                    property <int> cols: root.grid-cols;
+                    property <int> cols: GridViewState.grid-cols;
                     property <length> gap: 0px;
                     property <length> item-size: (parent.width - (cols + 1) * gap) / cols;
-                    property <int> rows: (root.model.length + cols - 1) / cols;
+                    property <int> rows: (GridViewState.model.length + cols - 1) / cols;
                     height: (rows * item-size) + ((rows + 1) * gap);
 
                     scroll-event(event) => {
                         if (event.modifiers.control) {
                             let delta = event.delta-y > 0 ? -1 : 1;
-                            root.update-grid-cols(root.grid-cols + delta);
+                            root.update-grid-cols(GridViewState.grid-cols + delta);
                             accept
                         } else {
                             reject
@@ -182,7 +186,7 @@ export component GridView inherits Rectangle {
                         property <int> cols: grid-touch.cols;
                         property <int> curr-bucket-res: 0;
 
-                        for item in root.visible-model: Rectangle {
+                        for item in GridViewState.visible-model: Rectangle {
                             width: parent.item-size;
                             height: parent.item-size;
                             x: (Math.mod(item.index, parent.cols) * (parent.item-size + parent.gap)) + parent.gap;
@@ -208,15 +212,15 @@ export component GridView inherits Rectangle {
                                 pointer-event(event) => {
                                     if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
                                         if (event.modifiers.control) {
-                                            root.toggle-selection(item.index);
+                                            GridViewState.toggle-selection(item.index);
                                             root.last-clicked-index = item.index;
                                         } else if (event.modifiers.shift && root.last-clicked-index != -1) {
-                                            root.request-range-select(root.last-clicked-index, item.index);
+                                            GridViewState.request-range-select(root.last-clicked-index, item.index);
                                         }
                                     }
                                 }
                                 double-clicked => {
-                                    root.image-selected(item.index);
+                                    GridViewState.image-selected(item.index);
                                 }
                             }
                         }
@@ -227,7 +231,7 @@ export component GridView inherits Rectangle {
                             MenuItem {
                                 title: @tr("Print selected paths to stdout");
                                 activated => {
-                                    root.print-selected-paths();
+                                    GridViewState.print-selected-paths();
                                 }
                             }
 
@@ -244,7 +248,7 @@ export component GridView inherits Rectangle {
                                     title: @tr("png");
                                     activated => {
                                         root.batch-save-with-format(ImgFmt.png);
-                                        root.toggle-select-all(false);
+                                        GridViewState.toggle-select-all(false);
                                     }
                                 }
 
@@ -252,7 +256,7 @@ export component GridView inherits Rectangle {
                                     title: @tr("jpeg");
                                     activated => {
                                         root.batch-save-with-format(ImgFmt.jpeg);
-                                        root.toggle-select-all(false);
+                                        GridViewState.toggle-select-all(false);
                                     }
                                 }
 
@@ -260,7 +264,7 @@ export component GridView inherits Rectangle {
                                     title: @tr("webp");
                                     activated => {
                                         root.batch-save-with-format(ImgFmt.webp);
-                                        root.toggle-select-all(false);
+                                        GridViewState.toggle-select-all(false);
                                     }
                                 }
                             }
