@@ -89,7 +89,7 @@ export component GridView inherits Rectangle {
                 Button {
                     text: GridViewState.selected-count > 0 ? GridViewState.selected-count + "/" + GridViewState.model.length : GridViewState.model.length;
                     clicked => {
-                        GridViewState.toggle-select-all(GridViewState.selected-count > 0);
+                        GridViewState.toggle-select-all(GridViewState.selected-count == 0);
                         GridViewState.selected-count = GridViewState.selected-count > 0 ? 0 : GridViewState.model.length;
                     }
                 }
