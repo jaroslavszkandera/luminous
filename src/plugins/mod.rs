@@ -37,6 +37,9 @@ pub trait Backend: Send + Sync {
     ) -> Option<SharedPixelBuffer<Rgba8Pixel>> {
         None
     }
+    fn semantic_image_search(&self, _paths: &Vec<PathBuf>, _query: &str) -> Option<Vec<PathBuf>> {
+        None
+    }
     /// Callback invoked whenever the backend status changes
     fn on_status_change(&self, _cb: Box<dyn Fn(IpcStatus) + Send + Sync>) {}
 }
@@ -112,6 +115,10 @@ impl Plugin {
         self.backend.rect_select(x1, y1, x2, y2)
     }
 
+    pub fn semantic_image_search(&self, paths: &Vec<PathBuf>, query: &str) -> Option<Vec<PathBuf>> {
+        self.backend.semantic_image_search(paths, query)
+    }
+
     pub fn on_status_change<F>(&self, cb: F)
     where
         F: Fn(IpcStatus) + Send + Sync + 'static,
@@ -136,6 +143,9 @@ impl Backend for Arc<DaemonBackend> {
     ) -> Option<SharedPixelBuffer<Rgba8Pixel>> {
         DaemonBackend::rect_select(self, x1, y1, x2, y2)
     }
+    fn semantic_image_search(&self, paths: &Vec<PathBuf>, query: &str) -> Option<Vec<PathBuf>> {
+        DaemonBackend::semantic_image_search(self, paths, query)
+    }
     fn on_status_change(&self, cb: Box<dyn Fn(IpcStatus) + Send + Sync>) {
         DaemonBackend::on_status_change(self, move |s| cb(s));
     }
@@ -145,6 +155,7 @@ pub struct PluginManager {
     /// extension (lowercase) -> plugin, TODO: make more agnostic
     plugins: HashMap<String, Arc<Plugin>>,
     interactive_plugins: Vec<Arc<Plugin>>,
+    search_plugins: Vec<Arc<Plugin>>,
 }
 
 impl Default for PluginManager {
@@ -158,6 +169,7 @@ impl PluginManager {
         Self {
             plugins: HashMap::new(),
             interactive_plugins: Vec::new(),
+            search_plugins: Vec::new(),
         }
     }
 
@@ -197,8 +209,13 @@ impl PluginManager {
     }
 
     // WARN: tmp, returns the first plugin
+    // TODO: return by some kind of UUID?
     pub fn get_interactive_plugin(&self) -> Option<Arc<Plugin>> {
         self.interactive_plugins.first().cloned()
+    }
+
+    pub fn get_search_plugin(&self) -> Option<Arc<Plugin>> {
+        self.search_plugins.first().cloned()
     }
 
     pub fn get_supported_extensions(&self) -> Vec<&str> {
@@ -259,7 +276,12 @@ impl PluginManager {
                     self.interactive_plugins.push(plugin.clone());
                     debug!("Interactive plugin '{}'", manifest.name);
                 }
+                PluginCapability::Search => {
+                    self.search_plugins.push(plugin.clone());
+                    debug!("Search plugin '{}'", manifest.name);
+                }
                 PluginCapability::Unknown => {
+                    // FIX: don't register plugins with Unknown capabilities
                     error!("Unknown capability in plugin '{}'", manifest.name);
                 }
             }

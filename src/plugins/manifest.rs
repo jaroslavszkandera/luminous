@@ -21,6 +21,7 @@ pub enum PluginCapability {
     Decoder,
     Encoder,
     Interactive,
+    Search,
     #[serde(other)]
     Unknown,
 }

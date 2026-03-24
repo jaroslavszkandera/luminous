@@ -1,0 +1,10 @@
+{
+  "name": "CLIP",
+  "version": "0.1.0",
+  "backend": "daemon",
+  "interpreter": "uv run",
+  "capabilities": ["search"],
+  "extensions": [],
+  "daemon_port": 50022,
+  "entry": "main.py"
+}

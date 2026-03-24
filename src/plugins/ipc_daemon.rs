@@ -7,6 +7,7 @@ use slint::{Rgba8Pixel, SharedPixelBuffer};
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::path::Path;
+use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{self, SyncSender};
 use std::sync::{Arc, Mutex, RwLock};
@@ -32,6 +33,10 @@ pub(crate) enum IpcCmd {
         x2: u32,
         y2: u32,
     },
+    Search {
+        paths: Vec<PathBuf>,
+        query: String,
+    },
     Shutdown,
 }
 
@@ -40,7 +45,13 @@ pub(crate) enum IpcCmd {
 pub(crate) enum IpcResponse {
     Ok,
     Busy,
+    // SearchResult { paths: Vec<PathBuf> },
     Error { message: String },
+}
+
+#[derive(Deserialize)]
+pub(crate) enum IpcSearchResponse {
+    SearchResult { paths: Vec<PathBuf> },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -82,6 +93,11 @@ enum WorkerRequest {
         x2: u32,
         y2: u32,
         tx: mpsc::SyncSender<Option<SharedPixelBuffer<Rgba8Pixel>>>,
+    },
+    Search {
+        paths: Vec<PathBuf>,
+        query: String,
+        tx: mpsc::SyncSender<Option<Vec<PathBuf>>>,
     },
 }
 
@@ -148,7 +164,7 @@ impl DaemonBackend {
                 }
             };
 
-            let mut stream = match connect_with_retry(port, 20, 500) {
+            let mut stream = match connect_with_retry(port, 30, 500) {
                 Some(s) => s,
                 None => {
                     error!("Failed to connect to daemon on port {port} after retries");
@@ -253,6 +269,18 @@ impl DaemonBackend {
                             },
                         }
                     }
+                    WorkerRequest::Search { paths, query, tx } => {
+                        debug!("search ({query})"); // paths...
+                        match ipc_search(&mut stream, paths, query) {
+                            Ok(result) => {
+                                let _ = tx.send(result);
+                            }
+                            Err(e) => {
+                                error!("semantic image search failed: {e}");
+                                let _ = tx.send(None);
+                            }
+                        }
+                    }
                 }
             }
 
@@ -336,6 +364,27 @@ impl Backend for DaemonBackend {
                 tx: result_tx,
             })
             .map_err(|e| warn!("rect_select enqueue failed: {e}"))
+            .ok()?;
+        result_rx.recv().ok().flatten()
+    }
+
+    fn semantic_image_search(
+        &self,
+        paths: &Vec<PathBuf>,
+        query: &str,
+    ) -> Option<Vec<std::path::PathBuf>> {
+        if self.status() == IpcStatus::Busy {
+            warn!("Semantic image search ignored: daemon is busy");
+            return None;
+        }
+        let (result_tx, result_rx) = mpsc::sync_channel(1);
+        self.tx
+            .try_send(WorkerRequest::Search {
+                paths: paths.clone(),
+                query: query.to_string(),
+                tx: result_tx,
+            })
+            .map_err(|e| warn!("semantic_image_search enqueue failed: {e}"))
             .ok()?;
         result_rx.recv().ok().flatten()
     }
@@ -459,6 +508,18 @@ fn ipc_rect_select(
         },
     )?;
     read_mask_response(stream, shm)
+}
+
+fn ipc_search(
+    stream: &mut TcpStream,
+    paths: Vec<PathBuf>,
+    query: String,
+) -> Result<Option<Vec<PathBuf>>, Box<dyn std::error::Error>> {
+    send_msg(stream, &IpcCmd::Search { paths, query })?;
+    let response = serde_json::from_slice::<IpcSearchResponse>(&recv_msg(stream)?)?;
+    match response {
+        IpcSearchResponse::SearchResult { paths } => Ok(Some(paths)),
+    }
 }
 
 fn read_mask_response(

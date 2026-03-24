@@ -290,8 +290,10 @@ impl AppController {
     }
 
     fn handle_search(&mut self, query: String) {
+        let start = std::time::Instant::now();
         let query = query.to_lowercase();
 
+        // First pass by file name
         self.filtered_indices = self
             .scan
             .paths
@@ -307,6 +309,27 @@ impl AppController {
             })
             .map(|(idx, _)| idx)
             .collect();
+
+        // Second pass with plugins
+        if let Some(search_plugin) = self.loader.plugin_manager.get_search_plugin() {
+            if let Some(semantic_search_paths) =
+                search_plugin.semantic_image_search(&self.scan.paths, &query)
+            {
+                debug!("semantic image search paths: {:?}", semantic_search_paths);
+                let semantic_indices: Vec<usize> = semantic_search_paths
+                    .iter()
+                    .filter_map(|p| self.scan.paths.iter().position(|sp| sp == p))
+                    .collect();
+
+                let mut combined = self.filtered_indices.clone();
+                for idx in semantic_indices {
+                    if !combined.contains(&idx) {
+                        combined.push(idx);
+                    }
+                }
+                self.filtered_indices = combined;
+            }
+        }
 
         self.active_grid_indices.clear();
         self.loader.clear_thumbs();
@@ -343,6 +366,7 @@ impl AppController {
                 ui.invoke_return_focus();
             }
         });
+        debug!("Search in {}ms", start.elapsed().as_secs_f64() * 1000.0);
     }
 
     fn handle_toggle_selection(&self, index: i32) {
