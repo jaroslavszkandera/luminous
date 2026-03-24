@@ -6,13 +6,13 @@ pub mod image_loader;
 pub mod image_processing;
 pub mod pipeline;
 pub mod plugins;
+mod ui;
 
 use config::Config;
 use fs_scan::ScanResult;
 use image_loader::ImageLoader;
-use image_processing::{batch_save_images, save_image};
-use pipeline::{StepFactory, run_pipeline_on_selection};
-use plugins::{IpcStatus, PluginManager};
+use pipeline::StepFactory;
+use plugins::PluginManager;
 
 #[allow(unused_imports)]
 use log::{debug, error, info, warn};
@@ -26,12 +26,12 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-struct AppController {
-    loader: Arc<ImageLoader>,
-    scan: Rc<ScanResult>,
-    active_grid_indices: HashSet<usize>,
-    filtered_indices: Vec<usize>,
-    window_weak: slint::Weak<MainWindow>,
+pub(crate) struct AppController {
+    pub(crate) loader: Arc<ImageLoader>,
+    pub(crate) scan: Rc<ScanResult>,
+    pub(crate) active_grid_indices: HashSet<usize>,
+    pub(crate) filtered_indices: Vec<usize>,
+    pub(crate) window_weak: slint::Weak<MainWindow>,
 }
 
 impl AppController {
@@ -83,8 +83,9 @@ impl AppController {
             }
             let _ = weak_full.upgrade_in_event_loop(move |ui| {
                 let img = Image::from_rgba8(buffer);
-                if index == ui.get_curr_image_index() as usize {
-                    ui.set_full_view_image(img);
+                let fv = ui.global::<FullViewState>();
+                if index == fv.get_curr_image_index() as usize {
+                    fv.set_curr_image(img);
                     ui.set_mask_overlay(Image::default());
                 }
             });
@@ -141,9 +142,8 @@ impl AppController {
             self.active_grid_indices.insert(row);
 
             let abs_idx = self.filtered_indices[row];
-            match self.loader.load_grid_thumb(abs_idx) {
-                Some(buf) => cached_updates.push((row, buf)),
-                None => {}
+            if let Some(buf) = self.loader.load_grid_thumb(abs_idx) {
+                cached_updates.push((row, buf));
             }
         }
 
@@ -176,11 +176,12 @@ impl AppController {
         let display_img = loader.load_full_progressive(index);
 
         if let Some(ui) = weak.upgrade() {
-            ui.set_full_view_image(display_img);
+            let fv = ui.global::<FullViewState>();
+            fv.set_curr_image(display_img);
             ui.set_mask_overlay(Image::default());
-            ui.set_curr_image_index(index as i32);
+            fv.set_curr_image_index(index as i32);
             if let Some(name) = loader.get_file_name(index) {
-                ui.set_curr_image_name(name.into());
+                fv.set_curr_image_name(name.into());
             }
             if loader.full_cache_contains(index) {
                 Self::notify_interactive_plugin(&loader);
@@ -200,7 +201,7 @@ impl AppController {
         if total == 0 {
             return;
         }
-        let curr = ui.get_curr_image_index() as usize;
+        let curr = ui.global::<FullViewState>().get_curr_image_index() as usize;
         let curr_pos = self
             .filtered_indices
             .iter()
@@ -259,14 +260,16 @@ impl AppController {
                 result.height(),
             );
 
-            // Changing Brightness and Contrast is additive
+            // FIX: If next/prev image is requested quickly, it can be saved into a different
+            // cache idx.
             if save_to_cache {
                 let active_idx = loader.active_idx.load(Ordering::Relaxed);
                 loader.cache_buffer(active_idx, new_buf.clone());
             }
 
             let _ = weak.upgrade_in_event_loop(move |ui| {
-                ui.set_full_view_image(Image::from_rgba8(new_buf));
+                ui.global::<FullViewState>()
+                    .set_curr_image(Image::from_rgba8(new_buf));
             });
         });
     }
@@ -364,16 +367,14 @@ impl AppController {
                 } else {
                     warn!("Interactive click failed");
                 }
+            } else if let Some(mask) =
+                plugin.interactive_rect_select(x1 as u32, y1 as u32, x2 as u32, y2 as u32)
+            {
+                let _ = weak.upgrade_in_event_loop(move |ui| {
+                    ui.set_mask_overlay(Image::from_rgba8(mask));
+                });
             } else {
-                if let Some(mask) =
-                    plugin.interactive_rect_select(x1 as u32, y1 as u32, x2 as u32, y2 as u32)
-                {
-                    let _ = weak.upgrade_in_event_loop(move |ui| {
-                        ui.set_mask_overlay(Image::from_rgba8(mask));
-                    });
-                } else {
-                    warn!("Interactive select failed");
-                }
+                warn!("Interactive select failed");
             }
         }
     }
@@ -405,14 +406,13 @@ impl AppController {
         loader.pool.spawn(move || {
             if let Some(plugin) = plugin_manager.get_interactive_plugin() {
                 if let Some(buf) = curr_active_buffer {
-                    // FIX: Hangs image loading when moved too many images.
                     plugin.set_interactive_image(&buf);
                 }
             }
         });
     }
 
-    fn collect_selected_paths(&self) -> Vec<std::path::PathBuf> {
+    pub(crate) fn collect_selected_paths(&self) -> Vec<std::path::PathBuf> {
         let Some(ui) = self.window_weak.upgrade() else {
             return Vec::new();
         };
@@ -431,6 +431,8 @@ impl AppController {
 }
 
 pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
+    info!("Starting Luminous");
+    let init_start = std::time::Instant::now();
     let mut plugin_manager = plugins::PluginManager::new();
 
     if !config.safe_mode {
@@ -442,13 +444,11 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
     let extra_exts = plugin_manager.get_supported_extensions();
     let scan = fs_scan::scan(&config.path, &extra_exts);
     if scan.paths.is_empty() {
-        log::error!("No supported images found in {}", config.path);
+        error!("No supported images found in {}", config.path);
         return Err(format!("No images in {}", config.path).into());
     }
 
     let main_window = MainWindow::new()?;
-
-    // Grid View
 
     let grid_data: Vec<GridItem> = scan
         .paths
@@ -463,349 +463,23 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
     main_window.set_grid_model(Rc::new(VecModel::from(grid_data)).into());
 
     let scan_rc = Rc::new(scan);
-    let controller = Rc::new(RefCell::new(AppController::new(
+    let app_controller = Rc::new(RefCell::new(AppController::new(
         plugin_manager,
         scan_rc.clone(),
         &config,
         &main_window,
     )));
 
-    let c = controller.clone();
-    main_window.on_request_grid_data(move |start, count| {
-        c.borrow_mut()
-            .handle_grid_request(start as usize, count as usize);
-    });
-
-    let c = controller.clone();
-    main_window.on_bucket_resolution_changed(move |res| {
-        c.borrow_mut().handle_bucket_resolution(res as u32);
-    });
-
-    let c = controller.clone();
-    main_window.on_search_submitted(move |query| {
-        c.borrow_mut().handle_search(query.to_string());
-    });
-
-    let c = controller.clone();
-    main_window.on_image_selected(move |index| {
-        let c_ref = c.borrow();
-        if let Some(&abs) = c_ref.filtered_indices.get(index as usize) {
-            c_ref.handle_full_view_load(abs);
-        }
-    });
-
-    let c = controller.clone();
-    main_window.on_toggle_select_all(move |select| {
-        let Some(ui) = c.borrow().window_weak.upgrade() else {
-            return;
-        };
-        let model = ui.get_grid_model();
-        let vm = ui.get_visible_grid_model();
-        for i in 0..model.row_count() {
-            if let Some(mut item) = model.row_data(i) {
-                if item.selected != select {
-                    item.selected = select;
-                    model.set_row_data(i, item.clone());
-                    for j in 0..vm.row_count() {
-                        if let Some(mut v) = vm.row_data(j) {
-                            if v.index == item.index {
-                                v.selected = select;
-                                vm.set_row_data(j, v);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    });
-
-    let c = controller.clone();
-    main_window.on_toggle_selection(move |index| {
-        c.borrow().handle_toggle_selection(index);
-    });
-
-    let c = controller.clone();
-    main_window.on_request_range_select(move |start_idx, end_idx| {
-        let Some(ui) = c.borrow().window_weak.upgrade() else {
-            return;
-        };
-        let model = ui.get_grid_model();
-        let vm = ui.get_visible_grid_model();
-        let target = model
-            .row_data(start_idx as usize)
-            .map(|i| i.selected)
-            .unwrap_or(true);
-        let (lo, hi) = (
-            (start_idx.min(end_idx)) as usize,
-            (start_idx.max(end_idx)) as usize,
-        );
-        let mut total_selected = 0i32;
-        for i in 0..model.row_count() {
-            if let Some(mut item) = model.row_data(i) {
-                let should = (i >= lo && i <= hi) && target;
-                if item.selected != should {
-                    item.selected = should;
-                    model.set_row_data(i, item.clone());
-                }
-                for j in 0..vm.row_count() {
-                    if let Some(mut v) = vm.row_data(j) {
-                        if v.index == item.index {
-                            v.selected = should;
-                            vm.set_row_data(j, v);
-                        }
-                    }
-                }
-                if should {
-                    total_selected += 1;
-                }
-            }
-        }
-        ui.set_selected_count(total_selected);
-    });
-
-    let c = controller.clone();
-    main_window.on_print_selected_paths(move || {
-        let paths = c.borrow().collect_selected_paths();
-        if paths.is_empty() {
-            log::info!("No files selected");
-        } else {
-            log::info!("Selected ({}):", paths.len());
-            for p in &paths {
-                log::info!("  {}", p.display());
-            }
-        }
-    });
-
-    let c = controller.clone();
-    main_window.on_batch_save_with_format(move |format| {
-        let (paths, weak_ui) = {
-            let c_ref = c.borrow();
-            let paths = c_ref.collect_selected_paths();
-            let weak = c_ref.window_weak.clone();
-            (paths, weak)
-        };
-        if paths.is_empty() {
-            log::info!("No files selected");
-            return;
-        }
-        batch_save_images(paths, format);
-        slint::invoke_from_event_loop(move || {
-            if let Some(ui) = weak_ui.upgrade() {
-                ui.invoke_return_focus();
-            }
-        })
-        .unwrap();
-    });
-
-    // Pipeline
     let factory = Arc::new(StepFactory::new());
 
-    let c = controller.clone();
-    main_window.on_pipeline_add_step(move |kind| {
-        let Some(ui) = c.borrow().window_weak.upgrade() else {
-            return;
-        };
-        let model = ui.get_pipeline_steps();
-        let vec_model = model
-            .as_any()
-            .downcast_ref::<VecModel<PipelineStep>>()
-            .expect("pipeline_steps must be a VecModel");
-
-        let new_step = match kind {
-            PipelineStepKind::Rotate => PipelineStep {
-                kind,
-                rotate_angle: RotateAngle::R90,
-                blur_sigma: 0.0,
-                brighten_value: 0,
-            },
-            PipelineStepKind::GaussianBlur => PipelineStep {
-                kind,
-                rotate_angle: RotateAngle::R90,
-                blur_sigma: 1.0,
-                brighten_value: 0,
-            },
-            PipelineStepKind::Brighten => PipelineStep {
-                kind,
-                rotate_angle: RotateAngle::R90,
-                blur_sigma: 0.0,
-                brighten_value: 10,
-            },
-        };
-        vec_model.push(new_step);
-    });
-
-    let c = controller.clone();
-    main_window.on_pipeline_remove_step(move |index| {
-        let Some(ui) = c.borrow().window_weak.upgrade() else {
-            return;
-        };
-        let model = ui.get_pipeline_steps();
-        let vec_model = model
-            .as_any()
-            .downcast_ref::<VecModel<PipelineStep>>()
-            .expect("pipeline_steps must be a VecModel");
-        if (index as usize) < vec_model.row_count() {
-            vec_model.remove(index as usize);
-        }
-    });
-
-    let c = controller.clone();
-    main_window.on_pipeline_update_rotate(move |index, angle| {
-        let Some(ui) = c.borrow().window_weak.upgrade() else {
-            return;
-        };
-        let model = ui.get_pipeline_steps();
-        let vec_model = model
-            .as_any()
-            .downcast_ref::<VecModel<PipelineStep>>()
-            .expect("pipeline_steps must be a VecModel");
-        if let Some(mut step) = vec_model.row_data(index as usize) {
-            step.rotate_angle = angle;
-            vec_model.set_row_data(index as usize, step);
-        }
-    });
-
-    let c = controller.clone();
-    main_window.on_pipeline_update_sigma(move |index, sigma| {
-        let Some(ui) = c.borrow().window_weak.upgrade() else {
-            return;
-        };
-        let model = ui.get_pipeline_steps();
-        let vec_model = model
-            .as_any()
-            .downcast_ref::<VecModel<PipelineStep>>()
-            .expect("pipeline_steps must be a VecModel");
-        if let Some(mut step) = vec_model.row_data(index as usize) {
-            step.blur_sigma = sigma;
-            vec_model.set_row_data(index as usize, step);
-        }
-    });
-
-    let c = controller.clone();
-    main_window.on_pipeline_update_brighten(move |index, value| {
-        let Some(ui) = c.borrow().window_weak.upgrade() else {
-            return;
-        };
-        let model = ui.get_pipeline_steps();
-        let vec_model = model
-            .as_any()
-            .downcast_ref::<VecModel<PipelineStep>>()
-            .expect("pipeline_steps must be a VecModel");
-        if let Some(mut step) = vec_model.row_data(index as usize) {
-            step.brighten_value = value;
-            vec_model.set_row_data(index as usize, step);
-        }
-    });
-
-    let c = controller.clone();
-    let factory_run = factory.clone();
-    main_window.on_pipeline_run(move || {
-        let (paths, weak_ui) = {
-            let c_ref = c.borrow();
-            let paths = c_ref.collect_selected_paths();
-            let weak = c_ref.window_weak.clone();
-            (paths, weak)
-        };
-
-        if paths.is_empty() {
-            log::info!("Pipeline: no images selected");
-            return;
-        }
-
-        let steps: Vec<PipelineStep> = {
-            let Some(ui) = weak_ui.upgrade() else { return };
-            let model = ui.get_pipeline_steps();
-            (0..model.row_count())
-                .filter_map(|i| model.row_data(i))
-                .collect()
-        };
-
-        run_pipeline_on_selection(paths, steps, factory_run.clone());
-
-        slint::invoke_from_event_loop(move || {
-            if let Some(ui) = weak_ui.upgrade() {
-                ui.invoke_return_focus();
-            }
-        })
-        .unwrap();
-    });
-
-    main_window.set_pipeline_steps(Rc::new(VecModel::<PipelineStep>::default()).into());
-
-    // Full View
-
-    let c = controller.clone();
-    main_window.on_request_next_image(move || c.borrow().handle_navigate(1));
-    let c = controller.clone();
-    main_window.on_request_prev_image(move || c.borrow().handle_navigate(-1));
-
-    let c = controller.clone();
-    main_window.on_apply_edit(move |op| {
-        c.borrow().handle_edit_op(op);
-    });
-
-    let c = controller.clone();
-    main_window.on_save_with_format(move |format| {
-        let (img, path, weak_ui) = {
-            let c_ref = c.borrow();
-            let idx = c_ref.loader.active_idx.load(Ordering::Relaxed);
-            (
-                c_ref.loader.get_curr_active_buffer(),
-                c_ref.loader.paths.get(idx).cloned(),
-                c_ref.window_weak.clone(),
-            )
-        };
-        save_image(img, path, format);
-        slint::invoke_from_event_loop(move || {
-            if let Some(ui) = weak_ui.upgrade() {
-                ui.invoke_return_focus();
-            }
-        })
-        .unwrap();
-    });
-
-    // TODO:
-    // let c = controller.clone();
-    // main_window.on_interactive_text_submitted(move |txt| {
-    //     c.borrow().handle_segmentation(txt as string);
-    // });
-
-    let c = controller.clone();
-    main_window.on_request_segmentation(move |x1, y1, x2, y2| {
-        c.borrow()
-            .handle_segmentation(x1 as i32, y1 as i32, x2 as i32, y2 as i32);
-    });
-
-    let ui_weak = controller.clone().borrow().window_weak.clone();
-    if let Some(plugin) = controller
-        .clone()
-        .borrow()
-        .loader
-        .plugin_manager
-        .get_interactive_plugin()
-    {
-        plugin.on_status_change(move |status| {
-            let _ = ui_weak.upgrade_in_event_loop(move |ui| {
-                let status_str = match status {
-                    IpcStatus::Ready => "Ready",
-                    IpcStatus::Busy => "Processing...",
-                    IpcStatus::Error => "Error",
-                    IpcStatus::Init => "Initializing...",
-                };
-                ui.set_plugin_status(status_str.into());
-            });
-        })
-    }
+    ui::grid_view_presenter::register(&main_window, app_controller.clone());
+    ui::full_view_presenter::register(&main_window, app_controller.clone());
+    ui::pipeline_presenter::register(&main_window, app_controller.clone(), factory);
+    ui::bindings::setup(&main_window, &config);
 
     main_window.on_quit_app(move || {
         let _ = slint::quit_event_loop();
     });
-
-    if !scan_rc.paths.is_empty() {
-        controller
-            .borrow()
-            .handle_full_view_load(scan_rc.start_index);
-    }
 
     main_window.set_app_background(config.background);
     main_window.set_view_mode(if scan_rc.is_dir {
@@ -814,25 +488,16 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
         ViewMode::Full
     });
 
-    setup_bindings(&main_window, &config);
+    if !scan_rc.paths.is_empty() {
+        app_controller
+            .borrow()
+            .handle_full_view_load(scan_rc.start_index);
+    }
+
+    debug!(
+        "Init in {:.1} ms",
+        init_start.elapsed().as_secs_f64() * 1000.0
+    );
     main_window.run()?;
     Ok(())
-}
-
-fn setup_bindings(main_window: &MainWindow, config: &Config) {
-    let get_key = |action: &str| {
-        Config::get_slint_key_string(
-            config
-                .bindings
-                .get(action)
-                .unwrap_or_else(|| panic!("Binding '{action}' not in config")),
-        )
-    };
-    main_window.set_bind_quit(get_key("quit"));
-    main_window.set_bind_fullscreen(get_key("toggle_fullscreen"));
-    main_window.set_bind_switch_view_mode(get_key("switch_view_mode"));
-    main_window.set_bind_reset_zoom(get_key("reset_zoom"));
-    main_window.set_bind_grid_pg_dn(get_key("grid_page_down"));
-    main_window.set_bind_grid_pg_up(get_key("grid_page_up"));
-    main_window.set_bind_toggle_side_panel(get_key("toggle_side_panel"));
 }

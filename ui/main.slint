@@ -1,10 +1,13 @@
 import { GridView } from "grid-view.slint";
-import { FullView } from "full-view.slint";
+import { FullView, FullViewState } from "full-view.slint";
 import { Palette } from "std-widgets.slint";
 import { ImgFmt, EditOp, GridItem, ViewMode } from "common.slint";
 import { PipelineStep, PipelineStepKind, RotateAngle } from "side-panel.slint";
 
 export { GridItem, ViewMode } from "common.slint";
+export { FullViewState } from "full-view.slint";
+// TODO: export { GridViewState } from "grid-view.slint";
+
 
 export component MainWindow inherits Window {
     title: "Luminous";
@@ -13,21 +16,9 @@ export component MainWindow inherits Window {
     preferred-height: 720px;
     full-screen: self.is-fullscreen;
 
-    // Bindings
-    in property <string> bind-quit;
-    in property <string> bind-fullscreen;
-    in property <string> bind-switch-view-mode;
-    in property <string> bind-reset-zoom;
-    in property <string> bind-grid-pg-dn;
-    in property <string> bind-grid-pg-up;
-    in property <string> bind-toggle-side-panel;
-
     // Full view Callbacks
-    callback request-next-image();
-    callback request-prev-image();
-    callback request-segmentation(int, int, int, int);
-    callback apply-edit(EditOp);
-    callback save-with-format(ImgFmt);
+    in property <image> mask-overlay;
+    in property <string> plugin-status: "Initializing...";
 
     // Grid view Callbacks
     callback request-grid-data(int, int);
@@ -56,16 +47,19 @@ export component MainWindow inherits Window {
     in property <color> app-background: Palette.background;
     in property <[GridItem]> grid-model;
     in property <[GridItem]> visible-grid-model;
-    in property <image> full-view-image;
-    in-out property <int> curr-image-index: 0;
-    in property <string> curr-image-name;
     in-out property <ViewMode> view-mode: ViewMode.grid;
     in-out property <bool> is-fullscreen: false;
     in-out property <int> grid-cols: 5;
     in-out property <int> selected-count: 0;
 
-    in property <image> mask-overlay;
-    in property <string> plugin-status: "Initializing...";
+    // Bindings
+    in property <string> bind-quit;
+    in property <string> bind-fullscreen;
+    in property <string> bind-switch-view-mode;
+    in property <string> bind-reset-zoom;
+    in property <string> bind-grid-pg-dn;
+    in property <string> bind-grid-pg-up;
+    in property <string> bind-toggle-side-panel;
 
     public function return-focus() {
         key-handler.focus();
@@ -90,12 +84,12 @@ export component MainWindow inherits Window {
             if (root.view-mode == ViewMode.full) {
                 if (event.text == "h" || event.text == Key.LeftArrow) {
                     full-ui.reset-zoom();
-                    root.request-prev-image();
+                    FullViewState.request-prev-image();
                     return accept;
                 }
                 if (event.text == "l" || event.text == Key.RightArrow) {
                     full-ui.reset-zoom();
-                    root.request-next-image();
+                    FullViewState.request-next-image();
                     return accept;
                 }
                 if (event.text == root.bind-reset-zoom) {
@@ -202,29 +196,10 @@ export component MainWindow inherits Window {
     full-ui := FullView {
         visible: root.view-mode == ViewMode.full;
         timer-running: root.view-mode == ViewMode.full;
-        current-image: root.full-view-image;
-        curr-image-index: root.curr-image-index;
-        curr-image-name: root.curr-image-name;
         total-images: root.grid-model.length;
         mask-overlay: root.mask-overlay;
         plugin-status: root.plugin-status;
 
-        request-next-image => {
-            root.request-next-image();
-        }
-        request-prev-image => {
-            root.request-prev-image();
-        }
-        request-segmentation(x1, y1, x2, y2) => {
-            debug("request-segmentation");
-            root.request-segmentation(x1, y1, x2, y2);
-        }
-        apply-edit(op) => {
-            root.apply-edit(op);
-        }
-        save-with-format(fmt) => {
-            root.save-with-format(fmt);
-        }
         exit-full-view => {
             root.view-mode = ViewMode.grid;
         }

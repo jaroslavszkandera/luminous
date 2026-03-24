@@ -14,7 +14,7 @@ use std::time::Instant;
 
 use crate::plugins::PluginManager;
 
-const THUMB_FILTER: FilterType = FilterType::Triangle;
+const THUMB_FILTER: FilterType = FilterType::Nearest;
 
 pub type ImageReadyFn = Arc<dyn Fn(usize, SharedPixelBuffer<Rgba8Pixel>) + Send + Sync>;
 pub type ImageReadyHook = Option<ImageReadyFn>;

@@ -5,24 +5,26 @@ import { EditsPanel } from "edits-panel.slint";
 import { SelectRect } from "select-rect.slint";
 import { InteractivePlugin } from "plugins.slint";
 
-// TODO: global singleton
+export global FullViewState {
+    in property <image> curr-image;
+    in property <string> curr-image-name;
+    in property <int> curr-image-index;
+
+    callback request-next-image();
+    callback request-prev-image();
+    callback request-segmentation(int, int, int, int);
+    callback save-with-format(ImgFmt);
+    callback apply-edit(EditOp);
+}
 
 export component FullView inherits TouchArea {
-    in property <image> current-image;
-    in property <int> curr-image-index;
-    in property <string> curr-image-name;
     in property <int> total-images;
     in property <bool> timer-running: false;
     in property <image> mask-overlay;
     in property <string> plugin-status;
     in-out property <bool> panel-visible: true; // TMP: testing
 
-    callback request-next-image();
-    callback request-prev-image();
     callback exit-full-view();
-    callback request-segmentation(int, int, int, int);
-    callback save-with-format(ImgFmt);
-    callback apply-edit(EditOp);
 
     // Plugins
     // TODO: make it better
@@ -44,10 +46,10 @@ export component FullView inherits TouchArea {
     property <bool> dragging: false;
     property <float> pinch-initial-scale: 1.0;
 
-    property <float> img-render-scale: (root.current-image.width > 0 && root.current-image.height > 0) ? Math.min(img-el.width / root.current-image.width, img-el.height / root.current-image.height) / 1px : 1.0;
+    property <float> img-render-scale: (FullViewState.curr-image.width > 0 && FullViewState.curr-image.height > 0) ? Math.min(img-el.width / FullViewState.curr-image.width, img-el.height / FullViewState.curr-image.height) / 1px : 1.0;
 
-    property <length> img-vis-x: img-el.x + (img-el.width - root.current-image.width * 1px * img-render-scale) / 2;
-    property <length> img-vis-y: img-el.y + (img-el.height - root.current-image.height * 1px * img-render-scale) / 2;
+    property <length> img-vis-x: img-el.x + (img-el.width - FullViewState.curr-image.width * 1px * img-render-scale) / 2;
+    property <length> img-vis-y: img-el.y + (img-el.height - FullViewState.curr-image.height * 1px * img-render-scale) / 2;
 
     mouse-cursor: (root.dragging && zoom-scale > 1.0) ? grabbing : crosshair;
 
@@ -58,11 +60,11 @@ export component FullView inherits TouchArea {
             if (root.mouse-x != root.last-coords-x || root.mouse-y != root.last-coords-y) {
                 root.last-coords-x = root.mouse-x;
                 root.last-coords-y = root.mouse-y;
-                if (root.current-image.width > 0 && root.current-image.height > 0) {
+                if (FullViewState.curr-image.width > 0 && FullViewState.curr-image.height > 0) {
                     let rel-x = root.mouse-x - img-rect.x;
                     let rel-y = root.mouse-y - img-rect.y;
-                    let x = clamp(Math.round((rel-x - root.img-vis-x) / (root.img-render-scale * 1px)), 0, root.current-image.width);
-                    let y = clamp(Math.round((rel-y - root.img-vis-y) / (root.img-render-scale * 1px)), 0, root.current-image.height);
+                    let x = clamp(Math.round((rel-x - root.img-vis-x) / (root.img-render-scale * 1px)), 0, FullViewState.curr-image.width);
+                    let y = clamp(Math.round((rel-y - root.img-vis-y) / (root.img-render-scale * 1px)), 0, FullViewState.curr-image.height);
                     root.display-coords = x + "," + y;
                 }
             }
@@ -107,8 +109,8 @@ export component FullView inherits TouchArea {
         let rel-x = screen-x - img-rect.x;
         let rel-y = screen-y - img-rect.y;
         return {
-            x: clamp(Math.round((rel-x - root.img-vis-x) / (root.img-render-scale * 1px)), 0, root.current-image.width),
-            y: clamp(Math.round((rel-y - root.img-vis-y) / (root.img-render-scale * 1px)), 0, root.current-image.height),
+            x: clamp(Math.round((rel-x - root.img-vis-x) / (root.img-render-scale * 1px)), 0, FullViewState.curr-image.width),
+            y: clamp(Math.round((rel-y - root.img-vis-y) / (root.img-render-scale * 1px)), 0, FullViewState.curr-image.height),
         };
     }
 
@@ -131,11 +133,11 @@ export component FullView inherits TouchArea {
                 select-rect.show(root.mouse-x - img-rect.x, root.mouse-y - img-rect.y);
             } else if (event.kind == PointerEventKind.up) {
                 if (select-rect.selection.w < 2px || select-rect.selection.h < 2px) {
-                    if root.current-image.width > 0 {
+                    if FullViewState.curr-image.width > 0 {
                         let coords = root.to-image-coords(root.mouse-x, root.mouse-y);
                         if interactive-plugin.click-active {
                             debug("click send");
-                            root.request-segmentation(coords.x, coords.y, -1, -1);
+                            FullViewState.request-segmentation(coords.x, coords.y, -1, -1);
                         } else if interactive-plugin.select-active && coords.x != coords.x + select-rect.selection.w / 1px {
                             debug("select send");
                             select-rect.confirmed();
@@ -172,9 +174,9 @@ export component FullView inherits TouchArea {
             }
             select-rect.cancelled();
             if (scroll-up) {
-                root.request-prev-image();
+                FullViewState.request-prev-image();
             } else {
-                root.request-next-image();
+                FullViewState.request-next-image();
             }
         }
         accept
@@ -186,7 +188,7 @@ export component FullView inherits TouchArea {
             clip: true;
 
             img-el := Image {
-                source: root.current-image;
+                source: FullViewState.curr-image;
                 image-fit: contain;
                 width: parent.width;
                 height: parent.height;
@@ -211,13 +213,13 @@ export component FullView inherits TouchArea {
 
                 Text {
                     x: 5px;
-                    text: (curr-image-index + 1) + "/" + root.total-images;
+                    text: (FullViewState.curr-image-index + 1) + "/" + root.total-images;
                 }
 
                 Text {
                     horizontal-alignment: center;
                     vertical-alignment: center;
-                    text: curr-image-name;
+                    text: FullViewState.curr-image-name;
                 }
 
                 Text {
@@ -235,7 +237,7 @@ export component FullView inherits TouchArea {
                     if (select-rect.selection.w > 2px && select-rect.selection.h > 2px) {
                         if interactive-plugin.select-active {
                             let r = select-rect.selection;
-                            root.request-segmentation(r.x / 1px, r.y / 1px, (r.x + r.w) / 1px, (r.y + r.h) / 1px);
+                            FullViewState.request-segmentation(r.x / 1px, r.y / 1px, (r.x + r.w) / 1px, (r.y + r.h) / 1px);
                         } else {
                             root.zoom-to-selection();
                         }
@@ -252,14 +254,14 @@ export component FullView inherits TouchArea {
                     MenuItem {
                         title: @tr("Rotate +90");
                         activated => {
-                            root.apply-edit({ kind: EditOpKind.RotateCW, int-val: 0, float-val: 0 });
+                            FullViewState.apply-edit({ kind: EditOpKind.RotateCW, int-val: 0, float-val: 0 });
                         }
                     }
 
                     MenuItem {
                         title: @tr("Rotate -90");
                         activated => {
-                            root.apply-edit({ kind: EditOpKind.RotateCCW, int-val: 0, float-val: 0 });
+                            FullViewState.apply-edit({ kind: EditOpKind.RotateCCW, int-val: 0, float-val: 0 });
                         }
                     }
 
@@ -275,21 +277,21 @@ export component FullView inherits TouchArea {
                         MenuItem {
                             title: @tr("png");
                             activated => {
-                                root.save-with-format(ImgFmt.png);
+                                FullViewState.save-with-format(ImgFmt.png);
                             }
                         }
 
                         MenuItem {
                             title: @tr("jpeg");
                             activated => {
-                                root.save-with-format(ImgFmt.jpeg);
+                                FullViewState.save-with-format(ImgFmt.jpeg);
                             }
                         }
 
                         MenuItem {
                             title: @tr("webp");
                             activated => {
-                                root.save-with-format(ImgFmt.webp);
+                                FullViewState.save-with-format(ImgFmt.webp);
                             }
                         }
                     }
@@ -304,7 +306,7 @@ export component FullView inherits TouchArea {
                 padding: 5px;
                 EditsPanel {
                     apply-edit(op) => {
-                        root.apply-edit(op);
+                        FullViewState.apply-edit(op);
                     }
                 }
 
