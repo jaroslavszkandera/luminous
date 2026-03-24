@@ -99,13 +99,11 @@ export component GridView inherits Rectangle {
                     font-size: 16px;
                     accepted(text) => {
                         GridViewState.search-submitted(self.text);
-                        self.clear-focus();
                     }
                     key-pressed(event) => {
                         if (event.text == Key.Escape) {
                             self.text = "";
                             GridViewState.search-submitted("");
-                            self.clear-focus();
                             return accept;
                         }
                         reject

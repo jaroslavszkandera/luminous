@@ -56,14 +56,21 @@ impl AppController {
                 let gv = ui.global::<GridViewState>();
                 let img = Image::from_rgba8(buffer);
                 let m = gv.get_model();
-                if let Some(mut item) = m.row_data(index) {
-                    item.image = img.clone();
-                    m.set_row_data(index, item);
+
+                for row in 0..m.row_count() {
+                    if let Some(mut item) = m.row_data(row) {
+                        if item.abs_index == index as i32 {
+                            item.image = img.clone();
+                            m.set_row_data(row, item);
+                            break; // Found it
+                        }
+                    }
                 }
+
                 let vm = gv.get_visible_model();
                 for i in 0..vm.row_count() {
                     if let Some(mut v) = vm.row_data(i) {
-                        if v.index == index as i32 {
+                        if v.abs_index == index as i32 {
                             v.image = img;
                             vm.set_row_data(i, v);
                             break;
@@ -103,6 +110,7 @@ impl AppController {
     }
 
     fn handle_grid_request(&mut self, start: usize, count: usize) {
+        debug!("handle grid request");
         let Some(ui) = self.window_weak.upgrade() else {
             return;
         };
@@ -140,10 +148,11 @@ impl AppController {
             if self.active_grid_indices.contains(&row) {
                 continue;
             }
-            self.active_grid_indices.insert(row);
+            // self.active_grid_indices.insert(row);
 
             let abs_idx = self.filtered_indices[row];
             if let Some(buf) = self.loader.load_grid_thumb(abs_idx) {
+                self.active_grid_indices.insert(row);
                 cached_updates.push((row, buf));
             }
         }
@@ -308,25 +317,32 @@ impl AppController {
             return;
         };
 
-        let items: Vec<GridItem> = self
+        let filtered_items: Vec<GridItem> = self
             .filtered_indices
             .iter()
             .enumerate()
             .map(|(row, _)| GridItem {
                 image: Image::default(),
                 index: row as i32,
+                abs_index: self.filtered_indices[row] as i32,
                 selected: false,
             })
             .collect();
 
         let gv = ui.global::<GridViewState>();
         gv.set_selected_count(0);
-        gv.set_model(Rc::new(VecModel::from(items)).into());
+        gv.set_model(Rc::new(VecModel::from(filtered_items)).into());
 
         if let Some(&first) = self.filtered_indices.first() {
             self.handle_full_view_load(first);
         }
         self.handle_grid_request(0, 50);
+        let weak_ui = self.window_weak.clone();
+        let _ = slint::invoke_from_event_loop(move || {
+            if let Some(ui) = weak_ui.upgrade() {
+                ui.invoke_return_focus();
+            }
+        });
     }
 
     fn handle_toggle_selection(&self, index: i32) {
@@ -460,6 +476,7 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
         .map(|(i, _)| GridItem {
             image: Image::default(),
             index: i as i32,
+            abs_index: i as i32,
             selected: false,
         })
         .collect();
