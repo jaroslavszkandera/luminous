@@ -326,8 +326,15 @@ export component FullView inherits TouchArea {
 
                 Tab {
                     title: "Metadata";
-                    ExifTable {
-                        exif-rows: FullViewState.exif-rows;
+                    VerticalLayout {
+                        Text {
+                            horizontal-alignment: center;
+                            text: "WxH = " + FullViewState.curr-image.width + "x" + FullViewState.curr-image.height;
+                        }
+
+                        ExifTable {
+                            exif-rows: FullViewState.exif-rows;
+                        }
                     }
                 }
 
