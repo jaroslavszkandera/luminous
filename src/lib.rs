@@ -538,6 +538,7 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
         app_controller
             .borrow()
             .handle_full_view_load(scan_rc.start_index);
+        ui::full_view_presenter::set_exif(app_controller);
     }
 
     debug!(

@@ -147,6 +147,10 @@ impl ImageLoader {
         self.paths.get(idx)?.file_name()?.to_str()
     }
 
+    pub fn get_curr_img_path(&self) -> Option<&PathBuf> {
+        self.paths.get(self.active_idx.load(Ordering::Relaxed))
+    }
+
     // source: https://github.com/slint-ui/slint/discussions/5140
     pub fn load_grid_thumb(&self, index: usize) -> Option<SharedPixelBuffer<Rgba8Pixel>> {
         let res = self.bucket_resolution.load(Ordering::Relaxed);

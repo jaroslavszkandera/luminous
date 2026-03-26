@@ -3,28 +3,34 @@ import { Palette } from "std-widgets.slint";
 export { PipelinePanel, PipelineStep, PipelineStepKind, RotateAngle } from "pipeline-panel.slint";
 
 export component SidePanel inherits Rectangle {
-    in-out property <length> side-width: 240px;
     in property <bool> is-visible: true;
+    in-out property <length> side-width: 250px;
+    in property <length> min-side-panel-width: 250px;
+    in property <length> max-side-panel-width: 500px;
+    property <length> handle-width: 3px;
+    property <length> handle-touch-width: 6px;
 
     width: is-visible ? side-width : 0px;
     background: Palette.foreground.darker(10%);
     clip: true;
 
     TouchArea {
-        width: 6px;
         x: 0;
+        width: handle-touch-width;
         mouse-cursor: ew-resize;
         moved => {
             if (self.pressed) {
                 let new-width = root.side-width - (self.mouse-x - self.pressed-x);
-                root.side-width = Math.max(150px, Math.min(500px, new-width));
+                if Math.abs(new-width - side-width) > 1px {
+                    root.side-width = Math.clamp(new-width, min-side-panel-width, max-side-panel-width);
+                }
             }
         }
     }
 
     Rectangle {
-        x: 3px;
-        width: parent.width - 3px;
+        x: handle-width;
+        width: parent.width - handle-width;
         background: Palette.background;
         @children
     }

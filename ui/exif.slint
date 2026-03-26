@@ -1,0 +1,16 @@
+import { StandardTableView } from "std-widgets.slint";
+import { Palette } from "std-widgets.slint";
+
+export component ExifTable inherits Rectangle {
+    in property <[[StandardListViewItem]]> exif-rows;
+
+    StandardTableView {
+        height: parent.height;
+        width: parent.width;
+        columns: [
+            { title: "Tag" },
+            { title: "Value" },
+        ];
+        rows: exif-rows;
+    }
+}

@@ -1,14 +1,16 @@
-import { Palette } from "std-widgets.slint";
+import { Palette, TabWidget } from "std-widgets.slint";
 import { ImgFmt, EditOp, EditOpKind } from "common.slint";
 import { SidePanel } from "side-panel.slint";
 import { EditsPanel } from "edits-panel.slint";
 import { SelectRect } from "select-rect.slint";
 import { InteractivePlugin } from "plugins.slint";
+import { ExifTable } from "exif.slint";
 
 export global FullViewState {
     in property <image> curr-image;
     in property <string> curr-image-name;
     in property <int> curr-image-index;
+    in property <[[StandardListViewItem]]> exif-rows;
 
     callback request-next-image();
     callback request-prev-image();
@@ -302,27 +304,31 @@ export component FullView inherits TouchArea {
         SidePanel {
             is-visible: root.panel-visible;
             side-width <=> root.side-panel-width;
-            VerticalLayout {
-                padding: 5px;
-                EditsPanel {
-                    apply-edit(op) => {
-                        FullViewState.apply-edit(op);
+
+            TabWidget {
+                current-index: 1; // Debug exif
+                Tab {
+                    title: "Edit";
+                    EditsPanel {
+                        apply-edit(op) => {
+                            FullViewState.apply-edit(op);
+                        }
                     }
                 }
 
-                interactive-plugin := InteractivePlugin {
-                    click-active: root.click-active;
-                    select-active: root.select-active;
-                    // run(control) => {
-                    //     run(control);
-                    // }
-                    // interactive-text-submitted(txt) => {
-                    //     interactive-text-submitted(txt);
-                    // }
-                    // update-run-state() => {
-                    //     update-run-state();
-                    //     self.update-run-state-react();
-                    // }
+                Tab {
+                    title: "Metadata";
+                    ExifTable {
+                        exif-rows: FullViewState.exif-rows;
+                    }
+                }
+
+                Tab {
+                    title: "Plugins";
+                    interactive-plugin := InteractivePlugin {
+                        click-active: root.click-active;
+                        select-active: root.select-active;
+                    }
                 }
             }
         }
