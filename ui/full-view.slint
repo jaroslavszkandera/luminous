@@ -207,7 +207,8 @@ export component FullView inherits TouchArea {
                 y: img-el.y;
             }
 
-            Rectangle {
+            footer := Rectangle {
+                visible: false;
                 height: 16px;
                 y: parent.height - self.height;
                 width: parent.width;
@@ -215,7 +216,7 @@ export component FullView inherits TouchArea {
 
                 Text {
                     x: 5px;
-                    text: (FullViewState.curr-image-index + 1) + "/" + root.total-images;
+                    text: (FullViewState.curr-image-index + 1) + "/" + total-images;
                 }
 
                 Text {
@@ -271,6 +272,13 @@ export component FullView inherits TouchArea {
                         title: @tr("Reset zoom");
                         activated => {
                             root.reset-zoom();
+                        }
+                    }
+
+                    MenuItem {
+                        title: @tr("Toggle footer");
+                        activated => {
+                            footer.visible = !footer.visible;
                         }
                     }
 

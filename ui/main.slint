@@ -10,7 +10,13 @@ export { GridViewState } from "grid-view.slint";
 
 
 export component MainWindow inherits Window {
-    title: "Luminous";
+    title: {
+        if view-mode == ViewMode.grid {
+            "Luminous"
+        } else {
+            (FullViewState.curr-image-index + 1) + "/" + full-ui.total-images + " - " + FullViewState.curr-image-name
+        }
+    };
     background: app-background;
     preferred-width: 1280px;
     preferred-height: 720px;
