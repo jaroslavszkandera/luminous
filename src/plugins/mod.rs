@@ -153,9 +153,8 @@ impl Backend for Arc<DaemonBackend> {
 
 pub struct PluginManager {
     /// extension (lowercase) -> plugin, TODO: make more agnostic
-    plugins: HashMap<String, Arc<Plugin>>,
-    interactive_plugins: Vec<Arc<Plugin>>,
-    search_plugins: Vec<Arc<Plugin>>,
+    shlib_plugins: HashMap<String, Arc<Plugin>>,
+    daemon_plugins: Vec<Arc<Plugin>>,
 }
 
 impl Default for PluginManager {
@@ -167,9 +166,8 @@ impl Default for PluginManager {
 impl PluginManager {
     pub fn new() -> Self {
         Self {
-            plugins: HashMap::new(),
-            interactive_plugins: Vec::new(),
-            search_plugins: Vec::new(),
+            shlib_plugins: HashMap::new(),
+            daemon_plugins: Vec::new(),
         }
     }
 
@@ -204,28 +202,45 @@ impl PluginManager {
         }
     }
 
-    pub fn get_interactive_plugins(&self) -> &[Arc<Plugin>] {
-        &self.interactive_plugins
+    pub fn get_interactive_plugins(&self) -> impl Iterator<Item = &Arc<Plugin>> {
+        self.daemon_plugins.iter().filter(|p| {
+            p.manifest
+                .capabilities
+                .contains(&PluginCapability::Interactive)
+        })
+    }
+
+    pub fn get_search_plugins(&self) -> impl Iterator<Item = &Arc<Plugin>> {
+        self.daemon_plugins
+            .iter()
+            .filter(|p| p.manifest.capabilities.contains(&PluginCapability::Search))
     }
 
     // WARN: tmp, returns the first plugin
     // TODO: return by some kind of UUID?
     pub fn get_interactive_plugin(&self) -> Option<Arc<Plugin>> {
-        self.interactive_plugins.first().cloned()
+        self.get_interactive_plugins().next().cloned()
     }
 
     pub fn get_search_plugin(&self) -> Option<Arc<Plugin>> {
-        self.search_plugins.first().cloned()
+        self.get_search_plugins().next().cloned()
     }
 
     pub fn get_supported_extensions(&self) -> Vec<&str> {
-        self.plugins.keys().map(String::as_str).collect()
+        self.shlib_plugins.keys().map(String::as_str).collect()
+    }
+
+    pub fn get_plugins_manifests(&self) -> Vec<PluginManifest> {
+        self.daemon_plugins
+            .iter()
+            .map(|p| p.manifest.clone())
+            .collect()
     }
 
     pub fn has_plugin_for(&self, path: &Path) -> bool {
         path.extension()
             .and_then(|e| e.to_str())
-            .map(|e| self.plugins.contains_key(&e.to_lowercase()))
+            .map(|e| self.shlib_plugins.contains_key(&e.to_lowercase()))
             .unwrap_or(false)
     }
 
@@ -240,7 +255,7 @@ impl PluginManager {
 
     pub fn decode_dynamic(&self, path: &Path) -> Option<image::DynamicImage> {
         let ext = path.extension()?.to_str()?.to_lowercase();
-        let plugin = self.plugins.get(&ext)?;
+        let plugin = self.shlib_plugins.get(&ext)?;
         debug!("Using plugin '{}' for {:?}", plugin.manifest.name, path);
         plugin.decode_dynamic(path)
     }
@@ -273,11 +288,11 @@ impl PluginManager {
                     debug!("Encoder support for {:?}", manifest.extensions);
                 }
                 PluginCapability::Interactive => {
-                    self.interactive_plugins.push(plugin.clone());
+                    self.daemon_plugins.push(plugin.clone());
                     debug!("Interactive plugin '{}'", manifest.name);
                 }
                 PluginCapability::Search => {
-                    self.search_plugins.push(plugin.clone());
+                    self.daemon_plugins.push(plugin.clone());
                     debug!("Search plugin '{}'", manifest.name);
                 }
                 PluginCapability::Unknown => {
@@ -288,7 +303,8 @@ impl PluginManager {
         }
 
         for ext in &manifest.extensions {
-            self.plugins.insert(ext.to_lowercase(), plugin.clone());
+            self.shlib_plugins
+                .insert(ext.to_lowercase(), plugin.clone());
         }
     }
 }
