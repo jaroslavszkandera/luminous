@@ -151,6 +151,44 @@ impl ImageLoader {
         self.paths.get(self.active_idx.load(Ordering::Relaxed))
     }
 
+    pub fn get_image_disk_cache_count(&self) -> u64 {
+        let Some(ref dir) = self.cache_dir else {
+            return 0;
+        };
+
+        fs::read_dir(dir)
+            .map(|entries| {
+                entries
+                    .filter_map(|e| e.ok())
+                    .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
+                    .count() as u64
+            })
+            .unwrap_or(0)
+    }
+
+    pub fn clear_disk_cache(&self) -> bool {
+        let Some(ref dir) = self.cache_dir else {
+            return false;
+        };
+
+        if !dir.exists() {
+            return true;
+        }
+
+        if let Err(e) = fs::remove_dir_all(dir) {
+            error!("Failed to clear disk cache at {dir:?}: {e}");
+            return false;
+        }
+
+        if let Err(e) = fs::create_dir_all(dir) {
+            error!("Failed to recreate cache directory: {e}");
+            return false;
+        }
+
+        debug!("Disk cache cleared");
+        true
+    }
+
     // source: https://github.com/slint-ui/slint/discussions/5140
     pub fn load_grid_thumb(&self, index: usize) -> Option<SharedPixelBuffer<Rgba8Pixel>> {
         let res = self.bucket_resolution.load(Ordering::Relaxed);

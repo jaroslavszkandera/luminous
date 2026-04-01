@@ -1,4 +1,27 @@
-import { Palette, Button } from "std-widgets.slint";
+import { Palette, Button, StandardButton } from "std-widgets.slint";
+
+
+export global SettingsState {
+    in property <int> image-cache-count;
+    callback clear-image-cache();
+    callback get-image-cache-count();
+
+    // in property <Plugins> plugins; // state, turn off/on, auto-start (bool), show folder, capabilities, version, Optional<extensions>
+}
+
+export component ClearImageCacheDiaglog inherits Dialog {
+    Text {
+        text: "Do you want to clear the image cache?";
+    }
+
+    StandardButton {
+        kind: yes;
+    }
+
+    StandardButton {
+        kind: no;
+    }
+}
 
 export component Settings inherits PopupWindow {
     close-policy: no-auto-close;
@@ -32,7 +55,30 @@ export component Settings inherits PopupWindow {
                 }
             }
 
-            Rectangle { }
+            Rectangle {
+                VerticalLayout {
+                    padding: 10px;
+                    HorizontalLayout {
+                        height: 25px;
+                        width: 100%;
+                        padding-left: 5px;
+                        Text {
+                            text: "Image cache count: " + SettingsState.image-cache-count;
+                        }
+
+                        Button {
+                            text: "Clear";
+                            width: 75px;
+                            clicked => {
+                                SettingsState.clear-image-cache();
+                                SettingsState.get-image-cache-count();
+                            }
+                        }
+                    }
+
+                    Rectangle { }
+                }
+            }
         }
     }
 }

@@ -521,6 +521,7 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
     ui::grid_view_presenter::register(&main_window, app_controller.clone());
     ui::full_view_presenter::register(&main_window, app_controller.clone());
     ui::pipeline_presenter::register(&main_window, app_controller.clone(), factory);
+    ui::settings_presenter::register(&main_window, app_controller.clone());
     ui::bindings::setup(&main_window, &config);
 
     main_window.on_quit_app(move || {
