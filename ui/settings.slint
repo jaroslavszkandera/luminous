@@ -1,0 +1,38 @@
+import { Palette, Button } from "std-widgets.slint";
+
+export component Settings inherits PopupWindow {
+    close-policy: no-auto-close;
+
+    Rectangle {
+        background: Palette.background;
+        border-radius: 3px;
+        drop-shadow-color: black;
+        drop-shadow-blur: 50px;
+        VerticalLayout {
+            Rectangle {
+                width: 100%;
+                height: 25px;
+                background: Palette.background.brighter(30%);
+                HorizontalLayout {
+                    padding-left: 5px;
+                    Text {
+                        text: "Settings";
+                        font-size: 14px;
+                        vertical-alignment: center;
+                    }
+
+                    Button {
+                        width: parent.height * 2;
+                        icon: @image-url("icons/close-button.svg");
+                        colorize-icon: true;
+                        clicked => {
+                            root.close();
+                        }
+                    }
+                }
+            }
+
+            Rectangle { }
+        }
+    }
+}

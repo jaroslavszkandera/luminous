@@ -7,6 +7,7 @@ import {
     PipelineStepKind,
     RotateAngle,
 } from "side-panel.slint";
+import { Settings } from "settings.slint";
 
 export global GridViewState {
     in property <[GridItem]> model;
@@ -84,7 +85,7 @@ export component GridView inherits Rectangle {
 
             HorizontalLayout {
                 padding: 5px;
-                spacing: 30px;
+                spacing: 5px;
 
                 Button {
                     text: GridViewState.selected-count > 0 ? GridViewState.selected-count + "/" + GridViewState.model.length : GridViewState.model.length;
@@ -111,11 +112,26 @@ export component GridView inherits Rectangle {
                 }
 
                 Button {
-                    icon: @image-url("icons/menu_icon_251951.svg");
+                    icon: @image-url("icons/menu-button.svg");
                     colorize-icon: true;
                     checked: panel-visible;
                     clicked => {
                         panel-visible = !panel-visible;
+                    }
+                }
+
+                settings := Settings {
+                    x: (root.width - self.width) / 2;
+                    y: (root.height - self.height) / 2;
+                    width: root.width * 90%;
+                    height: root.height * 90%;
+                }
+
+                Button {
+                    icon: @image-url("icons/settings-cogwheel-button.svg");
+                    colorize-icon: true;
+                    clicked => {
+                        settings.show();
                     }
                 }
             }
