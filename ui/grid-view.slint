@@ -120,6 +120,7 @@ export component GridView inherits Rectangle {
                     }
                 }
 
+                // FIX: Dimensions stay the same with window height/width change.
                 settings := Settings {
                     x: (root.width - self.width) / 2;
                     y: (root.height - self.height) / 2;

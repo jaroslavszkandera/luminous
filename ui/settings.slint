@@ -1,15 +1,35 @@
-import { Palette, Button, StandardButton } from "std-widgets.slint";
+import {
+    Palette,
+    Button,
+    StandardButton,
+    VerticalBox,
+    ListView,
+    StandardListView,
+} from "std-widgets.slint";
 
+// TODO: state, turn off/on, auto-start (bool), show folder, capabilities, version, Optional<extensions>
+struct Plugin {
+    name: string,
+    enable: bool,
+    auto-start: bool,
+}
 
 export global SettingsState {
     in property <int> image-cache-count;
     callback clear-image-cache();
     callback get-image-cache-count();
 
-    // in property <Plugins> plugins; // state, turn off/on, auto-start (bool), show folder, capabilities, version, Optional<extensions>
+    in property <[Plugin]> plugins: [
+        { name: "Something", enable: true, auto-start: true },
+        { name: "Anything", enable: false, auto-start: false },
+        { name: "Somewhere", enable: true, auto-start: false },
+        { name: "Anywhere", enable: true, auto-start: true },
+        { name: "Somehow", enable: false, auto-start: false },
+    ];
 }
 
-export component ClearImageCacheDiaglog inherits Dialog {
+export component ClearImageCacheDialog inherits Dialog {
+    title: "Clear Cache";
     Text {
         text: "Do you want to clear the image cache?";
     }
@@ -23,19 +43,43 @@ export component ClearImageCacheDiaglog inherits Dialog {
     }
 }
 
+export component Separator inherits Rectangle {
+    height: 1px;
+    width: 90%;
+    background: Palette.border;
+}
+
+export component SettingsSection inherits VerticalLayout {
+    in property <string> title;
+    spacing: 8px;
+
+    if (title != ""): Text {
+        text: title;
+        font-size: 14px;
+        font-weight: 700;
+    }
+
+    Rectangle {
+        background: Palette.alternate-background;
+        border-radius: 4px;
+        VerticalLayout {
+            padding: 8px;
+            @children
+        }
+    }
+}
+
 export component Settings inherits PopupWindow {
     close-policy: no-auto-close;
 
     Rectangle {
         background: Palette.background;
         border-radius: 3px;
-        drop-shadow-color: black;
-        drop-shadow-blur: 50px;
         VerticalLayout {
             Rectangle {
                 width: 100%;
                 height: 25px;
-                background: Palette.background.brighter(30%);
+                background: Palette.alternate-background;
                 HorizontalLayout {
                     padding-left: 5px;
                     Text {
@@ -55,28 +99,86 @@ export component Settings inherits PopupWindow {
                 }
             }
 
-            Rectangle {
-                VerticalLayout {
-                    padding: 10px;
+            VerticalLayout {
+                padding: 15px;
+                spacing: 10px;
+
+                SettingsSection {
                     HorizontalLayout {
-                        height: 25px;
-                        width: 100%;
-                        padding-left: 5px;
+                        alignment: space-between;
                         Text {
-                            text: "Image cache count: " + SettingsState.image-cache-count;
+                            text: "Image cache: " + SettingsState.image-cache-count;
+                            vertical-alignment: center;
                         }
 
                         Button {
                             text: "Clear";
-                            width: 75px;
+                            width: 80px;
                             clicked => {
                                 SettingsState.clear-image-cache();
-                                SettingsState.get-image-cache-count();
                             }
                         }
                     }
+                }
 
-                    Rectangle { }
+                SettingsSection {
+                    title: "Plugins";
+                    HorizontalLayout {
+                        spacing: 10px;
+                        Rectangle {
+                            height: 150px;
+                            background: Palette.background;
+                            plugins-list := StandardListView {
+                                // TODO: plugins names
+                                model: [
+                                    { text: "Something" },
+                                    { text: "Anything" },
+                                    { text: "Somewhere" },
+                                    { text: "Anywhere" },
+                                    { text: "Somehow" },
+                                ];
+                            }
+                        }
+
+                        Rectangle {
+                            width: 200px;
+                            VerticalLayout {
+                                spacing: 5px;
+                                alignment: start;
+                                Button {
+                                    text: "Enable/Disable";
+                                    checkable: true;
+                                    enabled: plugins-list.current-item != -1;
+                                    checked: plugins-list.current-item != -1 ? SettingsState.plugins[plugins-list.current-item].enable : false;
+                                    clicked => {
+                                        SettingsState.plugins[plugins-list.current-item].enable = !SettingsState.plugins[plugins-list.current-item].enable;
+                                    }
+                                }
+
+                                Button {
+                                    text: "Auto start";
+                                    checkable: true;
+                                    enabled: plugins-list.current-item != -1;
+                                    checked: plugins-list.current-item != -1 ? SettingsState.plugins[plugins-list.current-item].auto-start : false;
+                                    clicked => {
+                                        SettingsState.plugins[plugins-list.current-item].auto-start = !SettingsState.plugins[plugins-list.current-item].auto-start;
+                                    }
+                                }
+
+                                Button {
+                                    text: "Info";
+                                    enabled: plugins-list.current-item != -1;
+                                    clicked => {
+                                        debug("Showing info for: " + SettingsState.plugins[plugins-list.current-item].name);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Rectangle {
+                    vertical-stretch: 1;
                 }
             }
         }
