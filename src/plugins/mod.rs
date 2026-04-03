@@ -45,17 +45,22 @@ pub trait Backend: Send + Sync {
 }
 
 pub struct Plugin {
+    pub id: String,
     pub manifest: PluginManifest,
     backend: Box<dyn Backend>,
 }
 
 impl Plugin {
-    pub fn new(manifest: PluginManifest, dir: PathBuf) -> Option<Self> {
+    pub fn new(id: String, manifest: PluginManifest, dir: PathBuf) -> Option<Self> {
         let backend: Box<dyn Backend> = match manifest.backend {
             BackendKind::Daemon => Box::new(DaemonBackend::new(&manifest, &dir) as Arc<_>),
             BackendKind::SharedLib => Box::new(SharedLibBackend::new(&manifest, &dir)?),
         };
-        Some(Self { manifest, backend })
+        Some(Self {
+            id,
+            manifest,
+            backend,
+        })
     }
 
     pub fn start(&self) {
@@ -191,15 +196,23 @@ impl PluginManager {
             if !path.is_dir() {
                 continue;
             }
+            let id = match path.file_name().and_then(|n| n.to_str()) {
+                Some(s) => s.to_string(),
+                None => continue,
+            };
             let manifest_path = path.join("plugin.json");
             if !manifest_path.exists() {
                 error!("Plugin manifest missing: {:?}", manifest_path);
                 continue;
             }
             if let Some(manifest) = load_manifest(&manifest_path) {
-                self.register(path, manifest);
+                self.register(id, path, manifest);
             }
         }
+    }
+
+    pub fn get_all_plugins(&self) -> Vec<Arc<Plugin>> {
+        self.daemon_plugins.iter().cloned().collect()
     }
 
     pub fn get_interactive_plugins(&self) -> impl Iterator<Item = &Arc<Plugin>> {
@@ -260,8 +273,8 @@ impl PluginManager {
         plugin.decode_dynamic(path)
     }
 
-    fn register(&mut self, dir: PathBuf, manifest: PluginManifest) {
-        let plugin = match Plugin::new(manifest.clone(), dir) {
+    fn register(&mut self, id: String, dir: PathBuf, manifest: PluginManifest) {
+        let plugin = match Plugin::new(id, manifest.clone(), dir) {
             Some(p) => Arc::new(p),
             None => {
                 error!("Failed to construct plugin '{}'", manifest.name);

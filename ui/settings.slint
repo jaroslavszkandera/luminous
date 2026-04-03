@@ -18,14 +18,10 @@ export global SettingsState {
     in property <int> image-cache-count;
     callback clear-image-cache();
     callback get-image-cache-count();
+    callback settings-opened();
 
-    in property <[Plugin]> plugins: [
-        { name: "Something", enable: true, auto-start: true },
-        { name: "Anything", enable: false, auto-start: false },
-        { name: "Somewhere", enable: true, auto-start: false },
-        { name: "Anywhere", enable: true, auto-start: true },
-        { name: "Somehow", enable: false, auto-start: false },
-    ];
+    in property <[Plugin]> plugins;
+    in property <[StandardListViewItem]> plugin-names;
 }
 
 export component ClearImageCacheDialog inherits Dialog {
@@ -129,14 +125,7 @@ export component Settings inherits PopupWindow {
                             height: 150px;
                             background: Palette.background;
                             plugins-list := StandardListView {
-                                // TODO: plugins names
-                                model: [
-                                    { text: "Something" },
-                                    { text: "Anything" },
-                                    { text: "Somewhere" },
-                                    { text: "Anywhere" },
-                                    { text: "Somehow" },
-                                ];
+                                model: SettingsState.plugin-names;
                             }
                         }
 

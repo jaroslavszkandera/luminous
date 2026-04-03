@@ -26,4 +26,39 @@ pub fn register(window: &MainWindow, app_controller: Rc<RefCell<AppController>>)
         })
         .unwrap();
     });
+
+    let acc = app_controller.clone();
+    sg.on_settings_opened(move || {
+        let plugins_raw = acc.borrow().loader.plugin_manager.get_all_plugins();
+        let weak_ui = acc.borrow().window_weak.clone();
+
+        slint::invoke_from_event_loop(move || {
+            if let Some(ui) = weak_ui.upgrade() {
+                let plugins_vec: Vec<crate::Plugin> = plugins_raw
+                    .iter()
+                    .map(|p| crate::Plugin {
+                        name: p.id.clone().into(),
+                        // TODO: Placeholders
+                        enable: true,
+                        auto_start: true,
+                    })
+                    .collect();
+
+                let names_vec: Vec<slint::StandardListViewItem> = plugins_raw
+                    .into_iter()
+                    .map(|p| {
+                        slint::StandardListViewItem::from(slint::SharedString::from(p.id.clone()))
+                    })
+                    .collect();
+
+                let plugins_model = std::rc::Rc::new(slint::VecModel::from(plugins_vec));
+                let names_model = std::rc::Rc::new(slint::VecModel::from(names_vec));
+
+                let state = ui.global::<SettingsState>();
+                state.set_plugins(plugins_model.into());
+                state.set_plugin_names(names_model.into());
+            }
+        })
+        .unwrap();
+    });
 }
