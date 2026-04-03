@@ -1,8 +1,13 @@
 use crate::AppController;
 use crate::MainWindow;
 use crate::SettingsState;
+use directories::ProjectDirs;
+use log::error;
+use serde::{Deserialize, Serialize};
 use slint::ComponentHandle;
 use std::cell::RefCell;
+use std::fs::{self, File};
+use std::path::PathBuf;
 use std::rc::Rc;
 
 pub fn register(window: &MainWindow, app_controller: Rc<RefCell<AppController>>) {
@@ -29,36 +34,124 @@ pub fn register(window: &MainWindow, app_controller: Rc<RefCell<AppController>>)
 
     let acc = app_controller.clone();
     sg.on_settings_opened(move || {
-        let plugins_raw = acc.borrow().loader.plugin_manager.get_all_plugins();
-        let weak_ui = acc.borrow().window_weak.clone();
+        let plugins = acc.borrow().loader.plugin_manager.get_all_plugins();
+        let plugin_ids: Vec<String> = plugins.iter().map(|p| p.id.clone()).collect();
 
+        let mut settings = read_settings().unwrap_or(Settings { plugins: vec![] });
+        settings.sync_plugins(plugin_ids);
+
+        let _ = write_settings(&settings);
+
+        let weak_ui = acc.borrow().window_weak.clone();
         slint::invoke_from_event_loop(move || {
             if let Some(ui) = weak_ui.upgrade() {
-                let plugins_vec: Vec<crate::Plugin> = plugins_raw
-                    .iter()
-                    .map(|p| crate::Plugin {
-                        name: p.id.clone().into(),
-                        // TODO: Placeholders
-                        enable: true,
-                        auto_start: true,
-                    })
-                    .collect();
-
-                let names_vec: Vec<slint::StandardListViewItem> = plugins_raw
-                    .into_iter()
-                    .map(|p| {
-                        slint::StandardListViewItem::from(slint::SharedString::from(p.id.clone()))
-                    })
-                    .collect();
-
-                let plugins_model = std::rc::Rc::new(slint::VecModel::from(plugins_vec));
-                let names_model = std::rc::Rc::new(slint::VecModel::from(names_vec));
-
                 let state = ui.global::<SettingsState>();
-                state.set_plugins(plugins_model.into());
-                state.set_plugin_names(names_model.into());
+
+                let plugins_vec: Vec<crate::Plugin> = settings
+                    .plugins
+                    .into_iter()
+                    .map(|p| crate::Plugin {
+                        id: p.id.clone().into(),
+                        enabled: p.auto_start, // TODO: check plugin_manager
+                        auto_start: p.auto_start,
+                    })
+                    .collect();
+
+                let names_vec: Vec<slint::StandardListViewItem> = plugins_vec
+                    .iter()
+                    .map(|p| slint::StandardListViewItem::from(p.id.clone()))
+                    .collect();
+
+                state.set_plugins(std::rc::Rc::new(slint::VecModel::from(plugins_vec)).into());
+                state.set_plugin_names(std::rc::Rc::new(slint::VecModel::from(names_vec)).into());
             }
         })
         .unwrap();
     });
+
+    let acc = app_controller.clone();
+    sg.on_toggle_plugin_enable(move |id| {
+        if let Some(plugin) = acc.borrow().loader.plugin_manager.get_plugin_by_id(&id) {
+            if plugin.is_running() {
+                plugin.stop();
+            } else {
+                plugin.start();
+            }
+        };
+    });
+
+    sg.on_toggle_plugin_auto_start(move |id| {
+        let mut settings = read_settings().unwrap_or(Settings { plugins: vec![] });
+        if let Some(plugin) = settings.plugins.iter_mut().find(|p| *p.id == *id) {
+            plugin.auto_start = !plugin.auto_start;
+
+            if let Err(e) = write_settings(&settings) {
+                error!("Failed to save auto-start preference: {e}");
+            }
+        } else {
+        }
+    });
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct PluginSettings {
+    pub id: String,
+    pub auto_start: bool,
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct Settings {
+    pub plugins: Vec<PluginSettings>,
+}
+
+impl Settings {
+    pub fn sync_plugins(&mut self, active_ids: Vec<String>) {
+        self.plugins.retain(|p| active_ids.contains(&p.id));
+
+        for id in active_ids {
+            if !self.plugins.iter().any(|p| p.id == id) {
+                self.plugins.push(PluginSettings {
+                    id,
+                    auto_start: true,
+                });
+            }
+        }
+    }
+}
+
+fn get_settings_path() -> Option<PathBuf> {
+    let proj_dirs = ProjectDirs::from("", "", "luminous")?;
+    let settings_dir = proj_dirs.config_dir();
+    let settings_path = settings_dir.join("settings.toml");
+
+    if let Err(e) = fs::create_dir_all(settings_dir) {
+        error!("Failed to create config directory: {e}");
+        return None;
+    }
+
+    if !settings_path.exists() {
+        if let Err(e) = File::create(&settings_path) {
+            error!("Failed to create settings file: {e}");
+            return None;
+        }
+        log::info!("Created new settings file at {:?}", settings_path);
+    }
+
+    Some(settings_path)
+}
+
+pub fn read_settings() -> Option<Settings> {
+    get_settings_path().and_then(|path| {
+        let content = std::fs::read_to_string(path).ok()?;
+        toml::from_str(&content).ok()
+    })
+}
+
+pub fn write_settings(settings: &Settings) -> Result<(), Box<dyn std::error::Error>> {
+    let path = get_settings_path().ok_or("Could not determine settings path")?;
+
+    let toml_string = toml::to_string_pretty(settings)?;
+    std::fs::write(path, toml_string)?;
+
+    Ok(())
 }

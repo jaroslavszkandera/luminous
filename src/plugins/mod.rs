@@ -16,6 +16,9 @@ use std::sync::Arc;
 pub trait Backend: Send + Sync {
     fn start(&self) {}
     fn stop(&self) {}
+    fn is_running(&self) -> bool {
+        false
+    }
     fn decode(&self, _path: &Path) -> Option<image::DynamicImage> {
         None
     }
@@ -51,16 +54,26 @@ pub struct Plugin {
 }
 
 impl Plugin {
-    pub fn new(id: String, manifest: PluginManifest, dir: PathBuf) -> Option<Self> {
+    pub fn new(
+        id: String,
+        manifest: PluginManifest,
+        dir: PathBuf,
+        auto_start: bool,
+    ) -> Option<Self> {
         let backend: Box<dyn Backend> = match manifest.backend {
             BackendKind::Daemon => Box::new(DaemonBackend::new(&manifest, &dir) as Arc<_>),
             BackendKind::SharedLib => Box::new(SharedLibBackend::new(&manifest, &dir)?),
         };
-        Some(Self {
+        let plugin = Self {
             id,
             manifest,
             backend,
-        })
+        };
+        if auto_start {
+            debug!("Auto-starting plugin: {}", plugin.id);
+            plugin.start();
+        }
+        Some(plugin)
     }
 
     pub fn start(&self) {
@@ -69,6 +82,10 @@ impl Plugin {
 
     pub fn stop(&self) {
         self.backend.stop();
+    }
+
+    pub fn is_running(&self) -> bool {
+        self.backend.is_running()
     }
 
     pub fn version_compatible(&self) -> bool {
@@ -133,6 +150,15 @@ impl Plugin {
 }
 
 impl Backend for Arc<DaemonBackend> {
+    fn start(&self) {
+        DaemonBackend::start(self);
+    }
+    fn stop(&self) {
+        DaemonBackend::stop(self);
+    }
+    fn is_running(&self) -> bool {
+        DaemonBackend::is_running(self)
+    }
     fn set_image(&self, buf: &SharedPixelBuffer<Rgba8Pixel>) -> bool {
         DaemonBackend::set_image(self, buf)
     }
@@ -191,6 +217,11 @@ impl PluginManager {
             }
         };
 
+        let mut settings = crate::ui::settings_presenter::read_settings()
+            .unwrap_or_else(|| crate::ui::settings_presenter::Settings { plugins: vec![] });
+
+        let mut discovered_ids = Vec::new();
+
         for entry in entries.filter_map(|e| e.ok()) {
             let path = entry.path();
             if !path.is_dir() {
@@ -200,19 +231,36 @@ impl PluginManager {
                 Some(s) => s.to_string(),
                 None => continue,
             };
+
+            discovered_ids.push(id.clone());
+
             let manifest_path = path.join("plugin.json");
             if !manifest_path.exists() {
                 error!("Plugin manifest missing: {:?}", manifest_path);
                 continue;
             }
+            let auto_start = settings
+                .plugins
+                .iter()
+                .find(|p| p.id == id)
+                .map(|p| p.auto_start)
+                .unwrap_or(false);
             if let Some(manifest) = load_manifest(&manifest_path) {
-                self.register(id, path, manifest);
+                self.register(id, path, manifest, auto_start);
             }
+        }
+        settings.sync_plugins(discovered_ids);
+        if let Err(e) = crate::ui::settings_presenter::write_settings(&settings) {
+            error!("Failed to save plugins settings: {}", e);
         }
     }
 
     pub fn get_all_plugins(&self) -> Vec<Arc<Plugin>> {
         self.daemon_plugins.iter().cloned().collect()
+    }
+
+    pub fn get_plugin_by_id(&self, id: &str) -> Option<Arc<Plugin>> {
+        self.daemon_plugins.iter().find(|&p| p.id == id).cloned()
     }
 
     pub fn get_interactive_plugins(&self) -> impl Iterator<Item = &Arc<Plugin>> {
@@ -273,8 +321,8 @@ impl PluginManager {
         plugin.decode_dynamic(path)
     }
 
-    fn register(&mut self, id: String, dir: PathBuf, manifest: PluginManifest) {
-        let plugin = match Plugin::new(id, manifest.clone(), dir) {
+    fn register(&mut self, id: String, dir: PathBuf, manifest: PluginManifest, auto_start: bool) {
+        let plugin = match Plugin::new(id, manifest.clone(), dir, auto_start) {
             Some(p) => Arc::new(p),
             None => {
                 error!("Failed to construct plugin '{}'", manifest.name);

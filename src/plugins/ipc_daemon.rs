@@ -9,7 +9,8 @@ use std::net::TcpStream;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
-use std::sync::mpsc::{self, SyncSender};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::{Arc, Mutex, RwLock};
 
 #[derive(Serialize, Debug)]
@@ -56,6 +57,7 @@ pub(crate) enum IpcSearchResponse {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum IpcStatus {
+    NotRunning,
     Init,
     Busy,
     Ready,
@@ -99,23 +101,24 @@ enum WorkerRequest {
         query: String,
         tx: mpsc::SyncSender<Option<Vec<PathBuf>>>,
     },
+    Shutdown,
 }
 
 pub struct DaemonBackend {
-    manifest_name: String,
+    manifest: PluginManifest,
+    dir: PathBuf,
     process: Mutex<Option<Child>>,
     tx: SyncSender<WorkerRequest>,
+    rx: Mutex<Option<Receiver<WorkerRequest>>>,
     pending_image: Arc<Mutex<Option<PendingImage>>>,
     image_token: Arc<std::sync::atomic::AtomicU32>,
     status: Arc<RwLock<IpcStatus>>,
     on_status_change: Arc<Mutex<Option<Box<dyn Fn(IpcStatus) + Send + Sync>>>>,
+    running: AtomicBool,
 }
 
 impl DaemonBackend {
     pub fn new(manifest: &PluginManifest, dir: &Path) -> Arc<Self> {
-        let port = manifest
-            .daemon_port
-            .expect("Missing daemon port should be handled by manifest parsing.");
         let (tx, rx) = mpsc::sync_channel::<WorkerRequest>(1);
 
         let status = Arc::new(RwLock::new(IpcStatus::Init));
@@ -124,37 +127,84 @@ impl DaemonBackend {
         let pending_image: Arc<Mutex<Option<PendingImage>>> = Arc::new(Mutex::new(None));
         let image_token = Arc::new(std::sync::atomic::AtomicU32::new(0));
 
-        let process = manifest.interpreter.as_ref().and_then(|interp| {
+        let daemon = Arc::new(Self {
+            manifest: manifest.clone(),
+            dir: dir.to_path_buf(),
+            process: Mutex::new(None),
+            tx,
+            rx: Mutex::new(Some(rx)),
+            pending_image: pending_image.clone(),
+            image_token: image_token.clone(),
+            status: status.clone(),
+            on_status_change: on_status_change.clone(),
+            running: AtomicBool::new(false),
+        });
+        daemon
+    }
+
+    pub fn status(&self) -> IpcStatus {
+        self.status.read().unwrap().clone()
+    }
+
+    pub fn on_status_change<F>(&self, cb: F)
+    where
+        F: Fn(IpcStatus) + Send + Sync + 'static,
+    {
+        *self.on_status_change.lock().unwrap() = Some(Box::new(cb));
+    }
+}
+
+impl Backend for DaemonBackend {
+    fn start(&self) {
+        if self.process.lock().unwrap().is_some() {
+            error!("Plugin alredy running, not starting {}", self.manifest.name);
+            return;
+        }
+
+        let Ok(mut rx_guard) = self.rx.lock() else {
+            return;
+        };
+        let Some(rx) = rx_guard.take() else {
+            debug!("Worker thread already running or rx already taken");
+            return;
+        };
+
+        let process = self.manifest.interpreter.as_ref().and_then(|interp| {
             let parts: Vec<&str> = interp.split_whitespace().collect();
             let (&exe, args) = parts.split_first()?;
-            info!("Starting daemon: {} {:?} {:?}", exe, args, manifest.entry);
+            info!(
+                "Starting daemon: {} {:?} {:?}",
+                exe, args, self.manifest.entry
+            );
             Command::new(exe)
                 .args(args)
                 .arg(
-                    manifest
+                    self.manifest
                         .entry
                         .as_ref()
                         .expect("Missing daemon entry should be handled by manifest parsing."),
                 )
-                .current_dir(dir)
+                .current_dir(self.dir.clone())
                 .stdout(Stdio::inherit())
                 .stderr(Stdio::inherit())
                 .spawn()
                 .ok()
         });
+        if process.is_none() {
+            error!("Failed to start daemon: {}", self.manifest.name)
+        }
+        *self.process.lock().unwrap() = process;
+        self.running.store(true, Ordering::SeqCst);
 
-        let daemon = Arc::new(Self {
-            manifest_name: manifest.name.clone(),
-            process: Mutex::new(process),
-            tx,
-            pending_image: pending_image.clone(),
-            image_token: image_token.clone(),
-            status: status.clone(),
-            on_status_change: on_status_change.clone(),
-        });
+        let port = self
+            .manifest
+            .daemon_port
+            .expect("Missing daemon port should be handled by manifest parsing.");
 
-        let status_w = status.clone();
-        let on_status_w = on_status_change.clone();
+        let status_w = self.status.clone();
+        let on_status_w = self.on_status_change.clone();
+        let pending_image = self.pending_image.clone();
+        let image_token = self.image_token.clone();
 
         std::thread::spawn(move || {
             let set_status = |s: IpcStatus| {
@@ -281,28 +331,26 @@ impl DaemonBackend {
                             }
                         }
                     }
+                    WorkerRequest::Shutdown => break,
                 }
             }
 
             let _ = send_msg(&mut stream, &IpcCmd::Shutdown);
         });
-
-        daemon
     }
 
-    pub fn status(&self) -> IpcStatus {
-        self.status.read().unwrap().clone()
+    fn stop(&self) {
+        debug!("Stopping plugin: {}", self.manifest.name);
+        let _ = self.tx.try_send(WorkerRequest::Shutdown);
+        if let Some(mut child) = self.process.lock().unwrap().take() {
+            info!("Killing daemon '{}'", self.manifest.name);
+            let _ = child.kill();
+            let _ = child.wait(); // Could block
+        }
+        *self.status.write().unwrap() = IpcStatus::NotRunning.clone();
+        self.running.store(false, Ordering::SeqCst);
     }
 
-    pub fn on_status_change<F>(&self, cb: F)
-    where
-        F: Fn(IpcStatus) + Send + Sync + 'static,
-    {
-        *self.on_status_change.lock().unwrap() = Some(Box::new(cb));
-    }
-}
-
-impl Backend for DaemonBackend {
     fn set_image(&self, buf: &SharedPixelBuffer<Rgba8Pixel>) -> bool {
         let token = self
             .image_token
@@ -321,6 +369,10 @@ impl Backend for DaemonBackend {
                 false
             }
         }
+    }
+
+    fn is_running(&self) -> bool {
+        self.running.load(Ordering::Relaxed)
     }
 
     fn click(&self, x: u32, y: u32) -> Option<SharedPixelBuffer<Rgba8Pixel>> {
@@ -397,7 +449,7 @@ impl Backend for DaemonBackend {
 impl Drop for DaemonBackend {
     fn drop(&mut self) {
         if let Some(mut child) = self.process.lock().unwrap().take() {
-            info!("Killing daemon '{}'", self.manifest_name);
+            info!("Killing daemon '{}'", self.manifest.name);
             let _ = child.kill();
             let _ = child.wait();
         }
