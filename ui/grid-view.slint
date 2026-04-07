@@ -218,7 +218,7 @@ export component GridView inherits Rectangle {
                             }
 
                             Image {
-                                source: item.image;
+                                source: item.image.width > 1 ? item.image : @image-url("icons/placeholder-image.svg");
                                 image-fit: cover;
                                 width: 100%;
                                 height: 100%;

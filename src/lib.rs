@@ -110,7 +110,7 @@ impl AppController {
     }
 
     fn handle_grid_request(&mut self, start: usize, count: usize) {
-        debug!("handle grid request");
+        // debug!("handle grid request");
         let Some(ui) = self.window_weak.upgrade() else {
             return;
         };

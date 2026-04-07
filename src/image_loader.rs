@@ -14,7 +14,7 @@ use std::time::Instant;
 
 use crate::plugins::PluginManager;
 
-const THUMB_FILTER: FilterType = FilterType::Nearest;
+const THUMB_FILTER: FilterType = FilterType::Triangle;
 
 pub type ImageReadyFn = Arc<dyn Fn(usize, SharedPixelBuffer<Rgba8Pixel>) + Send + Sync>;
 pub type ImageReadyHook = Option<ImageReadyFn>;
@@ -28,6 +28,7 @@ fn to_pixel_buffer(img: image::DynamicImage) -> SharedPixelBuffer<Rgba8Pixel> {
     SharedPixelBuffer::clone_from_slice(rgba.as_raw(), rgba.width(), rgba.height())
 }
 
+// TODO: Save thumb_cache to db
 pub struct ImageLoader {
     thumb_cache: Arc<DashMap<usize, SharedPixelBuffer<Rgba8Pixel>>>,
     full_cache: Arc<DashMap<usize, SharedPixelBuffer<Rgba8Pixel>>>,
