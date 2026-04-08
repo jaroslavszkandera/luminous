@@ -2,7 +2,7 @@ use crate::AppController;
 use crate::FullViewState;
 use crate::MainWindow;
 use crate::image_processing::save_image;
-use log::error;
+use log::{debug, error};
 use slint::{ComponentHandle, SharedString, StandardListViewItem, VecModel};
 use std::cell::RefCell;
 use std::fs::File;
@@ -11,7 +11,7 @@ use std::rc::Rc;
 use std::sync::atomic::Ordering;
 
 pub fn register(window: &MainWindow, app_controller: Rc<RefCell<AppController>>) {
-    log::debug!("Registering full view presenter");
+    debug!("Registering full view presenter");
     let fv = window.global::<FullViewState>();
     let acc = app_controller.clone();
     fv.on_request_next_image(move || {

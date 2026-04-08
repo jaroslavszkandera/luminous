@@ -82,6 +82,7 @@ struct PendingImage {
     token: u32,
 }
 
+#[derive(Debug)]
 enum WorkerRequest {
     ImagePending,
     Click {
@@ -105,6 +106,7 @@ enum WorkerRequest {
 }
 
 pub struct DaemonBackend {
+    id: String,
     manifest: PluginManifest,
     dir: PathBuf,
     process: Mutex<Option<Child>>,
@@ -118,7 +120,7 @@ pub struct DaemonBackend {
 }
 
 impl DaemonBackend {
-    pub fn new(manifest: &PluginManifest, dir: &Path) -> Arc<Self> {
+    pub fn new(id: String, manifest: &PluginManifest, dir: &Path) -> Arc<Self> {
         let (tx, rx) = mpsc::sync_channel::<WorkerRequest>(1);
 
         let status = Arc::new(RwLock::new(IpcStatus::Init));
@@ -128,10 +130,11 @@ impl DaemonBackend {
         let image_token = Arc::new(std::sync::atomic::AtomicU32::new(0));
 
         let daemon = Arc::new(Self {
+            id: id,
             manifest: manifest.clone(),
             dir: dir.to_path_buf(),
             process: Mutex::new(None),
-            tx,
+            tx: tx,
             rx: Mutex::new(Some(rx)),
             pending_image: pending_image.clone(),
             image_token: image_token.clone(),
@@ -160,8 +163,8 @@ impl Backend for DaemonBackend {
             error!("Plugin alredy running, not starting {}", self.manifest.name);
             return;
         }
-
         let Ok(mut rx_guard) = self.rx.lock() else {
+            error!("Plugin channel mutex is already held");
             return;
         };
         let Some(rx) = rx_guard.take() else {
@@ -206,137 +209,124 @@ impl Backend for DaemonBackend {
         let pending_image = self.pending_image.clone();
         let image_token = self.image_token.clone();
 
-        std::thread::spawn(move || {
-            let set_status = |s: IpcStatus| {
-                *status_w.write().unwrap() = s.clone();
-                if let Some(cb) = on_status_w.lock().unwrap().as_ref() {
-                    cb(s);
-                }
-            };
-
-            let mut stream = match connect_with_retry(port, 30, 500) {
-                Some(s) => s,
-                None => {
-                    error!("Failed to connect to daemon on port {port} after retries");
-                    set_status(IpcStatus::Error);
-                    return;
-                }
-            };
-
-            let mut active_shm: Option<ActiveShmem> = None;
-            if let Some(pending) = pending_image.lock().unwrap().take() {
-                set_status(IpcStatus::Busy);
-                let current = image_token.load(std::sync::atomic::Ordering::Acquire);
-                if pending.token == current {
-                    match ipc_send_image(&mut stream, &pending.buffer) {
-                        Ok(shm) => {
-                            debug!("Initial embedding ready");
-                            active_shm = Some(shm);
-                            set_status(IpcStatus::Ready);
-                        }
-                        Err(e) => {
-                            error!("Initial send_image failed: {e}");
-                            set_status(IpcStatus::Error);
-                            return;
-                        }
+        let thread_name = self.id.clone();
+        std::thread::Builder::new()
+            .name(thread_name)
+            .spawn(move || {
+                let set_status = |s: IpcStatus| {
+                    debug!("Status changing to: {:?}", s);
+                    *status_w.write().unwrap() = s.clone();
+                    if let Some(cb) = on_status_w.lock().unwrap().as_ref() {
+                        cb(s);
                     }
-                } else {
-                    debug!("Initial pending image superseded, skipping");
-                    set_status(IpcStatus::Ready);
-                }
-            } else {
+                };
+
+                let mut stream = match connect_with_retry(port, 30, 500) {
+                    Some(s) => s,
+                    None => {
+                        error!("Failed to connect to daemon on port {port} after retries");
+                        set_status(IpcStatus::Error);
+                        return;
+                    }
+                };
+
+                let mut active_shm: Option<ActiveShmem> = None;
                 set_status(IpcStatus::Ready);
-            }
 
-            while let Ok(req) = rx.recv() {
-                match req {
-                    WorkerRequest::ImagePending => {
-                        let Some(pending) = pending_image.lock().unwrap().take() else {
-                            continue;
-                        };
-                        let current = image_token.load(std::sync::atomic::Ordering::Acquire);
-                        if pending.token < current {
-                            debug!(
-                                "Skipping stale embedding (token {} < {})",
-                                pending.token, current
-                            );
-                            continue;
-                        }
-                        set_status(IpcStatus::Busy);
-                        match ipc_send_image(&mut stream, &pending.buffer) {
-                            Ok(shm) => {
-                                if pending.token
-                                    == image_token.load(std::sync::atomic::Ordering::Acquire)
-                                {
-                                    active_shm = Some(shm);
-                                    set_status(IpcStatus::Ready);
-                                } else {
-                                    debug!("Embedding done but image changed, discarding");
-                                    set_status(IpcStatus::Busy);
+                while let Ok(req) = rx.recv() {
+                    debug!("request received: {:#?}", req);
+                    match req {
+                        WorkerRequest::ImagePending => {
+                            let Some(pending) = pending_image.lock().unwrap().take() else {
+                                debug!("image lock taken");
+                                continue;
+                            };
+                            let current = image_token.load(std::sync::atomic::Ordering::Acquire);
+                            if pending.token < current {
+                                debug!(
+                                    "Skipping stale embedding (token {} < {})",
+                                    pending.token, current
+                                );
+                                continue;
+                            }
+                            set_status(IpcStatus::Busy);
+                            match ipc_send_image(&mut stream, &pending.buffer) {
+                                Ok(shm) => {
+                                    if pending.token
+                                        == image_token.load(std::sync::atomic::Ordering::Acquire)
+                                    {
+                                        active_shm = Some(shm);
+                                        set_status(IpcStatus::Ready);
+                                    } else {
+                                        debug!("Embedding done but image changed, discarding");
+                                        set_status(IpcStatus::Busy);
+                                    }
+                                }
+                                Err(e) => {
+                                    error!("send_image failed: {e}");
+                                    set_status(IpcStatus::Error);
                                 }
                             }
-                            Err(e) => {
-                                error!("send_image failed: {e}");
-                                set_status(IpcStatus::Error);
+                        }
+
+                        WorkerRequest::Click { x, y, tx } => {
+                            debug!("click ({x},{y})");
+                            match &active_shm {
+                                None => {
+                                    warn!("Click ignored: no active embedding (image not set yet)");
+                                    let _ = tx.send(None);
+                                }
+                                Some(shm) => match ipc_click(&mut stream, shm, x, y) {
+                                    Ok(result) => {
+                                        let _ = tx.send(result);
+                                    }
+                                    Err(e) => {
+                                        error!("click failed: {e}");
+                                        let _ = tx.send(None);
+                                    }
+                                },
                             }
                         }
-                    }
 
-                    WorkerRequest::Click { x, y, tx } => {
-                        debug!("click ({x},{y})");
-                        match &active_shm {
-                            None => {
-                                warn!("Click ignored: no active embedding (image not set yet)");
-                                let _ = tx.send(None);
+                        WorkerRequest::RectSelect { x1, y1, x2, y2, tx } => {
+                            debug!("rect_select ({x1},{y1})-({x2},{y2})");
+                            match &active_shm {
+                                None => {
+                                    warn!("RectSelect ignored: no active embedding");
+                                    let _ = tx.send(None);
+                                }
+                                Some(shm) => {
+                                    match ipc_rect_select(&mut stream, shm, x1, y1, x2, y2) {
+                                        Ok(result) => {
+                                            let _ = tx.send(result);
+                                        }
+                                        Err(e) => {
+                                            error!("rect_select failed: {e}");
+                                            let _ = tx.send(None);
+                                        }
+                                    }
+                                }
                             }
-                            Some(shm) => match ipc_click(&mut stream, shm, x, y) {
+                        }
+                        WorkerRequest::Search { paths, query, tx } => {
+                            debug!("search ({query})"); // paths...
+                            match ipc_search(&mut stream, paths, query) {
                                 Ok(result) => {
                                     let _ = tx.send(result);
                                 }
                                 Err(e) => {
-                                    error!("click failed: {e}");
+                                    error!("semantic image search failed: {e}");
                                     let _ = tx.send(None);
                                 }
-                            },
-                        }
-                    }
-
-                    WorkerRequest::RectSelect { x1, y1, x2, y2, tx } => {
-                        debug!("rect_select ({x1},{y1})-({x2},{y2})");
-                        match &active_shm {
-                            None => {
-                                warn!("RectSelect ignored: no active embedding");
-                                let _ = tx.send(None);
-                            }
-                            Some(shm) => match ipc_rect_select(&mut stream, shm, x1, y1, x2, y2) {
-                                Ok(result) => {
-                                    let _ = tx.send(result);
-                                }
-                                Err(e) => {
-                                    error!("rect_select failed: {e}");
-                                    let _ = tx.send(None);
-                                }
-                            },
-                        }
-                    }
-                    WorkerRequest::Search { paths, query, tx } => {
-                        debug!("search ({query})"); // paths...
-                        match ipc_search(&mut stream, paths, query) {
-                            Ok(result) => {
-                                let _ = tx.send(result);
-                            }
-                            Err(e) => {
-                                error!("semantic image search failed: {e}");
-                                let _ = tx.send(None);
                             }
                         }
+                        WorkerRequest::Shutdown => break,
                     }
-                    WorkerRequest::Shutdown => break,
                 }
-            }
 
-            let _ = send_msg(&mut stream, &IpcCmd::Shutdown);
-        });
+                let _ = send_msg(&mut stream, &IpcCmd::Shutdown);
+            })
+            .expect("Failed to spawn worker thread");
     }
 
     fn stop(&self) {
@@ -352,6 +342,7 @@ impl Backend for DaemonBackend {
     }
 
     fn set_image(&self, buf: &SharedPixelBuffer<Rgba8Pixel>) -> bool {
+        debug!("set_image inside ipc daemon");
         let token = self
             .image_token
             .fetch_add(1, std::sync::atomic::Ordering::AcqRel)
@@ -363,7 +354,14 @@ impl Backend for DaemonBackend {
         });
 
         match self.tx.try_send(WorkerRequest::ImagePending) {
-            Ok(_) | Err(mpsc::TrySendError::Full(_)) => true,
+            Ok(_) => {
+                debug!("image pending request is successful");
+                true
+            }
+            Err(mpsc::TrySendError::Full(_)) => {
+                warn!("Worker queue full, image pending in mutex");
+                false
+            }
             Err(mpsc::TrySendError::Disconnected(_)) => {
                 error!("IPC worker thread disconnected");
                 false

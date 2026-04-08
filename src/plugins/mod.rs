@@ -61,7 +61,9 @@ impl Plugin {
         auto_start: bool,
     ) -> Option<Self> {
         let backend: Box<dyn Backend> = match manifest.backend {
-            BackendKind::Daemon => Box::new(DaemonBackend::new(&manifest, &dir) as Arc<_>),
+            BackendKind::Daemon => {
+                Box::new(DaemonBackend::new(id.clone(), &manifest, &dir) as Arc<_>)
+            }
             BackendKind::SharedLib => Box::new(SharedLibBackend::new(&manifest, &dir)?),
         };
         let plugin = Self {
