@@ -5,6 +5,7 @@ use directories::ProjectDirs;
 use log::error;
 use serde::{Deserialize, Serialize};
 use slint::ComponentHandle;
+use slint::Model;
 use std::cell::RefCell;
 use std::fs::{self, File};
 use std::path::PathBuf;
@@ -13,6 +14,7 @@ use std::rc::Rc;
 pub fn register(window: &MainWindow, app_controller: Rc<RefCell<AppController>>) {
     log::debug!("Registering settings presenter");
     let sg = window.global::<SettingsState>();
+
     let acc = app_controller.clone();
     sg.on_clear_image_cache(move || {
         acc.borrow().loader.clear_disk_cache();
@@ -73,25 +75,58 @@ pub fn register(window: &MainWindow, app_controller: Rc<RefCell<AppController>>)
     });
 
     let acc = app_controller.clone();
-    sg.on_toggle_plugin_enable(move |id| {
-        if let Some(plugin) = acc.borrow().loader.plugin_manager.get_plugin_by_id(&id) {
+    sg.on_toggle_plugin_enable(move |id, idx| {
+        let plugins_manager = acc.borrow().loader.plugin_manager.clone();
+        let is_now_running = if let Some(plugin) = plugins_manager.get_plugin_by_id(&id) {
             if plugin.is_running() {
                 plugin.stop();
+                false
             } else {
                 plugin.start();
+                true
             }
+        } else {
+            return;
         };
+
+        let weak_ui = acc.borrow().window_weak.clone();
+        slint::invoke_from_event_loop(move || {
+            if let Some(ui) = weak_ui.upgrade() {
+                let state = ui.global::<SettingsState>();
+                let model = state.get_plugins();
+                if let Some(mut p) = model.row_data(idx as usize) {
+                    p.enabled = is_now_running;
+                    model.set_row_data(idx as usize, p);
+                }
+            }
+        })
+        .unwrap();
     });
 
-    sg.on_toggle_plugin_auto_start(move |id| {
+    let acc = app_controller.clone();
+    sg.on_toggle_plugin_auto_start(move |id, idx| {
         let mut settings = read_settings().unwrap_or(Settings { plugins: vec![] });
-        if let Some(plugin) = settings.plugins.iter_mut().find(|p| *p.id == *id) {
-            plugin.auto_start = !plugin.auto_start;
+        if let Some(plugin_settings) = settings.plugins.iter_mut().find(|p| p.id == id.as_str()) {
+            plugin_settings.auto_start = !plugin_settings.auto_start;
+            let new_auto_start = plugin_settings.auto_start;
 
             if let Err(e) = write_settings(&settings) {
                 error!("Failed to save auto-start preference: {e}");
+                return;
             }
-        } else {
+
+            let weak_ui = acc.borrow().window_weak.clone();
+            slint::invoke_from_event_loop(move || {
+                if let Some(ui) = weak_ui.upgrade() {
+                    let state = ui.global::<SettingsState>();
+                    let model = state.get_plugins();
+                    if let Some(mut p) = model.row_data(idx as usize) {
+                        p.auto_start = new_auto_start;
+                        model.set_row_data(idx as usize, p);
+                    }
+                }
+            })
+            .unwrap();
         }
     });
 }

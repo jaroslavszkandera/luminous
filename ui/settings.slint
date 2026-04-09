@@ -16,9 +16,8 @@ export global SettingsState {
 
     in property <[Plugin]> plugins;
     in property <[StandardListViewItem]> plugin-names;
-    callback toggle-plugin-enable(string);
-    callback toggle-plugin-auto-start(string);
-    // callback get-plugin-info(); // TODO
+    callback toggle-plugin-enable(string, int);
+    callback toggle-plugin-auto-start(string, int);
 }
 
 export component ClearImageCacheDialog inherits Dialog {
@@ -123,6 +122,10 @@ export component Settings inherits PopupWindow {
                             background: Palette.background;
                             plugins-list := StandardListView {
                                 model: SettingsState.plugin-names;
+                                current-item-changed(index) => {
+                                    toggle-plugin-enable-btn.checked = SettingsState.plugins[index].enabled;
+                                    toggle-plugin-auto-start-btn.checked = SettingsState.plugins[index].auto-start;
+                                }
                             }
                         }
 
@@ -131,26 +134,25 @@ export component Settings inherits PopupWindow {
                             VerticalLayout {
                                 spacing: 5px;
                                 alignment: start;
-                                Button {
+                                toggle-plugin-enable-btn := Button {
                                     text: "Enable/Disable";
                                     checkable: true;
                                     enabled: plugins-list.current-item != -1;
-                                    // TODO: handle states, block button with starting/stopping
-                                    checked: plugins-list.current-item != -1 ? SettingsState.plugins[plugins-list.current-item].enabled : false;
                                     clicked => {
-                                        SettingsState.plugins[plugins-list.current-item].enabled = !SettingsState.plugins[plugins-list.current-item].enabled;
-                                        SettingsState.toggle-plugin-enable(SettingsState.plugins[plugins-list.current-item].id);
+                                        SettingsState.toggle-plugin-enable(
+                                            SettingsState.plugins[plugins-list.current-item].id,
+                                            plugins-list.current-item);
                                     }
                                 }
 
-                                Button {
+                                toggle-plugin-auto-start-btn := Button {
                                     text: "Auto start";
                                     checkable: true;
                                     enabled: plugins-list.current-item != -1;
-                                    checked: plugins-list.current-item != -1 ? SettingsState.plugins[plugins-list.current-item].auto-start : false;
                                     clicked => {
-                                        SettingsState.plugins[plugins-list.current-item].auto-start = !SettingsState.plugins[plugins-list.current-item].auto-start;
-                                        SettingsState.toggle-plugin-auto-start(SettingsState.plugins[plugins-list.current-item].id);
+                                        SettingsState.toggle-plugin-auto-start(
+                                            SettingsState.plugins[plugins-list.current-item].id,
+                                            plugins-list.current-item);
                                     }
                                 }
 
@@ -158,7 +160,7 @@ export component Settings inherits PopupWindow {
                                     text: "Info";
                                     enabled: plugins-list.current-item != -1;
                                     clicked => {
-                                        debug("Showing info for: " + SettingsState.plugins[plugins-list.current-item].id + " (unimplemented!)");
+                                        debug("Showing info for: " + SettingsState.plugins[plugins-list.current-item].id);
                                     }
                                 }
                             }
