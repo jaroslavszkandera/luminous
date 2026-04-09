@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 bytemuck = "1.25.0"
+chrono = "0.4.44"
 clap = { version = "4.5.57", default-features = false, features = [
   "std",
   "derive",
@@ -12,6 +13,7 @@ clap = { version = "4.5.57", default-features = false, features = [
   "usage",
   "error-context",
 ] }
+color-print = "0.3.7"
 csscolorparser = "0.8.2"
 dashmap = { version = "6.1.0", features = ["rayon"] }
 directories = "6.0.0"
