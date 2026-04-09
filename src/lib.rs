@@ -83,7 +83,7 @@ impl AppController {
         let weak_full = window_weak.clone();
         let pm = Arc::clone(&plugin_manager);
         loader.on_full_ready(move |index, buffer| {
-            if let Some(plugin) = pm.get_plugin_by_id("SAM_2") {
+            if let Some(plugin) = pm.get_plugin_by_id("SAM2") {
                 let buf = buffer.clone();
                 std::thread::spawn(move || {
                     plugin.set_interactive_image(&buf);
@@ -403,7 +403,7 @@ impl AppController {
 
         // FIX: dangerous, freezes the application
         // if let Some(plugin) = loader.plugin_manager.get_interactive_plugin() {
-        if let Some(plugin) = loader.plugin_manager.get_plugin_by_id("SAM_2") {
+        if let Some(plugin) = loader.plugin_manager.get_plugin_by_id("SAM2") {
             if x2 < 0 || y2 < 0 {
                 if let Some(mask) = plugin.interactive_click(x1 as u32, y1 as u32) {
                     let _ = weak.upgrade_in_event_loop(move |ui| {
@@ -449,7 +449,7 @@ impl AppController {
         let plugin_manager = loader.plugin_manager.clone();
         let curr_active_buffer = loader.get_curr_active_buffer();
         loader.pool.spawn(move || {
-            if let Some(plugin) = plugin_manager.get_plugin_by_id("SAM_2") {
+            if let Some(plugin) = plugin_manager.get_plugin_by_id("SAM2") {
                 if let Some(buf) = curr_active_buffer {
                     plugin.set_interactive_image(&buf);
                 }

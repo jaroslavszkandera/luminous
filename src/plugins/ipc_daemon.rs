@@ -234,7 +234,7 @@ impl Backend for DaemonBackend {
                 set_status(IpcStatus::Ready);
 
                 while let Ok(req) = rx.recv() {
-                    debug!("request received: {:#?}", req);
+                    // debug!("request received: {:#?}", req);
                     match req {
                         WorkerRequest::ImagePending => {
                             let Some(pending) = pending_image.lock().unwrap().take() else {
