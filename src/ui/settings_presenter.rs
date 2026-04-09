@@ -34,7 +34,8 @@ pub fn register(window: &MainWindow, app_controller: Rc<RefCell<AppController>>)
 
     let acc = app_controller.clone();
     sg.on_settings_opened(move || {
-        let plugins = acc.borrow().loader.plugin_manager.get_all_plugins();
+        let plugins_manager = acc.borrow().loader.plugin_manager.clone();
+        let plugins = plugins_manager.get_all_plugins();
         let plugin_ids: Vec<String> = plugins.iter().map(|p| p.id.clone()).collect();
 
         let mut settings = read_settings().unwrap_or(Settings { plugins: vec![] });
@@ -52,7 +53,9 @@ pub fn register(window: &MainWindow, app_controller: Rc<RefCell<AppController>>)
                     .into_iter()
                     .map(|p| crate::Plugin {
                         id: p.id.clone().into(),
-                        enabled: p.auto_start, // TODO: check plugin_manager
+                        enabled: plugins_manager
+                            .get_plugin_by_id(&p.id)
+                            .map_or(false, |plugin| plugin.is_running()),
                         auto_start: p.auto_start,
                     })
                     .collect();

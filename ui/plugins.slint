@@ -1,15 +1,23 @@
 import { Palette, Button, LineEdit } from "std-widgets.slint";
 
+// TODO: state, turn off/on, auto-start (bool), show folder, capabilities, version, Optional<extensions>
+export struct Plugin {
+    id: string,
+    enabled: bool, // TODO: replace with PluginControl
+    auto-start: bool,
+}
+
 enum PluginControl {
     Start,
     Starting,
     Stop,
     Stopping,
 }
+
 export component InteractivePlugin inherits Rectangle {
-    property <string> label: "Interactive";
+    property <Plugin> plugin;
     property <string> status: "Unknown";
-    property <bool> running: false;
+    property <bool> running: false; // TODO: replace with plugin.enabled
     property <bool> enable-control: control == PluginControl.Start || control == PluginControl.Stop;
     in-out property <bool> click-active: false;
     in-out property <bool> select-active: false;
@@ -46,7 +54,7 @@ export component InteractivePlugin inherits Rectangle {
         HorizontalLayout {
             VerticalLayout {
                 Text {
-                    text: label;
+                    text: plugin.id;
                 }
 
                 Text {

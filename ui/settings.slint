@@ -6,13 +6,7 @@ import {
     ListView,
     StandardListView,
 } from "std-widgets.slint";
-
-// TODO: state, turn off/on, auto-start (bool), show folder, capabilities, version, Optional<extensions>
-struct Plugin {
-    id: string,
-    enabled: bool,
-    auto-start: bool,
-}
+import { Plugin } from "plugins.slint";
 
 export global SettingsState {
     in property <int> image-cache-count;

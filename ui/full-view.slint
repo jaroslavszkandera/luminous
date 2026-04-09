@@ -340,9 +340,13 @@ export component FullView inherits TouchArea {
 
                 Tab {
                     title: "Plugins";
-                    interactive-plugin := InteractivePlugin {
-                        click-active: root.click-active;
-                        select-active: root.select-active;
+                    VerticalLayout {
+                        interactive-plugin := InteractivePlugin {
+                            click-active: root.click-active;
+                            select-active: root.select-active;
+                        }
+
+                        Rectangle { }
                     }
                 }
             }
