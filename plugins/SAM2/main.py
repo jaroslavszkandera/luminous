@@ -154,6 +154,7 @@ def handle_connection(conn: socket.socket, addr: tuple, worker: Worker) -> None:
             if cmd is None:
                 log.info("Host disconnected.")
                 break
+            log.debug(f"{cmd=}")
 
             try:
                 action = cmd.get("action")
@@ -204,7 +205,7 @@ def handle_connection(conn: socket.socket, addr: tuple, worker: Worker) -> None:
 
 def main() -> None:
     log.basicConfig(
-        format="[SAM]:%(asctime)s:%(levelname)s:%(message)s", level=log.DEBUG
+        format="[SAM2]:%(asctime)s:%(levelname)s:%(message)s", level=log.DEBUG
     )
     log.info("Init...")
     device = "cuda" if torch.cuda.is_available() else "cpu"

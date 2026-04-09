@@ -1,7 +1,7 @@
 [project]
-name = "segment-anything"
+name = "SAM_2"
 version = "0.1.0"
-description = "Segment Anything Model for Interactive Segmentation"
+description = "Segment Anything Model 2 (SAM 2) for Interactive Segmentation"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
