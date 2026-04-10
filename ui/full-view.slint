@@ -28,11 +28,6 @@ export component FullView inherits TouchArea {
 
     callback exit-full-view();
 
-    // Plugins
-    // TODO: make it better
-    // callback run(bool);
-    // callback interactive-text-submitted(string);
-    // callback update-run-state();
     in-out property <bool> click-active;
     in-out property <bool> select-active;
 
@@ -42,11 +37,14 @@ export component FullView inherits TouchArea {
     property <length> last-coords-y;
     property <length> start-drag-x;
     property <length> start-drag-y;
-    property <length> start-img-x;
-    property <length> start-img-y;
+    property <float> start-pan-x: 0.5;
+    property <float> start-pan-y: 0.5;
     property <length> side-panel-width: 240px;
     property <bool> dragging: false;
     property <float> pinch-initial-scale: 1.0;
+
+    property <float> pan-pos-x: 0.5;
+    property <float> pan-pos-y: 0.5;
 
     property <float> img-render-scale: (FullViewState.curr-image.width > 0 && FullViewState.curr-image.height > 0) ? Math.min(img-el.width / FullViewState.curr-image.width, img-el.height / FullViewState.curr-image.height) / 1px : 1.0;
 
@@ -75,10 +73,8 @@ export component FullView inherits TouchArea {
 
     public function reset-zoom() {
         zoom-scale = 1;
-        img-el.width = img-rect.width;
-        img-el.height = img-rect.height;
-        img-el.x = 0;
-        img-el.y = 0;
+        pan-pos-x = 0.5;
+        pan-pos-y = 0.5;
     }
 
     function zoom(scale-delta: float, center-x: length, center-y: length) {
@@ -89,12 +85,25 @@ export component FullView inherits TouchArea {
         }
         let rel-x = center-x - img-rect.x;
         let rel-y = center-y - img-rect.y;
+        let old-img-w = img-rect.width * old-scale;
+        let old-img-h = img-rect.height * old-scale;
+        let old-x = (img-rect.width - old-img-w) * pan-pos-x;
+        let old-y = (img-rect.height - old-img-h) * pan-pos-y;
+
         let ratio = new-scale / old-scale;
+        let new-img-w = img-rect.width * new-scale;
+        let new-img-h = img-rect.height * new-scale;
+
+        let new-x = rel-x - (rel-x - old-x) * ratio;
+        let new-y = rel-y - (rel-y - old-y) * ratio;
+
         zoom-scale = new-scale;
-        img-el.width = img-el.width * ratio;
-        img-el.height = img-el.height * ratio;
-        img-el.x = rel-x - (rel-x - img-el.x) * ratio;
-        img-el.y = rel-y - (rel-y - img-el.y) * ratio;
+        if (new-img-w > img-rect.width) {
+            pan-pos-x = clamp(new-x / (img-rect.width - new-img-w), 0, 1);
+        }
+        if (new-img-h > img-rect.height) {
+            pan-pos-y = clamp(new-y / (img-rect.height - new-img-h), 0, 1);
+        }
     }
 
     function zoom-to-selection() {
@@ -121,8 +130,8 @@ export component FullView inherits TouchArea {
             if (event.kind == PointerEventKind.down) {
                 root.start-drag-x = root.mouse-x;
                 root.start-drag-y = root.mouse-y;
-                root.start-img-x = img-el.x;
-                root.start-img-y = img-el.y;
+                root.start-pan-x = root.pan-pos-x;
+                root.start-pan-y = root.pan-pos-y;
                 root.dragging = true;
             } else if (event.kind == PointerEventKind.up) {
                 root.dragging = false;
@@ -138,13 +147,9 @@ export component FullView inherits TouchArea {
                     if FullViewState.curr-image.width > 0 {
                         let coords = root.to-image-coords(root.mouse-x, root.mouse-y);
                         if interactive-plugin.click-active {
-                            debug("click send");
                             FullViewState.request-segmentation(coords.x, coords.y, -1, -1);
                         } else if interactive-plugin.select-active && coords.x != coords.x + select-rect.selection.w / 1px {
-                            debug("select send");
                             select-rect.confirmed();
-                        } else {
-                            debug("nothing send");
                         }
                     }
                     select-rect.hide();
@@ -155,8 +160,16 @@ export component FullView inherits TouchArea {
 
     moved => {
         if (dragging && zoom-scale > 1.0) {
-            img-el.x = root.start-img-x + (root.mouse-x - root.start-drag-x);
-            img-el.y = root.start-img-y + (root.mouse-y - root.start-drag-y);
+            let dx = root.mouse-x - root.start-drag-x;
+            let dy = root.mouse-y - root.start-drag-y;
+            let overflow-x = img-rect.width * (zoom-scale - 1);
+            let overflow-y = img-rect.height * (zoom-scale - 1);
+            if (overflow-x > 0px) {
+                root.pan-pos-x = clamp(root.start-pan-x - dx / overflow-x, 0, 1);
+            }
+            if (overflow-y > 0px) {
+                root.pan-pos-y = clamp(root.start-pan-y - dy / overflow-y, 0, 1);
+            }
         }
         if (root.pressed && !dragging) {
             select-rect.update-selection(
@@ -192,10 +205,10 @@ export component FullView inherits TouchArea {
             img-el := Image {
                 source: FullViewState.curr-image;
                 image-fit: contain;
-                width: parent.width;
-                height: parent.height;
-                x: 0px;
-                y: 0px;
+                width: parent.width * root.zoom-scale;
+                height: parent.height * root.zoom-scale;
+                x: (parent.width - self.width) * root.pan-pos-x;
+                y: (parent.height - self.height) * root.pan-pos-y;
             }
 
             Image {
@@ -213,7 +226,6 @@ export component FullView inherits TouchArea {
                 y: parent.height - self.height;
                 width: parent.width;
                 background: Palette.background.with-alpha(50%);
-
                 Text {
                     x: 5px;
                     text: (FullViewState.curr-image-index + 1) + "/" + total-images;
@@ -235,7 +247,6 @@ export component FullView inherits TouchArea {
                 img-offset-x: root.img-vis-x;
                 img-offset-y: root.img-vis-y;
                 img-scale: root.img-render-scale;
-
                 confirmed => {
                     if (select-rect.selection.w > 2px && select-rect.selection.h > 2px) {
                         if interactive-plugin.select-active {
@@ -314,7 +325,7 @@ export component FullView inherits TouchArea {
             side-width <=> root.side-panel-width;
 
             TabWidget {
-                current-index: 1; // Debug exif
+                current-index: 0;
                 Tab {
                     title: "Edit";
                     EditsPanel {
