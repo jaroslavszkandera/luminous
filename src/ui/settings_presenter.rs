@@ -116,32 +116,17 @@ pub fn register(window: &MainWindow, app_controller: Rc<RefCell<AppController>>)
     });
 
     let acc = app_controller.clone();
-    sg.on_toggle_plugin_enable(move |id, idx| {
+    sg.on_toggle_plugin_enable(move |id| {
         let plugins_manager = acc.borrow().loader.plugin_manager.clone();
-        let is_now_running = if let Some(plugin) = plugins_manager.get_plugin_by_id(&id) {
+        if let Some(plugin) = plugins_manager.get_plugin_by_id(&id) {
             if plugin.is_running() {
                 plugin.stop(5000, false);
-                false
             } else {
                 plugin.start();
-                true
             }
         } else {
             return;
         };
-
-        let weak_ui = acc.borrow().window_weak.clone();
-        slint::invoke_from_event_loop(move || {
-            if let Some(ui) = weak_ui.upgrade() {
-                let state = ui.global::<SettingsState>();
-                let model = state.get_plugins();
-                if let Some(mut p) = model.row_data(idx as usize) {
-                    p.enabled = is_now_running;
-                    model.set_row_data(idx as usize, p);
-                }
-            }
-        })
-        .unwrap();
     });
 
     let acc = app_controller.clone();

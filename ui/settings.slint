@@ -16,7 +16,7 @@ export global SettingsState {
 
     in property <[Plugin]> plugins;
     in property <[StandardListViewItem]> plugin-names;
-    callback toggle-plugin-enable(string, int);
+    callback toggle-plugin-enable(string);
     callback toggle-plugin-auto-start(string, int);
 }
 
@@ -123,7 +123,7 @@ export component Settings inherits PopupWindow {
                             plugins-list := StandardListView {
                                 model: SettingsState.plugin-names;
                                 current-item-changed(index) => {
-                                    toggle-plugin-enable-btn.checked = SettingsState.plugins[index].enabled;
+                                    toggle-plugin-enable-btn.checked = SettingsState.plugins[index].state == "Disable";
                                     toggle-plugin-auto-start-btn.checked = SettingsState.plugins[index].auto-start;
                                 }
                             }
@@ -132,35 +132,36 @@ export component Settings inherits PopupWindow {
                         Rectangle {
                             width: 200px;
                             VerticalLayout {
+                                property <int> idx: plugins-list.current-item;
                                 spacing: 5px;
                                 alignment: start;
                                 toggle-plugin-enable-btn := Button {
-                                    text: plugins-list.current-item == -1 ? "Enable" : SettingsState.plugins[plugins-list.current-item].state;
+                                    text: {
+                                        idx == -1 ? "Enable" : SettingsState.plugins[idx].state
+                                    };
                                     checkable: true;
-                                    enabled: plugins-list.current-item != -1 && !SettingsState.plugins[plugins-list.current-item].is_busy;
+                                    enabled: idx != -1 && !SettingsState.plugins[idx].is_busy;
                                     clicked => {
                                         SettingsState.toggle-plugin-enable(
-                                            SettingsState.plugins[plugins-list.current-item].id,
-                                            plugins-list.current-item);
+                                            SettingsState.plugins[idx].id);
                                     }
                                 }
 
                                 toggle-plugin-auto-start-btn := Button {
                                     text: "Auto start";
                                     checkable: true;
-                                    enabled: plugins-list.current-item != -1;
+                                    enabled: idx != -1;
                                     clicked => {
                                         SettingsState.toggle-plugin-auto-start(
-                                            SettingsState.plugins[plugins-list.current-item].id,
-                                            plugins-list.current-item);
+                                            SettingsState.plugins[idx].id, idx);
                                     }
                                 }
 
                                 Button {
                                     text: "Info";
-                                    enabled: plugins-list.current-item != -1;
+                                    enabled: idx != -1;
                                     clicked => {
-                                        debug("Showing info for: " + SettingsState.plugins[plugins-list.current-item].id);
+                                        debug("Showing info for: " + SettingsState.plugins[idx].id);
                                     }
                                 }
                             }
