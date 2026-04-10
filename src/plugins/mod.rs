@@ -2,7 +2,7 @@ pub mod ipc_daemon;
 pub mod manifest;
 pub mod shared_lib;
 
-pub use ipc_daemon::IpcStatus;
+pub use ipc_daemon::{IpcStatus, PluginControl};
 pub use manifest::{BackendKind, PluginCapability, PluginManifest, load_manifest};
 
 use ipc_daemon::DaemonBackend;
@@ -45,6 +45,11 @@ pub trait Backend: Send + Sync {
     }
     /// Callback invoked whenever the backend status changes
     fn on_status_change(&self, _cb: Box<dyn Fn(IpcStatus) + Send + Sync>) {}
+    fn get_state(&self) -> PluginControl {
+        PluginControl::Enable
+    }
+    /// Callback invoked whenever the backend state changes (Enable, Starting, Disable, Stopping)
+    fn on_state_change(&self, _cb: Box<dyn Fn(PluginControl) + Send + Sync>) {}
 }
 
 pub struct Plugin {
@@ -149,6 +154,17 @@ impl Plugin {
     {
         self.backend.on_status_change(Box::new(cb));
     }
+
+    pub fn get_state(&self) -> PluginControl {
+        self.backend.get_state()
+    }
+
+    pub fn on_state_change<F>(&self, cb: F)
+    where
+        F: Fn(PluginControl) + Send + Sync + 'static,
+    {
+        self.backend.on_state_change(Box::new(cb));
+    }
 }
 
 impl Backend for Arc<DaemonBackend> {
@@ -181,6 +197,12 @@ impl Backend for Arc<DaemonBackend> {
     }
     fn on_status_change(&self, cb: Box<dyn Fn(IpcStatus) + Send + Sync>) {
         DaemonBackend::on_status_change(self, move |s| cb(s));
+    }
+    fn get_state(&self) -> PluginControl {
+        DaemonBackend::get_state(&self)
+    }
+    fn on_state_change(&self, cb: Box<dyn Fn(PluginControl) + Send + Sync>) {
+        DaemonBackend::on_state_change(self, move |s| cb(s));
     }
 }
 

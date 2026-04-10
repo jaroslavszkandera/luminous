@@ -34,6 +34,43 @@ pub fn register(window: &MainWindow, app_controller: Rc<RefCell<AppController>>)
         .unwrap();
     });
 
+    let plugins = app_controller
+        .borrow()
+        .loader
+        .plugin_manager
+        .get_all_plugins();
+    for plugin in plugins {
+        let id = plugin.id.clone();
+
+        let weak_ui = app_controller.borrow().window_weak.clone();
+        plugin.on_state_change(move |state| {
+            let id_clone = id.clone();
+            let state_str = state.to_str().to_string();
+            let is_busy = state_str == "Starting" || state_str == "Stopping";
+            let is_enabled = state_str == "Enable" || state_str == "Starting";
+
+            let weak_ui_c = weak_ui.clone();
+            let _ = slint::invoke_from_event_loop(move || {
+                if let Some(ui) = weak_ui_c.upgrade() {
+                    let g = ui.global::<SettingsState>();
+                    let model = g.get_plugins();
+
+                    for i in 0..model.row_count() {
+                        if let Some(mut p) = model.row_data(i) {
+                            if p.id == id_clone {
+                                p.state = state_str.clone().into();
+                                p.is_busy = is_busy;
+                                p.enabled = is_enabled;
+                                model.set_row_data(i, p);
+                                break;
+                            }
+                        }
+                    }
+                }
+            });
+        });
+    }
+
     let acc = app_controller.clone();
     sg.on_settings_opened(move || {
         let plugins_manager = acc.borrow().loader.plugin_manager.clone();
@@ -49,16 +86,20 @@ pub fn register(window: &MainWindow, app_controller: Rc<RefCell<AppController>>)
         slint::invoke_from_event_loop(move || {
             if let Some(ui) = weak_ui.upgrade() {
                 let state = ui.global::<SettingsState>();
-
                 let plugins_vec: Vec<crate::Plugin> = settings
                     .plugins
                     .into_iter()
-                    .map(|p| crate::Plugin {
-                        id: p.id.clone().into(),
-                        enabled: plugins_manager
-                            .get_plugin_by_id(&p.id)
-                            .map_or(false, |plugin| plugin.is_running()),
-                        auto_start: p.auto_start,
+                    .filter_map(|p| {
+                        let plugin = plugins_manager.get_plugin_by_id(&p.id)?;
+                        let state_str = plugin.get_state().to_str();
+
+                        Some(crate::Plugin {
+                            id: p.id.into(),
+                            enabled: plugin.is_running(),
+                            auto_start: p.auto_start,
+                            state: state_str.into(),
+                            is_busy: state_str == "Starting" || state_str == "Stopping",
+                        })
                     })
                     .collect();
 

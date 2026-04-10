@@ -135,9 +135,9 @@ export component Settings inherits PopupWindow {
                                 spacing: 5px;
                                 alignment: start;
                                 toggle-plugin-enable-btn := Button {
-                                    text: "Enable/Disable";
+                                    text: plugins-list.current-item == -1 ? "Enable" : SettingsState.plugins[plugins-list.current-item].state;
                                     checkable: true;
-                                    enabled: plugins-list.current-item != -1;
+                                    enabled: plugins-list.current-item != -1 && !SettingsState.plugins[plugins-list.current-item].is_busy;
                                     clicked => {
                                         SettingsState.toggle-plugin-enable(
                                             SettingsState.plugins[plugins-list.current-item].id,

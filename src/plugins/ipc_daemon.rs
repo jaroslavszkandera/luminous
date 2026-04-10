@@ -13,6 +13,25 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::{Arc, Mutex, RwLock};
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum PluginControl {
+    Enable, // Can be enabled
+    Starting,
+    Disable, // Can be disabled
+    Stopping,
+}
+
+impl PluginControl {
+    pub fn to_str(&self) -> &'static str {
+        match self {
+            Self::Enable => "Enable",
+            Self::Starting => "Starting",
+            Self::Disable => "Disable",
+            Self::Stopping => "Stopping",
+        }
+    }
+}
+
 #[derive(Serialize, Debug)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub(crate) enum IpcCmd {
@@ -116,6 +135,8 @@ pub struct DaemonBackend {
     image_token: Arc<std::sync::atomic::AtomicU32>,
     status: Arc<RwLock<IpcStatus>>,
     on_status_change: Arc<Mutex<Option<Box<dyn Fn(IpcStatus) + Send + Sync>>>>,
+    state: Arc<RwLock<PluginControl>>,
+    on_state_change: Arc<Mutex<Option<Box<dyn Fn(PluginControl) + Send + Sync>>>>,
     running: AtomicBool,
 }
 
@@ -124,9 +145,10 @@ impl DaemonBackend {
         let (tx, rx) = mpsc::sync_channel::<WorkerRequest>(1);
 
         let status = Arc::new(RwLock::new(IpcStatus::Init));
-        let on_status_change: Arc<Mutex<Option<Box<dyn Fn(IpcStatus) + Send + Sync>>>> =
-            Arc::new(Mutex::new(None));
-        let pending_image: Arc<Mutex<Option<PendingImage>>> = Arc::new(Mutex::new(None));
+        let on_status_change = Arc::new(Mutex::new(None));
+        let state = Arc::new(RwLock::new(PluginControl::Enable));
+        let on_state_change = Arc::new(Mutex::new(None));
+        let pending_image = Arc::new(Mutex::new(None));
         let image_token = Arc::new(std::sync::atomic::AtomicU32::new(0));
 
         let daemon = Arc::new(Self {
@@ -140,6 +162,8 @@ impl DaemonBackend {
             image_token: image_token.clone(),
             status: status.clone(),
             on_status_change: on_status_change.clone(),
+            state: state.clone(),
+            on_state_change: on_state_change.clone(),
             running: AtomicBool::new(false),
         });
         daemon
@@ -155,11 +179,36 @@ impl DaemonBackend {
     {
         *self.on_status_change.lock().unwrap() = Some(Box::new(cb));
     }
+
+    pub fn state(&self) -> PluginControl {
+        self.state.read().unwrap().clone()
+    }
+
+    pub fn on_state_change<F>(&self, cb: F)
+    where
+        F: Fn(PluginControl) + Send + Sync + 'static,
+    {
+        *self.on_state_change.lock().unwrap() = Some(Box::new(cb));
+    }
+
+    pub fn set_state(&self, state: PluginControl) {
+        debug!("State changing to: {:?}", state);
+
+        {
+            let mut state_lock = self.state.write().unwrap();
+            *state_lock = state.clone();
+        }
+
+        if let Some(cb) = self.on_state_change.lock().unwrap().as_ref() {
+            cb(state);
+        }
+    }
 }
 
 impl Backend for DaemonBackend {
     fn start(&self) {
         info!("Starting {} plugin...", self.id);
+        self.set_state(PluginControl::Enable);
         if self.process.lock().unwrap().is_some() {
             error!(
                 "Plugin already running, not starting {}",
@@ -180,6 +229,7 @@ impl Backend for DaemonBackend {
             rx
         };
 
+        self.set_state(PluginControl::Starting);
         let process = self.manifest.interpreter.as_ref().and_then(|interp| {
             let parts: Vec<&str> = interp.split_whitespace().collect();
             let (&exe, args) = parts.split_first()?;
@@ -202,6 +252,7 @@ impl Backend for DaemonBackend {
                 .ok()
         });
         if process.is_none() {
+            self.set_state(PluginControl::Enable);
             error!("Failed to start daemon: {}", self.manifest.name)
         }
         *self.process.lock().unwrap() = process;
@@ -212,6 +263,8 @@ impl Backend for DaemonBackend {
             .daemon_port
             .expect("Missing daemon port should be handled by manifest parsing.");
 
+        let state_w = self.state.clone();
+        let on_state_w = self.on_state_change.clone();
         let status_w = self.status.clone();
         let on_status_w = self.on_status_change.clone();
         let pending_image = self.pending_image.clone();
@@ -228,6 +281,13 @@ impl Backend for DaemonBackend {
                         cb(s);
                     }
                 };
+                let set_state = |s: PluginControl| {
+                    debug!("State changing to: {:?}", s);
+                    *state_w.write().unwrap() = s.clone();
+                    if let Some(cb) = on_state_w.lock().unwrap().as_ref() {
+                        cb(s);
+                    }
+                };
 
                 let mut stream = match connect_with_retry(port, 30, 500) {
                     Some(s) => s,
@@ -235,9 +295,11 @@ impl Backend for DaemonBackend {
                         error!("Failed to connect to daemon on port {port} after retries");
                         set_status(IpcStatus::Error);
                         *rx_mutex.lock().unwrap() = Some(rx);
+                        set_state(PluginControl::Enable);
                         return;
                     }
                 };
+                set_state(PluginControl::Disable);
 
                 let mut active_shm: Option<ActiveShmem> = None;
                 set_status(IpcStatus::Ready);
@@ -334,6 +396,7 @@ impl Backend for DaemonBackend {
                     }
                 }
 
+                set_state(PluginControl::Enable);
                 let _ = send_msg(&mut stream, &IpcCmd::Shutdown);
                 *rx_mutex.lock().unwrap() = Some(rx);
             })
@@ -342,6 +405,7 @@ impl Backend for DaemonBackend {
 
     fn stop(&self, timeout_ms: u64, wait: bool) {
         debug!("Stopping plugin: {}", self.manifest.name);
+        self.set_state(PluginControl::Stopping);
 
         let _ = self.tx.try_send(WorkerRequest::Shutdown);
 
@@ -383,6 +447,7 @@ impl Backend for DaemonBackend {
             }
         }
 
+        self.set_state(PluginControl::Enable);
         *self.status.write().unwrap() = IpcStatus::NotRunning;
         self.running.store(false, Ordering::SeqCst);
     }
@@ -487,6 +552,14 @@ impl Backend for DaemonBackend {
 
     fn on_status_change(&self, cb: Box<dyn Fn(IpcStatus) + Send + Sync>) {
         *self.on_status_change.lock().unwrap() = Some(cb);
+    }
+
+    fn get_state(&self) -> PluginControl {
+        self.state()
+    }
+
+    fn on_state_change(&self, cb: Box<dyn Fn(PluginControl) + Send + Sync>) {
+        *self.on_state_change.lock().unwrap() = Some(cb);
     }
 }
 

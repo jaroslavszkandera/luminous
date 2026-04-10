@@ -5,6 +5,8 @@ export struct Plugin {
     id: string,
     enabled: bool, // TODO: replace with PluginControl
     auto-start: bool,
+    is_busy: bool,
+    state: string,
 }
 
 enum PluginControl {
