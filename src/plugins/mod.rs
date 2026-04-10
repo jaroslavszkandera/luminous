@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 pub trait Backend: Send + Sync {
     fn start(&self) {}
-    fn stop(&self) {}
+    fn stop(&self, _timeout_ms: u64, _wait: bool) {}
     fn is_running(&self) -> bool {
         false
     }
@@ -82,8 +82,8 @@ impl Plugin {
         self.backend.start();
     }
 
-    pub fn stop(&self) {
-        self.backend.stop();
+    pub fn stop(&self, timeout_ms: u64, wait: bool) {
+        self.backend.stop(timeout_ms, wait);
     }
 
     pub fn is_running(&self) -> bool {
@@ -155,8 +155,8 @@ impl Backend for Arc<DaemonBackend> {
     fn start(&self) {
         DaemonBackend::start(self);
     }
-    fn stop(&self) {
-        DaemonBackend::stop(self);
+    fn stop(&self, timeout_ms: u64, wait: bool) {
+        DaemonBackend::stop(self, timeout_ms, wait);
     }
     fn is_running(&self) -> bool {
         DaemonBackend::is_running(self)

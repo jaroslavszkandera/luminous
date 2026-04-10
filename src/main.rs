@@ -18,7 +18,7 @@ fn main() {
             };
 
             let curr_thread = std::thread::current();
-            let thread_name = curr_thread.name().unwrap_or("---");
+            let thread_name = curr_thread.name().unwrap_or("----");
             let timestamp = chrono::Local::now().format("%T");
 
             writeln!(

@@ -111,7 +111,7 @@ pub struct DaemonBackend {
     dir: PathBuf,
     process: Mutex<Option<Child>>,
     tx: SyncSender<WorkerRequest>,
-    rx: Mutex<Option<Receiver<WorkerRequest>>>,
+    rx: Arc<Mutex<Option<Receiver<WorkerRequest>>>>,
     pending_image: Arc<Mutex<Option<PendingImage>>>,
     image_token: Arc<std::sync::atomic::AtomicU32>,
     status: Arc<RwLock<IpcStatus>>,
@@ -135,7 +135,7 @@ impl DaemonBackend {
             dir: dir.to_path_buf(),
             process: Mutex::new(None),
             tx: tx,
-            rx: Mutex::new(Some(rx)),
+            rx: Arc::new(Mutex::new(Some(rx))),
             pending_image: pending_image.clone(),
             image_token: image_token.clone(),
             status: status.clone(),
@@ -159,17 +159,25 @@ impl DaemonBackend {
 
 impl Backend for DaemonBackend {
     fn start(&self) {
+        info!("Starting {} plugin...", self.id);
         if self.process.lock().unwrap().is_some() {
-            error!("Plugin alredy running, not starting {}", self.manifest.name);
+            error!(
+                "Plugin already running, not starting {}",
+                self.manifest.name
+            );
             return;
         }
-        let Ok(mut rx_guard) = self.rx.lock() else {
-            error!("Plugin channel mutex is already held");
-            return;
-        };
-        let Some(rx) = rx_guard.take() else {
-            debug!("Worker thread already running or rx already taken");
-            return;
+        let rx_mutex = self.rx.clone();
+        let rx = {
+            let Ok(mut rx_guard) = rx_mutex.lock() else {
+                error!("Plugin channel mutex is already held");
+                return;
+            };
+            let Some(rx) = rx_guard.take() else {
+                debug!("Worker thread already running or rx already taken");
+                return;
+            };
+            rx
         };
 
         let process = self.manifest.interpreter.as_ref().and_then(|interp| {
@@ -226,6 +234,7 @@ impl Backend for DaemonBackend {
                     None => {
                         error!("Failed to connect to daemon on port {port} after retries");
                         set_status(IpcStatus::Error);
+                        *rx_mutex.lock().unwrap() = Some(rx);
                         return;
                     }
                 };
@@ -234,7 +243,7 @@ impl Backend for DaemonBackend {
                 set_status(IpcStatus::Ready);
 
                 while let Ok(req) = rx.recv() {
-                    // debug!("request received: {:#?}", req);
+                    log::trace!("request received: {:#?}", req);
                     match req {
                         WorkerRequest::ImagePending => {
                             let Some(pending) = pending_image.lock().unwrap().take() else {
@@ -265,6 +274,7 @@ impl Backend for DaemonBackend {
                                 Err(e) => {
                                     error!("send_image failed: {e}");
                                     set_status(IpcStatus::Error);
+                                    break;
                                 }
                             }
                         }
@@ -325,19 +335,55 @@ impl Backend for DaemonBackend {
                 }
 
                 let _ = send_msg(&mut stream, &IpcCmd::Shutdown);
+                *rx_mutex.lock().unwrap() = Some(rx);
             })
             .expect("Failed to spawn worker thread");
     }
 
-    fn stop(&self) {
+    fn stop(&self, timeout_ms: u64, wait: bool) {
         debug!("Stopping plugin: {}", self.manifest.name);
+
         let _ = self.tx.try_send(WorkerRequest::Shutdown);
+
         if let Some(mut child) = self.process.lock().unwrap().take() {
-            info!("Killing daemon '{}'", self.manifest.name);
-            let _ = child.kill();
-            let _ = child.wait(); // Could block
+            let plugin_name = self.manifest.name.clone();
+
+            let mut cleanup = move || {
+                let timeout = std::time::Duration::from_millis(timeout_ms);
+                let start = std::time::Instant::now();
+
+                loop {
+                    match child.try_wait() {
+                        Ok(Some(status)) => {
+                            debug!("Plugin {} exited: {:?}", plugin_name, status);
+                            break;
+                        }
+                        Ok(None) => {
+                            if start.elapsed() >= timeout {
+                                warn!("Timeout reached for {}. Force killing tree.", plugin_name);
+                                kill_process_group(&child);
+                                let _ = child.wait();
+                                break;
+                            }
+                            std::thread::sleep(std::time::Duration::from_millis(50));
+                        }
+                        Err(_) => {
+                            kill_process_group(&child);
+                            let _ = child.wait();
+                            break;
+                        }
+                    }
+                }
+            };
+
+            if wait {
+                cleanup();
+            } else {
+                std::thread::spawn(cleanup);
+            }
         }
-        *self.status.write().unwrap() = IpcStatus::NotRunning.clone();
+
+        *self.status.write().unwrap() = IpcStatus::NotRunning;
         self.running.store(false, Ordering::SeqCst);
     }
 
@@ -446,11 +492,7 @@ impl Backend for DaemonBackend {
 
 impl Drop for DaemonBackend {
     fn drop(&mut self) {
-        if let Some(mut child) = self.process.lock().unwrap().take() {
-            info!("Killing daemon '{}'", self.manifest.name);
-            let _ = child.kill();
-            let _ = child.wait();
-        }
+        self.stop(200, true);
     }
 }
 
@@ -601,4 +643,37 @@ pub(crate) fn mask_to_rgba_overlay(mask: &[u8]) -> Vec<u8> {
         }
     }
     rgba
+}
+
+fn kill_process_group(child: &std::process::Child) {
+    let pid = child.id();
+    debug!("Attempting to kill process tree for PID: {}", pid);
+
+    let mut sys = sysinfo::System::new();
+    sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+
+    let mut procs_to_kill = Vec::new();
+
+    for (p, proc) in sys.processes() {
+        if let Some(parent_pid) = proc.parent() {
+            if parent_pid.as_u32() == pid {
+                procs_to_kill.push(*p);
+            }
+        }
+    }
+
+    for p in procs_to_kill {
+        if let Some(proc) = sys.process(p) {
+            debug!(
+                "Killing sub-process: {} ({})",
+                proc.name().to_string_lossy(),
+                p
+            );
+            proc.kill();
+        }
+    }
+
+    if let Some(proc) = sys.process(sysinfo::Pid::from_u32(pid)) {
+        proc.kill();
+    }
 }

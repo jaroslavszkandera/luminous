@@ -79,7 +79,7 @@ pub fn register(window: &MainWindow, app_controller: Rc<RefCell<AppController>>)
         let plugins_manager = acc.borrow().loader.plugin_manager.clone();
         let is_now_running = if let Some(plugin) = plugins_manager.get_plugin_by_id(&id) {
             if plugin.is_running() {
-                plugin.stop();
+                plugin.stop(5000, false);
                 false
             } else {
                 plugin.start();
