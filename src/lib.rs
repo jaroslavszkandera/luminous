@@ -311,23 +311,30 @@ impl AppController {
             .collect();
 
         // Second pass with plugins
-        if let Some(search_plugin) = self.loader.plugin_manager.get_search_plugin() {
-            if let Some(semantic_search_paths) =
-                search_plugin.semantic_image_search(&self.scan.paths, &query)
-            {
-                debug!("semantic image search paths: {:?}", semantic_search_paths);
-                let semantic_indices: Vec<usize> = semantic_search_paths
-                    .iter()
-                    .filter_map(|p| self.scan.paths.iter().position(|sp| sp == p))
-                    .collect();
+        // TODO: set deadline for the plugin
+        // WARN: tmp hardcoded
+        if let Some(search_plugin) = self.loader.plugin_manager.get_plugin_by_id("CLIP") {
+            debug!("Available search plugin");
+            if !search_plugin.is_running() {
+                warn!("CLIP plugin is registered but not running.");
+            } else {
+                if let Some(semantic_search_paths) =
+                    search_plugin.semantic_image_search(&self.scan.paths, &query)
+                {
+                    debug!("semantic image search paths: {:?}", semantic_search_paths);
+                    let semantic_indices: Vec<usize> = semantic_search_paths
+                        .iter()
+                        .filter_map(|p| self.scan.paths.iter().position(|sp| sp == p))
+                        .collect();
 
-                let mut combined = self.filtered_indices.clone();
-                for idx in semantic_indices {
-                    if !combined.contains(&idx) {
-                        combined.push(idx);
+                    let mut combined = self.filtered_indices.clone();
+                    for idx in semantic_indices {
+                        if !combined.contains(&idx) {
+                            combined.push(idx);
+                        }
                     }
+                    self.filtered_indices = combined;
                 }
-                self.filtered_indices = combined;
             }
         }
 
