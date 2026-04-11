@@ -1,0 +1,6 @@
+{
+  "name": "HDF5 Encoder Plugin",
+  "version": "0.1.0",
+  "extensions": ["hdf5"],
+  "capabilities": ["encoder"]
+}

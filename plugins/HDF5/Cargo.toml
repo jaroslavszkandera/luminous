@@ -1,0 +1,11 @@
+[package]
+name = "hdf5"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+hdf5-metno = "0.12.4"
+ndarray = "0.17.2"
