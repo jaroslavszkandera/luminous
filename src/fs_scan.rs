@@ -4,13 +4,84 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
-// TMP: red should extension is for testing
-// const SUPPORTED_EXTENSIONS: &[&str; 7] = &["jpg", "jpeg", "png", "bmp", "gif", "webp", "red"];
-
 pub struct ScanResult {
     pub paths: Vec<PathBuf>,
     pub start_index: usize,
     pub is_dir: bool,
+}
+
+pub struct ImageFormats {
+    pub image_formats: HashSet<ImageFormat>,
+}
+
+#[derive(PartialEq, Eq, Hash, Debug)]
+pub struct ImageFormat {
+    pub exts: Vec<String>,
+    pub decoding_support: bool,
+    pub encoding_support: bool,
+}
+
+impl ImageFormats {
+    pub fn new() -> Self {
+        let mut formats = HashSet::new();
+
+        // All formats supported from image crate
+        // TODO: make the formats optional by #![feature(<format>)]
+        let data = vec![
+            (vec!["avif"], true, true),
+            (vec!["bmp"], true, true),
+            (vec!["dds"], true, false),
+            (vec!["ff"], true, false),
+            (vec!["gif"], true, false),
+            (vec!["hdr"], true, false),
+            (vec!["ico"], true, true),
+            (vec!["jpeg", "jpg"], true, true),
+            (vec!["exr"], true, false),
+            (vec!["png"], true, true),
+            (vec!["pnm", "pbm", "pgm", "ppm", "pam"], true, false),
+            (vec!["qoi"], true, true),
+            (vec!["tga"], true, false),
+            (vec!["tif", "tiff"], true, true),
+            (vec!["webp"], true, true),
+        ];
+
+        for (exts, dec, enc) in data {
+            formats.insert(ImageFormat {
+                exts: exts.into_iter().map(String::from).collect(),
+                decoding_support: dec,
+                encoding_support: enc,
+            });
+        }
+
+        ImageFormats {
+            image_formats: formats,
+        }
+    }
+
+    pub fn add_format(&mut self, exts: Vec<&str>, decoding: bool, encoding: bool) {
+        let format = ImageFormat {
+            exts: exts.into_iter().map(|s| s.to_lowercase()).collect(),
+            decoding_support: decoding,
+            encoding_support: encoding,
+        };
+        self.image_formats.insert(format);
+    }
+
+    pub fn get_all_decoding_exts(&self) -> HashSet<String> {
+        self.image_formats
+            .iter()
+            .filter(|f| f.decoding_support)
+            .flat_map(|f| f.exts.iter().cloned())
+            .collect()
+    }
+
+    pub fn get_all_encoding_exts(&self) -> HashSet<String> {
+        self.image_formats
+            .iter()
+            .filter(|f| f.encoding_support)
+            .flat_map(|f| f.exts.iter().cloned())
+            .collect()
+    }
 }
 
 fn is_image(path: &Path, extensions: &HashSet<String>) -> bool {
@@ -40,13 +111,7 @@ pub fn scan(path_str: &str, extra_exts: &[&str]) -> ScanResult {
     let mut starting_index: usize = 0;
     let mut start_img_path: Option<PathBuf> = None;
 
-    let mut extensions: HashSet<String> = [
-        "avif", "bmp", "dds", "exr", "ff", "gif", "hdr", "ico", "jpeg", "jpg", "png", "pnm", "qoi",
-        "tga", "tif", "tiff", "webp",
-    ]
-    .into_iter()
-    .map(String::from)
-    .collect();
+    let mut extensions = ImageFormats::new().get_all_decoding_exts();
 
     for ext in extra_exts {
         extensions.insert(ext.to_lowercase());
