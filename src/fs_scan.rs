@@ -25,33 +25,35 @@ impl ImageFormats {
     pub fn new() -> Self {
         let mut formats = HashSet::new();
 
-        // All formats supported from image crate
-        // TODO: make the formats optional by #![feature(<format>)]
-        let data = vec![
-            (vec!["avif"], true, true),
-            (vec!["bmp"], true, true),
-            (vec!["dds"], true, false),
-            (vec!["ff"], true, false),
-            (vec!["gif"], true, false),
-            (vec!["hdr"], true, false),
-            (vec!["ico"], true, true),
-            (vec!["jpeg", "jpg"], true, true),
-            (vec!["exr"], true, false),
-            (vec!["png"], true, true),
-            (vec!["pnm", "pbm", "pgm", "ppm", "pam"], true, false),
-            (vec!["qoi"], true, true),
-            (vec!["tga"], true, false),
-            (vec!["tif", "tiff"], true, true),
-            (vec!["webp"], true, true),
-        ];
-
-        for (exts, dec, enc) in data {
-            formats.insert(ImageFormat {
-                exts: exts.into_iter().map(String::from).collect(),
-                decoding_support: dec,
-                encoding_support: enc,
-            });
+        macro_rules! add_fmt {
+            ($feature:literal, $exts:expr, $dec:expr, $enc:expr) => {
+                if cfg!(feature = $feature) {
+                    formats.insert(ImageFormat {
+                        exts: $exts.iter().map(|&s| s.to_string()).collect(),
+                        decoding_support: $dec,
+                        encoding_support: $enc,
+                    });
+                }
+            };
         }
+
+        // TODO: test
+        // add_fmt!("avif", ["avif"], false, true);
+        add_fmt!("avif-native", ["avif"], true, true);
+        add_fmt!("bmp", ["bmp"], true, true);
+        add_fmt!("dds", ["dds"], true, false);
+        add_fmt!("ff", ["ff"], true, false);
+        add_fmt!("gif", ["gif"], true, false);
+        add_fmt!("hdr", ["hdr"], true, false);
+        add_fmt!("ico", ["ico"], true, true);
+        add_fmt!("jpeg", ["jpeg", "jpg"], true, true);
+        add_fmt!("exr", ["exr"], true, false);
+        add_fmt!("png", ["png"], true, true);
+        add_fmt!("pnm", ["pnm", "pbm", "pgm", "ppm", "pam"], true, false);
+        add_fmt!("qoi", ["qoi"], true, true);
+        add_fmt!("tga", ["tga"], true, false);
+        add_fmt!("tiff", ["tif", "tiff"], true, true);
+        add_fmt!("webp", ["webp"], true, true);
 
         ImageFormats {
             image_formats: formats,
@@ -112,11 +114,15 @@ pub fn scan(path_str: &str, extra_exts: &[&str]) -> ScanResult {
     let mut start_img_path: Option<PathBuf> = None;
 
     let mut extensions = ImageFormats::new().get_all_decoding_exts();
+    debug!("Active decoding extensions: {:?}", extensions);
 
     for ext in extra_exts {
         extensions.insert(ext.to_lowercase());
     }
-    info!("Supported extensions: {:?}", extensions);
+    debug!(
+        "Active decoding extensions (with plugins): {:?}",
+        extensions
+    );
 
     let scan_dir = if metadata.is_file() {
         if !is_image(&main_path, &extensions) {

@@ -3,6 +3,25 @@ name = "luminous"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = ["gif", "jpeg", "png", "tiff", "webp"]
+# avif = ["image/avif"]
+avif-native = ["image/avif-native"]
+bmp = ["image/bmp"]
+dds = ["image/dds"]
+exr = ["image/exr"]
+ff = ["image/ff"]
+gif = ["image/gif"]
+hdr = ["image/hdr"]
+ico = ["image/ico"]
+jpeg = ["image/jpeg"]
+png = ["image/png"]
+pnm = ["image/pnm"]
+qoi = ["image/qoi"]
+tga = ["image/tga"]
+tiff = ["image/tiff"]
+webp = ["image/webp"]
+
 [dependencies]
 bytemuck = "1.25.0"
 chrono = "0.4.44"
@@ -20,7 +39,7 @@ directories = "6.0.0"
 dlopen2 = "0.8.2"
 env_logger = "0.11.8"
 hex = "0.4.3"
-image = { version = "0.25.9", features = ["default", "avif-native"] }
+image = { version = "0.25.9", default-features = false }
 kamadak-exif = "0.6.1"
 log = "0.4.29"
 num_cpus = "1.17.0"
