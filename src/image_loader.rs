@@ -368,10 +368,10 @@ impl ImageLoader {
         h.update(path.to_string_lossy().as_bytes());
         h.update(mtime.to_be_bytes());
 
-        // TODO: switch to JPEG/WebP for faster encode/decode
-        Some(cache_dir?.join(format!("{}_{res}.png", hex::encode(h.finalize()))))
+        Some(cache_dir?.join(format!("{}_{res}.webp", hex::encode(h.finalize()))))
     }
 
+    // FIX: The image open and save thumbnail is not atomic, resulting in corrupt cache errors.
     fn decode_thumb(
         path: &Path,
         plugin_manager: &PluginManager,
