@@ -487,10 +487,10 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
     let init_start = std::time::Instant::now();
     let mut plugin_manager = plugins::PluginManager::new();
 
-    if !config.safe_mode {
-        plugin_manager.discover(Path::new("plugins"));
-    } else {
+    if config.safe_mode {
         info!("Starting in safe mode");
+    } else {
+        plugin_manager.discover(Path::new("plugins"));
     }
 
     let extra_exts = plugin_manager.get_supported_extensions();

@@ -1,8 +1,8 @@
 use crate::plugins::Backend;
 use crate::plugins::manifest::{PluginCapability, PluginManifest};
 use dlopen2::wrapper::{Container, WrapperApi};
+use image::DynamicImage;
 use log::{debug, error, info};
-use slint::{Rgba8Pixel, SharedPixelBuffer};
 use std::ffi::CString;
 use std::path::Path;
 
@@ -101,7 +101,7 @@ impl Backend for SharedLibBackend {
         result
     }
 
-    fn encode(&self, path: &Path, buf: &SharedPixelBuffer<Rgba8Pixel>) -> bool {
+    fn encode(&self, path: &Path, buf: &DynamicImage) -> bool {
         if !self.manifest.has_capability(&PluginCapability::Encoder) {
             error!("Plugin '{}' does not support encoding", self.manifest.name);
             return false;
@@ -112,15 +112,18 @@ impl Backend for SharedLibBackend {
             Err(_) => return false,
         };
 
+        let rgba_buf = buf.to_rgba8();
         let ffi_buf = ImageBuffer {
-            data: buf.as_slice().as_ptr() as *mut u8,
-            len: buf.as_slice().len() * 4,
-            width: buf.width(),
-            height: buf.height(),
+            data: rgba_buf.as_ptr() as *mut u8,
+            len: rgba_buf.len(),
+            width: rgba_buf.width(),
+            height: rgba_buf.height(),
             channels: 4,
         };
 
-        unsafe { self.container.save_image(c_path.as_ptr(), ffi_buf) }
+        let res = unsafe { self.container.save_image(c_path.as_ptr(), ffi_buf) };
+        debug!("Plugin FFI res={res}");
+        res
     }
 }
 

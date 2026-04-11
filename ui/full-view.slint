@@ -15,7 +15,8 @@ export global FullViewState {
     callback request-next-image();
     callback request-prev-image();
     callback request-segmentation(int, int, int, int);
-    callback save-with-format(ImgFmt);
+    in property <[string]> encoder_extensions;
+    callback save-with-format(string);
     callback apply-edit(EditOp);
 }
 
@@ -295,24 +296,10 @@ export component FullView inherits TouchArea {
 
                     Menu {
                         title: @tr("Save with format");
-                        MenuItem {
-                            title: @tr("png");
+                        for ext in FullViewState.encoder_extensions: MenuItem {
+                            title: ext;
                             activated => {
-                                FullViewState.save-with-format(ImgFmt.png);
-                            }
-                        }
-
-                        MenuItem {
-                            title: @tr("jpeg");
-                            activated => {
-                                FullViewState.save-with-format(ImgFmt.jpeg);
-                            }
-                        }
-
-                        MenuItem {
-                            title: @tr("webp");
-                            activated => {
-                                FullViewState.save-with-format(ImgFmt.webp);
+                                FullViewState.save-with-format(ext);
                             }
                         }
                     }

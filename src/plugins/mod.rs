@@ -2,16 +2,17 @@ pub mod ipc_daemon;
 pub mod manifest;
 pub mod shared_lib;
 
+use image::DynamicImage;
 pub use ipc_daemon::{IpcStatus, PluginControl};
 pub use manifest::{BackendKind, PluginCapability, PluginManifest, load_manifest};
 
+use crate::fs_scan::{ImageFormat, ImageFormats};
 use ipc_daemon::DaemonBackend;
 use log::{debug, error, info};
 use shared_lib::SharedLibBackend;
 use slint::{Rgba8Pixel, SharedPixelBuffer};
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 pub trait Backend: Send + Sync {
     fn start(&self) {}
@@ -19,10 +20,10 @@ pub trait Backend: Send + Sync {
     fn is_running(&self) -> bool {
         false
     }
-    fn decode(&self, _path: &Path) -> Option<image::DynamicImage> {
+    fn decode(&self, _path: &Path) -> Option<DynamicImage> {
         None
     }
-    fn encode(&self, _path: &Path, _buf: &SharedPixelBuffer<Rgba8Pixel>) -> bool {
+    fn encode(&self, _path: &Path, _buf: &DynamicImage) -> bool {
         false
     }
     fn set_image(&self, _buf: &SharedPixelBuffer<Rgba8Pixel>) -> bool {
@@ -56,6 +57,7 @@ pub struct Plugin {
     pub id: String,
     pub manifest: PluginManifest,
     backend: Box<dyn Backend>,
+    image_format_support: RwLock<ImageFormat>,
 }
 
 impl Plugin {
@@ -64,6 +66,7 @@ impl Plugin {
         manifest: PluginManifest,
         dir: PathBuf,
         auto_start: bool,
+        image_format_support: ImageFormat,
     ) -> Option<Self> {
         let backend: Box<dyn Backend> = match manifest.backend {
             BackendKind::Daemon => {
@@ -75,6 +78,7 @@ impl Plugin {
             id,
             manifest,
             backend,
+            image_format_support: RwLock::new(image_format_support),
         };
         if auto_start {
             debug!("Auto-starting plugin: {}", plugin.id);
@@ -117,7 +121,7 @@ impl Plugin {
         ))
     }
 
-    pub fn encode(&self, path: &Path, buf: &SharedPixelBuffer<Rgba8Pixel>) -> bool {
+    pub fn encode(&self, path: &Path, buf: &DynamicImage) -> bool {
         if !self.manifest.has_capability(&PluginCapability::Encoder) {
             error!("Plugin '{}' does not support encoding", self.manifest.name);
             return false;
@@ -207,8 +211,8 @@ impl Backend for Arc<DaemonBackend> {
 }
 
 pub struct PluginManager {
-    /// extension (lowercase) -> plugin, TODO: make more agnostic
-    shlib_plugins: HashMap<String, Arc<Plugin>>,
+    // TODO: merge plugins backends
+    shlib_plugins: Vec<Arc<Plugin>>,
     daemon_plugins: Vec<Arc<Plugin>>,
 }
 
@@ -221,7 +225,7 @@ impl Default for PluginManager {
 impl PluginManager {
     pub fn new() -> Self {
         Self {
-            shlib_plugins: HashMap::new(),
+            shlib_plugins: Vec::new(),
             daemon_plugins: Vec::new(),
         }
     }
@@ -311,8 +315,18 @@ impl PluginManager {
         self.get_search_plugins().next().cloned()
     }
 
-    pub fn get_supported_extensions(&self) -> Vec<&str> {
-        self.shlib_plugins.keys().map(String::as_str).collect()
+    pub fn get_supported_extensions(&self) -> Vec<ImageFormat> {
+        self.shlib_plugins
+            .iter()
+            .filter_map(|p| match p.image_format_support.read() {
+                Ok(support) => Some(support.clone()),
+                Err(_) => None,
+            })
+            .collect()
+    }
+
+    pub fn get_supprted_image_formats(&self) -> Vec<ImageFormats> {
+        unimplemented!();
     }
 
     pub fn get_plugins_manifests(&self) -> Vec<PluginManifest> {
@@ -322,11 +336,35 @@ impl PluginManager {
             .collect()
     }
 
+    // pub fn has_decoding(&self, path: &Path) -> bool {
     pub fn has_plugin_for(&self, path: &Path) -> bool {
-        path.extension()
-            .and_then(|e| e.to_str())
-            .map(|e| self.shlib_plugins.contains_key(&e.to_lowercase()))
-            .unwrap_or(false)
+        let ext = match path.extension().and_then(|e| e.to_str()) {
+            Some(e) => e.to_lowercase(),
+            None => return false,
+        };
+
+        self.shlib_plugins.iter().any(|p| {
+            if let Ok(support) = p.image_format_support.read() {
+                support.decoding_support && support.exts.contains(&ext)
+            } else {
+                false
+            }
+        })
+    }
+
+    pub fn has_encoding(&self, path: &Path) -> bool {
+        let ext = match path.extension().and_then(|e| e.to_str()) {
+            Some(e) => e.to_lowercase(),
+            None => return false,
+        };
+
+        self.shlib_plugins.iter().any(|p| {
+            if let Ok(support) = p.image_format_support.read() {
+                support.encoding_support && support.exts.contains(&ext)
+            } else {
+                false
+            }
+        })
     }
 
     pub fn decode(&self, path: &Path) -> Option<SharedPixelBuffer<Rgba8Pixel>> {
@@ -338,15 +376,58 @@ impl PluginManager {
         ))
     }
 
+    pub fn encode(&self, path: &Path, buf: &DynamicImage) -> bool {
+        let ext = match path.extension().and_then(|e| e.to_str()) {
+            Some(e) => e.to_lowercase(),
+            None => {
+                error!("Cannot encode: Path has no extension {:?}", path);
+                return false;
+            }
+        };
+
+        let plugin = self.shlib_plugins.iter().find(|p| {
+            if let Ok(support) = p.image_format_support.read() {
+                support.encoding_support && support.exts.contains(&ext)
+            } else {
+                false
+            }
+        });
+
+        if let Some(p) = plugin {
+            debug!("Encoding with plugin '{}' to {:?}", p.manifest.name, path);
+
+            p.encode(path, buf)
+        } else {
+            error!("No encoding plugin found for extension: {}", ext);
+            false
+        }
+    }
+
     pub fn decode_dynamic(&self, path: &Path) -> Option<image::DynamicImage> {
         let ext = path.extension()?.to_str()?.to_lowercase();
-        let plugin = self.shlib_plugins.get(&ext)?;
+        let plugin = self.shlib_plugins.iter().find(|p| {
+            if let Ok(support) = p.image_format_support.read() {
+                support.decoding_support && support.exts.contains(&ext)
+            } else {
+                false
+            }
+        })?;
         debug!("Using plugin '{}' for {:?}", plugin.manifest.name, path);
         plugin.decode_dynamic(path)
     }
 
     fn register(&mut self, id: String, dir: PathBuf, manifest: PluginManifest, auto_start: bool) {
-        let plugin = match Plugin::new(id, manifest.clone(), dir, auto_start) {
+        let plugin = match Plugin::new(
+            id,
+            manifest.clone(),
+            dir,
+            auto_start,
+            ImageFormat {
+                exts: vec![],
+                decoding_support: false,
+                encoding_support: false,
+            },
+        ) {
             Some(p) => Arc::new(p),
             None => {
                 error!("Failed to construct plugin '{}'", manifest.name);
@@ -387,9 +468,23 @@ impl PluginManager {
             }
         }
 
-        for ext in &manifest.extensions {
-            self.shlib_plugins
-                .insert(ext.to_lowercase(), plugin.clone());
+        if manifest.has_capability(&PluginCapability::Decoder)
+            || manifest.has_capability(&PluginCapability::Encoder)
+        {
+            let can_decode = manifest.has_capability(&PluginCapability::Decoder);
+            let can_encode = manifest.has_capability(&PluginCapability::Encoder);
+
+            match plugin.image_format_support.write() {
+                Ok(mut support) => {
+                    *support = ImageFormat {
+                        exts: manifest.extensions,
+                        decoding_support: can_decode,
+                        encoding_support: can_encode,
+                    };
+                }
+                Err(e) => error!("Failed to acquire write lock: {}", e),
+            }
+            self.shlib_plugins.push(plugin.clone());
         }
     }
 }

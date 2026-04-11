@@ -1,19 +1,21 @@
 use image::{DynamicImage, ImageBuffer, ImageFormat, Rgba};
-use log::debug;
+use log::{debug, error};
 use rayon::prelude::*;
 use slint::{Rgba8Pixel, SharedPixelBuffer};
+use std::sync::Arc;
 use std::{path::PathBuf, time::Instant};
 
-use crate::ImgFmt; // TODO: Consider rename
+use crate::{ImgFmt, plugins::PluginManager}; // TODO: Consider rename
 
 pub fn save_image(
     image_buffer: Option<SharedPixelBuffer<Rgba8Pixel>>,
     image_path: Option<PathBuf>,
-    format: ImgFmt,
+    format: String,
+    plugin_manager: Arc<PluginManager>,
 ) {
     if let Some(path) = image_path {
         let new_name = path
-            .with_extension(format_to_str(format))
+            .with_extension(&format)
             .file_name()
             .and_then(|n| n.to_str())
             .map(|s| s.to_string())
@@ -43,24 +45,24 @@ pub fn save_image(
                     image::open(path).map_err(|e| e.to_string()).unwrap()
                 };
 
-                let mut out = std::fs::File::create(&dst_file)
-                    .map_err(|e| e.to_string())
-                    .unwrap();
-
-                match format {
-                    ImgFmt::Jpeg => {
-                        let quality = 90;
+                if let Some(native_format) = image::ImageFormat::from_extension(&format) {
+                    if format.to_lowercase() == "jpg" || format.to_lowercase() == "jpeg" {
+                        let mut out = std::fs::File::create(&dst_file)
+                            .map_err(|e| e.to_string())
+                            .unwrap();
                         let encoder =
-                            image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, quality);
+                            image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 90);
                         img.write_with_encoder(encoder)
                             .map_err(|e| e.to_string())
                             .unwrap();
-                    }
-                    _ => {
-                        img.save_with_format(&dst_file, format_to_image_format(format))
+                    } else {
+                        img.save_with_format(&dst_file, native_format)
                             .map_err(|e| e.to_string())
                             .unwrap();
                     }
+                } else if !plugin_manager.encode(&dst_file, &img) {
+                    error!("No native or plugin encoder found for format: {}", format);
+                    return;
                 }
                 debug!("Saved to: {:?}", dst_file);
             });
