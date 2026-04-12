@@ -150,7 +150,6 @@ export component MainWindow inherits Window {
     }
 
     // ----- Full view -----
-    in property <image> mask-overlay;
     in property <string> plugin-status: "Initializing...";
 
     // Plugins
@@ -162,7 +161,6 @@ export component MainWindow inherits Window {
         visible: root.view-mode == ViewMode.full;
         timer-running: root.view-mode == ViewMode.full;
         total-images: GridViewState.model.length;
-        mask-overlay: root.mask-overlay;
         plugin-status: root.plugin-status;
 
         exit-full-view => {

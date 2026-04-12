@@ -2,11 +2,16 @@ use crate::AppController;
 use crate::FullViewState;
 use crate::MainWindow;
 use crate::image_processing::save_image;
+use cocotools::coco::object_detection::{
+    Annotation, Bbox, Dataset, Image as CocoImage, Rle, Segmentation,
+};
 use log::{debug, error};
 use slint::{ComponentHandle, SharedString, StandardListViewItem, VecModel};
+use slint::{Image, Rgba8Pixel, SharedPixelBuffer};
 use std::cell::RefCell;
 use std::fs::File;
 use std::io::BufReader;
+use std::path::Path;
 use std::rc::Rc;
 use std::sync::atomic::Ordering;
 
@@ -71,6 +76,157 @@ pub fn register(window: &MainWindow, app_controller: Rc<RefCell<AppController>>)
         acc.borrow()
             .handle_segmentation(x1 as i32, y1 as i32, x2 as i32, y2 as i32);
     });
+
+    let window_weak = window.as_weak();
+    fv.on_clear_curr_mask_overlay(move || {
+        let _ = window_weak.upgrade_in_event_loop(move |ui| {
+            ui.global::<FullViewState>()
+                .set_mask_overlay(Image::from_rgba8(SharedPixelBuffer::<Rgba8Pixel>::new(
+                    0, 0,
+                )));
+        });
+    });
+    let window_weak = window.as_weak();
+    let acc = app_controller.clone();
+    fv.on_save_curr_mask_overlay(move || {
+        let image_path = acc
+            .borrow()
+            .loader
+            .get_curr_img_path()
+            .map(|p| p.to_path_buf());
+
+        let _ = window_weak.upgrade_in_event_loop(move |ui| {
+            let fv = ui.global::<FullViewState>();
+            let mask_image = fv.get_mask_overlay();
+
+            if let Some(buffer) = mask_image.to_rgba8() {
+                if let Some(path) = image_path {
+                    let file_name = path
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .to_string();
+                    if let Some(parent_dir) = path.parent() {
+                        let annotation_path = parent_dir.join("annotations.json");
+                        save_mask(buffer, &annotation_path, &file_name);
+                    }
+                }
+            }
+        });
+    });
+}
+
+fn save_mask(mask_buffer: SharedPixelBuffer<Rgba8Pixel>, path: &Path, file_name: &str) -> bool {
+    let width = mask_buffer.width() as usize;
+    let height = mask_buffer.height() as usize;
+
+    if width == 0 || height == 0 {
+        debug!("No mask to save (width == 0 || height == 0)");
+        return false;
+    }
+
+    let mut mask_bits = vec![0u8; width * height];
+    let mut area = 0.0;
+    let (mut min_x, mut min_y) = (width as f64, height as f64);
+    let (mut max_x, mut max_y) = (0.0, 0.0);
+
+    let slice = mask_buffer.as_slice();
+
+    for x in 0..width {
+        for y in 0..height {
+            let pixel = &slice[y * width + x];
+            if pixel.a > 0 {
+                mask_bits[x * height + y] = 1;
+                area += 1.0;
+                let (fx, fy) = (x as f64, y as f64);
+                if fx < min_x {
+                    min_x = fx;
+                }
+                if fx > max_x {
+                    max_x = fx;
+                }
+                if fy < min_y {
+                    min_y = fy;
+                }
+                if fy > max_y {
+                    max_y = fy;
+                }
+            }
+        }
+    }
+
+    if area == 0.0 {
+        debug!("No make to save (area == 0.0)");
+        return false;
+    }
+
+    let mut counts = Vec::new();
+    let mut current_val = 0u8;
+    let mut current_run = 0u32;
+    for bit in mask_bits {
+        if bit == current_val {
+            current_run += 1;
+        } else {
+            counts.push(current_run);
+            current_run = 1;
+            current_val = bit;
+        }
+    }
+    counts.push(current_run);
+
+    let mut dataset = if path.exists() {
+        std::fs::read_to_string(path)
+            .ok()
+            .and_then(|content| serde_json::from_str::<Dataset>(&content).ok())
+            .unwrap_or_default()
+    } else {
+        Dataset::default()
+    };
+
+    let image_id = dataset
+        .images
+        .iter()
+        .find(|img| img.file_name == file_name)
+        .map(|img| img.id)
+        .unwrap_or_else(|| {
+            let new_id = (dataset.images.len() + 1) as u64;
+            dataset.images.push(CocoImage {
+                id: new_id,
+                width: width as u32,
+                height: height as u32,
+                file_name: file_name.to_string(),
+                ..Default::default()
+            });
+            new_id
+        });
+
+    let ann_id = (dataset.annotations.len() + 1) as u64;
+    dataset.annotations.push(Annotation {
+        id: ann_id,
+        image_id,
+        category_id: 1,
+        segmentation: Segmentation::Rle(Rle {
+            size: vec![height as u32, width as u32],
+            counts,
+        }),
+        area,
+        bbox: Bbox {
+            left: min_x,
+            top: min_y,
+            width: max_x - min_x,
+            height: max_y - min_y,
+        },
+        iscrowd: 0,
+    });
+
+    serde_json::to_string_pretty(&dataset)
+        .ok()
+        .and_then(|json| std::fs::write(path, json).ok())
+        .map(|_| {
+            debug!("Dataset updated at {path:?}");
+            true
+        })
+        .unwrap_or(false)
 }
 
 fn set_empty_exif() -> slint::ModelRc<slint::ModelRc<StandardListViewItem>> {

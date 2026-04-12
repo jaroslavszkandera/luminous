@@ -32,6 +32,7 @@ clap = { version = "4.5.57", default-features = false, features = [
   "usage",
   "error-context",
 ] }
+cocotools = "0.0.7"
 color-print = "0.3.7"
 csscolorparser = "0.8.2"
 dashmap = { version = "6.1.0", features = ["rayon"] }

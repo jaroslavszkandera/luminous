@@ -1,4 +1,4 @@
-import { Palette, TabWidget } from "std-widgets.slint";
+import { Palette, TabWidget, Button } from "std-widgets.slint";
 import { ImgFmt, EditOp, EditOpKind } from "common.slint";
 import { SidePanel } from "side-panel.slint";
 import { EditsPanel } from "edits-panel.slint";
@@ -14,7 +14,12 @@ export global FullViewState {
 
     callback request-next-image();
     callback request-prev-image();
+
+    in property <image> mask-overlay;
+    callback clear-curr-mask-overlay();
+    callback save-curr-mask-overlay();
     callback request-segmentation(int, int, int, int);
+
     in property <[string]> encoder_extensions;
     callback save-with-format(string);
     callback apply-edit(EditOp);
@@ -23,7 +28,6 @@ export global FullViewState {
 export component FullView inherits TouchArea {
     in property <int> total-images;
     in property <bool> timer-running: false;
-    in property <image> mask-overlay;
     in property <string> plugin-status;
     in-out property <bool> panel-visible: true; // TMP: testing
 
@@ -213,7 +217,7 @@ export component FullView inherits TouchArea {
             }
 
             Image {
-                source: root.mask-overlay;
+                source: FullViewState.mask-overlay;
                 image-fit: contain;
                 width: img-el.width;
                 height: img-el.height;
@@ -312,7 +316,7 @@ export component FullView inherits TouchArea {
             side-width <=> root.side-panel-width;
 
             TabWidget {
-                current-index: 0;
+                current-index: 2;
                 Tab {
                     title: "Edit";
                     EditsPanel {
@@ -339,6 +343,24 @@ export component FullView inherits TouchArea {
                 Tab {
                     title: "Plugins";
                     VerticalLayout {
+                        padding-top: 2px;
+                        spacing: 5px;
+                        HorizontalLayout {
+                            Button {
+                                text: "Clear mask";
+                                clicked => {
+                                    FullViewState.clear-curr-mask-overlay();
+                                }
+                            }
+
+                            Button {
+                                text: "Save mask";
+                                clicked => {
+                                    FullViewState.save-curr-mask-overlay();
+                                }
+                            }
+                        }
+
                         interactive-plugin := InteractivePlugin {
                             click-active: root.click-active;
                             select-active: root.select-active;

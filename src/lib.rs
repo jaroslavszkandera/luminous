@@ -94,7 +94,7 @@ impl AppController {
                 let fv = ui.global::<FullViewState>();
                 if index == fv.get_curr_image_index() as usize {
                     fv.set_curr_image(img);
-                    ui.set_mask_overlay(Image::default());
+                    fv.set_mask_overlay(Image::default());
                 }
             });
         });
@@ -188,7 +188,7 @@ impl AppController {
         if let Some(ui) = weak.upgrade() {
             let fv = ui.global::<FullViewState>();
             fv.set_curr_image(display_img);
-            ui.set_mask_overlay(Image::default());
+            fv.set_mask_overlay(Image::default());
             fv.set_curr_image_index(index as i32);
             if let Some(name) = loader.get_file_name(index) {
                 fv.set_curr_image_name(name.into());
@@ -414,7 +414,8 @@ impl AppController {
             if x2 < 0 || y2 < 0 {
                 if let Some(mask) = plugin.interactive_click(x1 as u32, y1 as u32) {
                     let _ = weak.upgrade_in_event_loop(move |ui| {
-                        ui.set_mask_overlay(Image::from_rgba8(mask));
+                        ui.global::<FullViewState>()
+                            .set_mask_overlay(Image::from_rgba8(mask));
                     });
                 } else {
                     warn!("Interactive click failed");
@@ -423,7 +424,8 @@ impl AppController {
                 plugin.interactive_rect_select(x1 as u32, y1 as u32, x2 as u32, y2 as u32)
             {
                 let _ = weak.upgrade_in_event_loop(move |ui| {
-                    ui.set_mask_overlay(Image::from_rgba8(mask));
+                    ui.global::<FullViewState>()
+                        .set_mask_overlay(Image::from_rgba8(mask));
                 });
             } else {
                 warn!("Interactive select failed");
