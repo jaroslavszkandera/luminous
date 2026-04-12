@@ -404,33 +404,61 @@ impl AppController {
         }
     }
 
-    fn handle_segmentation(&self, x1: i32, y1: i32, x2: i32, y2: i32) {
+    fn handle_segmentation(&self, x1: i32, y1: i32, x2: i32, y2: i32, txt: String) {
         let weak = self.window_weak.clone();
         let loader = self.loader.clone();
+        let before_idx = loader.active_idx.load(Ordering::Relaxed);
 
-        // FIX: dangerous, freezes the application
-        // if let Some(plugin) = loader.plugin_manager.get_interactive_plugin() {
-        if let Some(plugin) = loader.plugin_manager.get_plugin_by_id("SAM2") {
-            if x2 < 0 || y2 < 0 {
-                if let Some(mask) = plugin.interactive_click(x1 as u32, y1 as u32) {
-                    let _ = weak.upgrade_in_event_loop(move |ui| {
-                        ui.global::<FullViewState>()
-                            .set_mask_overlay(Image::from_rgba8(mask));
-                    });
-                } else {
-                    warn!("Interactive click failed");
+        std::thread::Builder::new()
+            .name("segm".to_string())
+            .spawn(move || {
+                // TODO: make more ambiguous
+                // if let Some(plugin) = loader.plugin_manager.get_interactive_plugin() {
+                // if let Some(plugin) = loader.plugin_manager.get_plugin_by_id("SAM3") {
+                if let Some(plugin) = loader.plugin_manager.get_plugin_by_id("SAM2") {
+                    if txt.len() > 0 {
+                        if let Some(mask) = plugin.text_to_mask(txt) {
+                            if before_idx == loader.active_idx.load(Ordering::Relaxed) {
+                                let _ = weak.upgrade_in_event_loop(move |ui| {
+                                    ui.global::<FullViewState>()
+                                        .set_mask_overlay(Image::from_rgba8(mask));
+                                });
+                            } else {
+                                debug!("Index has moved, not applying mask");
+                            }
+                        } else {
+                            warn!("Text to mask failed");
+                        }
+                    } else if x2 < 0 || y2 < 0 {
+                        if let Some(mask) = plugin.interactive_click(x1 as u32, y1 as u32) {
+                            if before_idx == loader.active_idx.load(Ordering::Relaxed) {
+                                let _ = weak.upgrade_in_event_loop(move |ui| {
+                                    ui.global::<FullViewState>()
+                                        .set_mask_overlay(Image::from_rgba8(mask));
+                                });
+                            } else {
+                                debug!("Index has moved, not applying mask");
+                            }
+                        } else {
+                            warn!("Interactive click failed");
+                        }
+                    } else if let Some(mask) =
+                        plugin.interactive_rect_select(x1 as u32, y1 as u32, x2 as u32, y2 as u32)
+                    {
+                        if before_idx == loader.active_idx.load(Ordering::Relaxed) {
+                            let _ = weak.upgrade_in_event_loop(move |ui| {
+                                ui.global::<FullViewState>()
+                                    .set_mask_overlay(Image::from_rgba8(mask));
+                            });
+                        } else {
+                            debug!("Index has moved, not applying mask");
+                        }
+                    } else {
+                        warn!("Interactive select failed");
+                    }
                 }
-            } else if let Some(mask) =
-                plugin.interactive_rect_select(x1 as u32, y1 as u32, x2 as u32, y2 as u32)
-            {
-                let _ = weak.upgrade_in_event_loop(move |ui| {
-                    ui.global::<FullViewState>()
-                        .set_mask_overlay(Image::from_rgba8(mask));
-                });
-            } else {
-                warn!("Interactive select failed");
-            }
-        }
+            })
+            .expect("Failed to spawn segmentation thread");
     }
 
     fn build_window_indices(&self, center: usize) -> Vec<usize> {
@@ -458,6 +486,7 @@ impl AppController {
         let plugin_manager = loader.plugin_manager.clone();
         let curr_active_buffer = loader.get_curr_active_buffer();
         loader.pool.spawn(move || {
+            // TODO:
             if let Some(plugin) = plugin_manager.get_plugin_by_id("SAM2") {
                 if let Some(buf) = curr_active_buffer {
                     plugin.set_interactive_image(&buf);

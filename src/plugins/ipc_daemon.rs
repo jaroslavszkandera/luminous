@@ -53,6 +53,10 @@ pub(crate) enum IpcCmd {
         x2: u32,
         y2: u32,
     },
+    TextToMask {
+        shm_name: String,
+        text: String,
+    },
     Search {
         paths: Vec<PathBuf>,
         query: String,
@@ -114,6 +118,10 @@ enum WorkerRequest {
         y1: u32,
         x2: u32,
         y2: u32,
+        tx: mpsc::SyncSender<Option<SharedPixelBuffer<Rgba8Pixel>>>,
+    },
+    TextToMask {
+        text: String,
         tx: mpsc::SyncSender<Option<SharedPixelBuffer<Rgba8Pixel>>>,
     },
     Search {
@@ -380,6 +388,21 @@ impl Backend for DaemonBackend {
                                 }
                             }
                         }
+                        WorkerRequest::TextToMask { text, tx } => match &active_shm {
+                            None => {
+                                warn!("TextToMask ignored: no active embedding");
+                                let _ = tx.send(None);
+                            }
+                            Some(shm) => match ipc_text_to_mask(&mut stream, shm, text) {
+                                Ok(result) => {
+                                    let _ = tx.send(result);
+                                }
+                                Err(e) => {
+                                    error!("text_to_mask failed: {e}");
+                                    let _ = tx.send(None);
+                                }
+                            },
+                        },
                         WorkerRequest::Search { paths, query, tx } => {
                             debug!("search ({query})"); // paths...
                             match ipc_search(&mut stream, paths, query) {
@@ -529,6 +552,23 @@ impl Backend for DaemonBackend {
         result_rx.recv().ok().flatten()
     }
 
+    fn text_to_mask(&self, text: String) -> Option<SharedPixelBuffer<Rgba8Pixel>> {
+        let status = self.status();
+        if status == IpcStatus::Busy {
+            warn!("Text to mask ignored: daemon is busy");
+            return None;
+        }
+        let (result_tx, result_rx) = mpsc::sync_channel(1);
+        self.tx
+            .try_send(WorkerRequest::TextToMask {
+                text,
+                tx: result_tx,
+            })
+            .map_err(|e| warn!("rect_select enqueue failed: {e}"))
+            .ok()?;
+        result_rx.recv().ok().flatten()
+    }
+
     fn semantic_image_search(
         &self,
         paths: &Vec<PathBuf>,
@@ -670,6 +710,21 @@ fn ipc_rect_select(
             y1,
             x2,
             y2,
+        },
+    )?;
+    read_mask_response(stream, shm)
+}
+
+fn ipc_text_to_mask(
+    stream: &mut TcpStream,
+    shm: &ActiveShmem,
+    text: String,
+) -> Result<Option<SharedPixelBuffer<Rgba8Pixel>>, Box<dyn std::error::Error>> {
+    send_msg(
+        stream,
+        &IpcCmd::TextToMask {
+            shm_name: shm.mask.0.get_os_id().into(),
+            text,
         },
     )?;
     read_mask_response(stream, shm)

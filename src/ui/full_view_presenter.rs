@@ -72,9 +72,21 @@ pub fn register(window: &MainWindow, app_controller: Rc<RefCell<AppController>>)
     });
 
     let acc = app_controller.clone();
-    fv.on_request_segmentation(move |x1, y1, x2, y2| {
-        acc.borrow()
-            .handle_segmentation(x1 as i32, y1 as i32, x2 as i32, y2 as i32);
+    fv.on_request_segmentation(move |x1, y1, x2, y2, txt| {
+        acc.borrow().handle_segmentation(
+            x1 as i32,
+            y1 as i32,
+            x2 as i32,
+            y2 as i32,
+            std::string::String::from(txt),
+        );
+        let weak_ui = acc.borrow().window_weak.clone();
+        slint::invoke_from_event_loop(move || {
+            if let Some(ui) = weak_ui.upgrade() {
+                ui.invoke_return_focus();
+            }
+        })
+        .unwrap();
     });
 
     let window_weak = window.as_weak();

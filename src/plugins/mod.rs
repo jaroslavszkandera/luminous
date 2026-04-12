@@ -41,6 +41,9 @@ pub trait Backend: Send + Sync {
     ) -> Option<SharedPixelBuffer<Rgba8Pixel>> {
         None
     }
+    fn text_to_mask(&self, _text: String) -> Option<SharedPixelBuffer<Rgba8Pixel>> {
+        None
+    }
     fn semantic_image_search(&self, _paths: &Vec<PathBuf>, _query: &str) -> Option<Vec<PathBuf>> {
         None
     }
@@ -148,6 +151,10 @@ impl Plugin {
         self.backend.rect_select(x1, y1, x2, y2)
     }
 
+    pub fn text_to_mask(&self, text: String) -> Option<SharedPixelBuffer<Rgba8Pixel>> {
+        self.backend.text_to_mask(text)
+    }
+
     pub fn semantic_image_search(&self, paths: &Vec<PathBuf>, query: &str) -> Option<Vec<PathBuf>> {
         self.backend.semantic_image_search(paths, query)
     }
@@ -195,6 +202,9 @@ impl Backend for Arc<DaemonBackend> {
         y2: u32,
     ) -> Option<SharedPixelBuffer<Rgba8Pixel>> {
         DaemonBackend::rect_select(self, x1, y1, x2, y2)
+    }
+    fn text_to_mask(&self, text: String) -> Option<SharedPixelBuffer<Rgba8Pixel>> {
+        DaemonBackend::text_to_mask(self, text)
     }
     fn semantic_image_search(&self, paths: &Vec<PathBuf>, query: &str) -> Option<Vec<PathBuf>> {
         DaemonBackend::semantic_image_search(self, paths, query)

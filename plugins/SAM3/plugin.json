@@ -1,0 +1,10 @@
+{
+  "name": "Segment Anything Model 3 (SAM3) for Interactive Segmentation",
+  "version": "0.1.0",
+  "backend": "daemon",
+  "interpreter": "uv run",
+  "capabilities": ["interactive"],
+  "extensions": [],
+  "daemon_port": 50023,
+  "entry": "main.py"
+}
