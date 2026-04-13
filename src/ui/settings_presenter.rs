@@ -17,7 +17,17 @@ pub fn register(window: &MainWindow, app_controller: Rc<RefCell<AppController>>)
 
     let acc = app_controller.clone();
     sg.on_clear_image_cache(move || {
-        acc.borrow().loader.clear_disk_cache();
+        let acc_bor = acc.borrow();
+        acc_bor.loader.clear_disk_cache();
+        let disk_cache_count = acc_bor.loader.get_image_disk_cache_count();
+        let weak_ui = acc_bor.window_weak.clone();
+        slint::invoke_from_event_loop(move || {
+            if let Some(ui) = weak_ui.upgrade() {
+                ui.global::<SettingsState>()
+                    .set_image_cache_count(disk_cache_count as i32);
+            }
+        })
+        .unwrap();
     });
 
     let acc = app_controller.clone();
