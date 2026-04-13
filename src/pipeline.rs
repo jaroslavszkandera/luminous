@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Instant;
 
-use crate::{FlipDirection, PipelineStep, PipelineStepKind, RotateAngle};
+use crate::{Channel, FlipDirection, PipelineStep, PipelineStepKind, RotateAngle};
 
 pub trait ProcessingStep: Send + Sync {
     fn apply(&self, img: DynamicImage, params: &PipelineStep) -> DynamicImage;
@@ -25,7 +25,7 @@ impl StepFactory {
         f.register(PipelineStepKind::GaussianBlur, GaussianBlurStep);
         f.register(PipelineStepKind::Brighten, BrightenStep);
         f.register(PipelineStepKind::Resize, ResizeStep);
-        f.register(PipelineStepKind::Grayscale, GrayscaleStep);
+        f.register(PipelineStepKind::ExtractChannel, ExtractChannelStep);
         f.register(PipelineStepKind::Flip, FlipStep);
         f
     }
@@ -126,16 +126,6 @@ impl ProcessingStep for ResizeStep {
     }
 }
 
-struct GrayscaleStep;
-impl ProcessingStep for GrayscaleStep {
-    fn name(&self) -> &'static str {
-        "Grayscale"
-    }
-    fn apply(&self, img: DynamicImage, _params: &PipelineStep) -> DynamicImage {
-        DynamicImage::ImageLuma8(img.into_luma8())
-    }
-}
-
 struct FlipStep;
 impl ProcessingStep for FlipStep {
     fn name(&self) -> &'static str {
@@ -145,6 +135,47 @@ impl ProcessingStep for FlipStep {
         match params.flip_direction {
             FlipDirection::Horizontal => img.fliph(),
             FlipDirection::Vertical => img.flipv(),
+        }
+    }
+}
+
+struct ExtractChannelStep;
+impl ProcessingStep for ExtractChannelStep {
+    fn name(&self) -> &'static str {
+        "Extract Channel"
+    }
+    fn apply(&self, img: DynamicImage, params: &PipelineStep) -> DynamicImage {
+        match params.extract_channel {
+            Channel::Gray => DynamicImage::ImageLuma8(img.into_luma8()),
+            Channel::Red => {
+                DynamicImage::ImageLuma8(imageproc::map::into_red_channel(&img.into_rgb8()))
+            }
+            Channel::Green => {
+                DynamicImage::ImageLuma8(imageproc::map::into_green_channel(&img.into_rgb8()))
+            }
+            Channel::Blue => {
+                DynamicImage::ImageLuma8(imageproc::map::into_blue_channel(&img.into_rgb8()))
+            }
+            Channel::Hue | Channel::Saturation | Channel::Value => {
+                let rgb = img.into_rgb8();
+                let luma = image::ImageBuffer::from_fn(rgb.width(), rgb.height(), |x, y| {
+                    let p = rgb.get_pixel(x, y);
+                    let srgb = palette::Srgb::new(
+                        p[0] as f32 / 255.0,
+                        p[1] as f32 / 255.0,
+                        p[2] as f32 / 255.0,
+                    );
+                    let hsv: palette::Hsv = palette::IntoColor::into_color(srgb);
+                    let val = match params.extract_channel {
+                        Channel::Hue => (hsv.hue.into_positive_degrees() / 360.0 * 255.0) as u8,
+                        Channel::Saturation => (hsv.saturation * 255.0) as u8,
+                        Channel::Value => (hsv.value * 255.0) as u8,
+                        _ => 0,
+                    };
+                    image::Luma([val])
+                });
+                DynamicImage::ImageLuma8(luma)
+            }
         }
     }
 }

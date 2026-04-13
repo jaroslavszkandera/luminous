@@ -1,7 +1,7 @@
 use crate::AppController;
 use crate::MainWindow;
 use crate::pipeline::{StepFactory, run_pipeline_on_selection};
-use crate::{FlipDirection, PipelineStep, PipelineStepKind, RotateAngle};
+use crate::{Channel, FlipDirection, PipelineStep, PipelineStepKind, RotateAngle};
 use slint::{Model, VecModel};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -29,6 +29,7 @@ pub fn register(window: &MainWindow, c: Rc<RefCell<AppController>>, factory: Arc
             resize_width: 224,
             resize_height: 224,
             flip_direction: FlipDirection::Horizontal,
+            extract_channel: Channel::Gray,
         };
 
         match kind {

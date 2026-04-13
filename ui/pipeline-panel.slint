@@ -6,15 +6,6 @@ import {
     Palette,
 } from "std-widgets.slint";
 
-export enum PipelineStepKind {
-    Rotate,
-    GaussianBlur,
-    Brighten,
-    Resize,
-    Grayscale,
-    Flip,
-}
-
 export enum RotateAngle {
     R90,
     R180,
@@ -27,6 +18,25 @@ export enum FlipDirection {
     Vertical,
 }
 
+export enum Channel {
+    Gray,
+    Red,
+    Green,
+    Blue,
+    Hue,
+    Saturation,
+    Value,
+}
+
+export enum PipelineStepKind {
+    Rotate,
+    GaussianBlur,
+    Brighten,
+    Resize,
+    ExtractChannel,
+    Flip,
+}
+
 export struct PipelineStep {
     kind: PipelineStepKind,
     rotate-angle: RotateAngle,
@@ -35,6 +45,7 @@ export struct PipelineStep {
     resize-width: int,
     resize-height: int,
     flip-direction: FlipDirection,
+    extract-channel: Channel,
 }
 
 component CloseButton inherits Button {
@@ -235,9 +246,29 @@ export component FlipStepCard inherits StepCard {
     }
 }
 
-export component GrayscaleStepCard inherits StepCard {
-    title: "Grayscale Conversion";
-    height: 40px;
+export component ExtractChannelStepCard inherits StepCard {
+    title: "Extract Channel";
+    in-out property <Channel> channel: Channel.Gray;
+    callback changed();
+
+    HorizontalLayout {
+        spacing: 6px;
+        Text {
+            text: "Channel:";
+            font-size: 12px;
+            vertical-alignment: center;
+            width: 50px;
+        }
+
+        ComboBox {
+            model: ["Gray", "Red", "Green", "Blue", "Hue", "Saturation", "Value"];
+            current-index: root.channel == Channel.Gray ? 0 : root.channel == Channel.Red ? 1 : root.channel == Channel.Green ? 2 : root.channel == Channel.Blue ? 3 : root.channel == Channel.Hue ? 4 : root.channel == Channel.Saturation ? 5 : 6;
+            selected(val) => {
+                root.channel = val == "Gray" ? Channel.Gray : val == "Red" ? Channel.Red : val == "Green" ? Channel.Green : val == "Blue" ? Channel.Blue : val == "Hue" ? Channel.Hue : val == "Saturation" ? Channel.Saturation : Channel.Value;
+                root.changed();
+            }
+        }
+    }
 }
 
 component AddStepMenu inherits Rectangle {
@@ -251,7 +282,7 @@ component AddStepMenu inherits Rectangle {
             "Brighten",
             "Gaussian Blur",
             "Resize",
-            "Grayscale",
+            "Extract Channel",
             "Flip"
         ];
         selected(val) => {
@@ -263,8 +294,8 @@ component AddStepMenu inherits Rectangle {
                 root.add-step(PipelineStepKind.GaussianBlur);
             } else if (val == "Resize") {
                 root.add-step(PipelineStepKind.Resize);
-            } else if (val == "Grayscale") {
-                root.add-step(PipelineStepKind.Grayscale);
+            } else if (val == "Extract Channel") {
+                root.add-step(PipelineStepKind.ExtractChannel);
             } else if (val == "Flip") {
                 root.add-step(PipelineStepKind.Flip);
             }
@@ -356,9 +387,14 @@ export component PipelinePanel inherits Rectangle {
                                 root.request-update-step(i, step);
                             }
                         }
-                        if step.kind == PipelineStepKind.Grayscale: GrayscaleStepCard {
+                        if step.kind == PipelineStepKind.ExtractChannel: ExtractChannelStepCard {
+                            channel: step.extract-channel;
                             remove => {
                                 root.request-remove-step(i);
+                            }
+                            changed => {
+                                step.extract-channel = self.channel;
+                                root.request-update-step(i, step);
                             }
                         }
                     }
