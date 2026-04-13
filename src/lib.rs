@@ -223,6 +223,7 @@ impl AppController {
         }
     }
 
+    // TODO: How to not reload images from disk and keep the cache consistent?
     fn handle_edit_op(&self, op: EditOp) {
         let Some(buffer) = self.loader.get_curr_active_buffer() else {
             return;
@@ -276,6 +277,83 @@ impl AppController {
                         selection.h as u32,
                     )
                 }
+                EditOpKind::ColorSpace => match op.string_val.as_str() {
+                    "RGB" => {
+                        loader.load_full_progressive(before_idx, true);
+                        return;
+                    }
+                    "HSV" => {
+                        let rgba = img.to_rgba8();
+                        let hsv_img =
+                            image::ImageBuffer::from_fn(rgba.width(), rgba.height(), |x, y| {
+                                let p = rgba.get_pixel(x, y);
+                                let srgb = palette::Srgb::new(
+                                    p[0] as f32 / 255.0,
+                                    p[1] as f32 / 255.0,
+                                    p[2] as f32 / 255.0,
+                                );
+                                let hsv: palette::Hsv = palette::IntoColor::into_color(srgb);
+
+                                let h = hsv.hue.into_positive_degrees();
+                                let h_u8 = if h.is_nan() {
+                                    0
+                                } else {
+                                    (h / 360.0 * 255.0).round() as u8
+                                };
+                                let s_u8 = (hsv.saturation * 255.0).round() as u8;
+                                let v_u8 = (hsv.value * 255.0).round() as u8;
+
+                                image::Rgba([h_u8, s_u8, v_u8, p[3]])
+                            });
+                        image::DynamicImage::ImageRgba8(hsv_img)
+                    }
+                    "Gray" => image::DynamicImage::ImageLumaA8(img.to_luma_alpha8()),
+                    "Red" | "Green" | "Blue" => {
+                        let rgba = img.to_rgba8();
+                        let channel_idx = match op.string_val.as_str() {
+                            "Red" => 0,
+                            "Green" => 1,
+                            "Blue" => 2,
+                            _ => 0,
+                        };
+                        let luma_a =
+                            image::ImageBuffer::from_fn(rgba.width(), rgba.height(), |x, y| {
+                                let p = rgba.get_pixel(x, y);
+                                image::LumaA([p[channel_idx], p[3]])
+                            });
+                        image::DynamicImage::ImageLumaA8(luma_a)
+                    }
+                    "Hue" | "Saturation" | "Value" => {
+                        let rgba = img.to_rgba8();
+                        let mode = op.string_val.clone();
+                        let luma_a =
+                            image::ImageBuffer::from_fn(rgba.width(), rgba.height(), |x, y| {
+                                let p = rgba.get_pixel(x, y);
+                                let srgb = palette::Srgb::new(
+                                    p[0] as f32 / 255.0,
+                                    p[1] as f32 / 255.0,
+                                    p[2] as f32 / 255.0,
+                                );
+                                let hsv: palette::Hsv = palette::IntoColor::into_color(srgb);
+                                let val = match mode.as_str() {
+                                    "Hue" => {
+                                        let h = hsv.hue.into_positive_degrees();
+                                        if h.is_nan() {
+                                            0
+                                        } else {
+                                            (h / 360.0 * 255.0).round() as u8
+                                        }
+                                    }
+                                    "Saturation" => (hsv.saturation * 255.0).round() as u8,
+                                    "Value" => (hsv.value * 255.0).round() as u8,
+                                    _ => 0,
+                                };
+                                image::LumaA([val, p[3]])
+                            });
+                        image::DynamicImage::ImageLumaA8(luma_a)
+                    }
+                    _ => img,
+                },
                 EditOpKind::Reset => {
                     loader.load_full_progressive(before_idx, true);
                     return;
@@ -297,6 +375,7 @@ impl AppController {
                 let _ = weak.upgrade_in_event_loop(move |ui| {
                     ui.global::<FullViewState>()
                         .set_curr_image(Image::from_rgba8(new_buf));
+                    ui.invoke_return_focus();
                 });
             }
         });

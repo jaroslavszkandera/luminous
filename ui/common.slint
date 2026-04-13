@@ -17,13 +17,25 @@ export enum EditOpKind {
     Brighten,
     Contrast,
     Crop,
+    ColorSpace,
     Reset,
+}
+
+export enum Channel {
+    Gray,
+    Red,
+    Green,
+    Blue,
+    Hue,
+    Saturation,
+    Value,
 }
 
 export struct EditOp {
     kind: EditOpKind,
     int-val: int,
     float-val: float,
+    string-val: string,
 }
 
 export struct GridItem {

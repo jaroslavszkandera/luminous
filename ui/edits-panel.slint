@@ -1,5 +1,5 @@
-import { SpinBox, Button } from "std-widgets.slint";
-import { EditOp, EditOpKind } from "common.slint";
+import { SpinBox, Button, ComboBox } from "std-widgets.slint";
+import { Channel, EditOp, EditOpKind } from "common.slint";
 
 component EditRow inherits HorizontalLayout {
     in property <string> label;
@@ -32,14 +32,14 @@ export component EditsPanel inherits Rectangle {
             Button {
                 text: "−90°";
                 clicked => {
-                    root.apply-edit({ kind: EditOpKind.RotateCCW, int-val: 0, float-val: 0 });
+                    root.apply-edit({ kind: EditOpKind.RotateCCW });
                 }
             }
 
             Button {
                 text: "+90°";
                 clicked => {
-                    root.apply-edit({ kind: EditOpKind.RotateCW, int-val: 0, float-val: 0 });
+                    root.apply-edit({ kind: EditOpKind.RotateCW });
                 }
             }
         }
@@ -49,14 +49,14 @@ export component EditsPanel inherits Rectangle {
             Button {
                 text: "H";
                 clicked => {
-                    root.apply-edit({ kind: EditOpKind.FlipH, int-val: 0, float-val: 0 });
+                    root.apply-edit({ kind: EditOpKind.FlipH });
                 }
             }
 
             Button {
                 text: "V";
                 clicked => {
-                    root.apply-edit({ kind: EditOpKind.FlipV, int-val: 0, float-val: 0 });
+                    root.apply-edit({ kind: EditOpKind.FlipV });
                 }
             }
         }
@@ -68,7 +68,7 @@ export component EditsPanel inherits Rectangle {
                 minimum: -255;
                 maximum: 255;
                 edited(v) => {
-                    root.apply-edit({ kind: EditOpKind.Brighten, int-val: v, float-val: 0 });
+                    root.apply-edit({ kind: EditOpKind.Brighten, int-val: v });
                 }
             }
         }
@@ -81,6 +81,26 @@ export component EditsPanel inherits Rectangle {
                 maximum: 100;
                 edited(v) => {
                     root.apply-edit({ kind: EditOpKind.Contrast, int-val: v, float-val: v / 100.0 });
+                }
+            }
+        }
+
+        EditRow {
+            label: "Color Space";
+            channel-combo-box := ComboBox {
+                model: ["RGB", "HSV", "Gray", "Red", "Green", "Blue", "Hue", "Saturation", "Value"];
+                selected(color-space) => {
+                    debug("Selected ColorSpace: ", color-space);
+                    root.apply-edit({ kind: EditOpKind.ColorSpace, string-val: color-space });
+                }
+            }
+        }
+
+        EditRow {
+            Button {
+                text: "Reset";
+                clicked => {
+                    root.apply-edit({ kind: EditOpKind.Reset });
                 }
             }
         }

@@ -145,21 +145,25 @@ impl ProcessingStep for ExtractChannelStep {
         "Extract Channel"
     }
     fn apply(&self, img: DynamicImage, params: &PipelineStep) -> DynamicImage {
+        let rgba = img.to_rgba8();
         match params.extract_channel {
-            Channel::Gray => DynamicImage::ImageLuma8(img.into_luma8()),
-            Channel::Red => {
-                DynamicImage::ImageLuma8(imageproc::map::into_red_channel(&img.into_rgb8()))
-            }
-            Channel::Green => {
-                DynamicImage::ImageLuma8(imageproc::map::into_green_channel(&img.into_rgb8()))
-            }
-            Channel::Blue => {
-                DynamicImage::ImageLuma8(imageproc::map::into_blue_channel(&img.into_rgb8()))
+            Channel::Gray => DynamicImage::ImageLumaA8(img.to_luma_alpha8()),
+            Channel::Red | Channel::Green | Channel::Blue => {
+                let idx = match params.extract_channel {
+                    Channel::Red => 0,
+                    Channel::Green => 1,
+                    Channel::Blue => 2,
+                    _ => 0,
+                };
+                let luma_a = image::ImageBuffer::from_fn(rgba.width(), rgba.height(), |x, y| {
+                    let p = rgba.get_pixel(x, y);
+                    image::LumaA([p[idx], p[3]])
+                });
+                DynamicImage::ImageLumaA8(luma_a)
             }
             Channel::Hue | Channel::Saturation | Channel::Value => {
-                let rgb = img.into_rgb8();
-                let luma = image::ImageBuffer::from_fn(rgb.width(), rgb.height(), |x, y| {
-                    let p = rgb.get_pixel(x, y);
+                let luma_a = image::ImageBuffer::from_fn(rgba.width(), rgba.height(), |x, y| {
+                    let p = rgba.get_pixel(x, y);
                     let srgb = palette::Srgb::new(
                         p[0] as f32 / 255.0,
                         p[1] as f32 / 255.0,
@@ -167,14 +171,21 @@ impl ProcessingStep for ExtractChannelStep {
                     );
                     let hsv: palette::Hsv = palette::IntoColor::into_color(srgb);
                     let val = match params.extract_channel {
-                        Channel::Hue => (hsv.hue.into_positive_degrees() / 360.0 * 255.0) as u8,
-                        Channel::Saturation => (hsv.saturation * 255.0) as u8,
-                        Channel::Value => (hsv.value * 255.0) as u8,
+                        Channel::Hue => {
+                            let h = hsv.hue.into_positive_degrees();
+                            if h.is_nan() {
+                                0
+                            } else {
+                                (h / 360.0 * 255.0).round() as u8
+                            }
+                        }
+                        Channel::Saturation => (hsv.saturation * 255.0).round() as u8,
+                        Channel::Value => (hsv.value * 255.0).round() as u8,
                         _ => 0,
                     };
-                    image::Luma([val])
+                    image::LumaA([val, p[3]])
                 });
-                DynamicImage::ImageLuma8(luma)
+                DynamicImage::ImageLumaA8(luma_a)
             }
         }
     }
