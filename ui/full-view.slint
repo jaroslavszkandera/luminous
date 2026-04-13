@@ -30,7 +30,7 @@ export component FullView inherits TouchArea {
     in property <int> total-images;
     in property <bool> timer-running: false;
     in property <string> plugin-status;
-    in-out property <bool> panel-visible: false; // TMP: testing
+    in-out property <bool> panel-visible: false;
 
     callback exit-full-view();
 
@@ -291,7 +291,7 @@ export component FullView inherits TouchArea {
                         title: @tr("Crop");
                         activated => {
                             let r = select-rect.selection;
-                            if (r.w > 2px && r.h > 2px) {
+                            if (r.w > 2px && r.h > 2px && select-rect.visible) {
                                 debug("Crop (x,y,w,h):", r.x, r.y, r.w, r.h);
                                 FullViewState.selection = { x: r.x, y: r.y, w: r.w, h: r.h };
                                 FullViewState.apply-edit({ kind: EditOpKind.Crop, int-val: 0, float-val: 0 });
@@ -360,7 +360,7 @@ export component FullView inherits TouchArea {
             side-width <=> root.side-panel-width;
 
             TabWidget {
-                current-index: 2;
+                current-index: 0;
                 Tab {
                     title: "Edit";
                     EditsPanel {

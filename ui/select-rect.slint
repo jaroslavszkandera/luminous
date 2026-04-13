@@ -68,14 +68,6 @@ export component SelectRect inherits Rectangle {
 
     public function hide() {
         self.visible = false;
-        zero-selection-coords();
-    }
-
-    public function zero-selection-coords() {
-        selection.x = 0;
-        selection.y = 0;
-        selection.w = 0;
-        selection.h = 0;
     }
 
     public function update-selection(screen-anchor: {x: length, y: length}, screen-opposite: {x: length, y: length}) {
