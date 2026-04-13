@@ -116,9 +116,7 @@ export component MainWindow inherits Window {
     in-out property <[PipelineStep]> pipeline-steps;
     callback pipeline-add-step(PipelineStepKind);
     callback pipeline-remove-step(int);
-    callback pipeline-update-rotate(int, RotateAngle);
-    callback pipeline-update-sigma(int, float);
-    callback pipeline-update-brighten(int, int);
+    callback pipeline-update-step(int, PipelineStep);
     callback pipeline-run();
 
     grid-ui := GridView {
@@ -132,17 +130,11 @@ export component MainWindow inherits Window {
         pipeline-add-step(k) => {
             root.pipeline-add-step(k);
         }
+        pipeline-update-step(i, s) => {
+            root.pipeline-update-step(i, s);
+        }
         pipeline-remove-step(i) => {
             root.pipeline-remove-step(i);
-        }
-        pipeline-update-rotate(i, a) => {
-            root.pipeline-update-rotate(i, a);
-        }
-        pipeline-update-sigma(i, s) => {
-            root.pipeline-update-sigma(i, s);
-        }
-        pipeline-update-brighten(i, b) => {
-            root.pipeline-update-brighten(i, b);
         }
         pipeline-run() => {
             root.pipeline-run();

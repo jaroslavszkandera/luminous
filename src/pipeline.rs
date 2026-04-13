@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Instant;
 
-use crate::{PipelineStep, PipelineStepKind, RotateAngle};
+use crate::{FlipDirection, PipelineStep, PipelineStepKind, RotateAngle};
 
 pub trait ProcessingStep: Send + Sync {
     fn apply(&self, img: DynamicImage, params: &PipelineStep) -> DynamicImage;
@@ -24,6 +24,9 @@ impl StepFactory {
         f.register(PipelineStepKind::Rotate, RotateStep);
         f.register(PipelineStepKind::GaussianBlur, GaussianBlurStep);
         f.register(PipelineStepKind::Brighten, BrightenStep);
+        f.register(PipelineStepKind::Resize, ResizeStep);
+        f.register(PipelineStepKind::Grayscale, GrayscaleStep);
+        f.register(PipelineStepKind::Flip, FlipStep);
         f
     }
 
@@ -53,7 +56,6 @@ impl ProcessingStep for RotateStep {
     fn name(&self) -> &'static str {
         "Rotate"
     }
-
     fn apply(&self, img: DynamicImage, params: &PipelineStep) -> DynamicImage {
         let angle = resolve_random_angle(params.rotate_angle);
         let rgba = img.to_rgba8();
@@ -95,7 +97,6 @@ impl ProcessingStep for GaussianBlurStep {
     fn name(&self) -> &'static str {
         "GaussianBlur"
     }
-
     fn apply(&self, img: DynamicImage, params: &PipelineStep) -> DynamicImage {
         img.blur(params.blur_sigma.max(0.1))
     }
@@ -106,9 +107,45 @@ impl ProcessingStep for BrightenStep {
     fn name(&self) -> &'static str {
         "Brighten"
     }
-
     fn apply(&self, img: DynamicImage, params: &PipelineStep) -> DynamicImage {
         img.brighten(params.brighten_value)
+    }
+}
+
+struct ResizeStep;
+impl ProcessingStep for ResizeStep {
+    fn name(&self) -> &'static str {
+        "Resize"
+    }
+    fn apply(&self, img: DynamicImage, params: &PipelineStep) -> DynamicImage {
+        img.resize_exact(
+            params.resize_width as u32,
+            params.resize_height as u32,
+            image::imageops::FilterType::Triangle,
+        )
+    }
+}
+
+struct GrayscaleStep;
+impl ProcessingStep for GrayscaleStep {
+    fn name(&self) -> &'static str {
+        "Grayscale"
+    }
+    fn apply(&self, img: DynamicImage, _params: &PipelineStep) -> DynamicImage {
+        DynamicImage::ImageLuma8(img.into_luma8())
+    }
+}
+
+struct FlipStep;
+impl ProcessingStep for FlipStep {
+    fn name(&self) -> &'static str {
+        "Flip"
+    }
+    fn apply(&self, img: DynamicImage, params: &PipelineStep) -> DynamicImage {
+        match params.flip_direction {
+            FlipDirection::Horizontal => img.fliph(),
+            FlipDirection::Vertical => img.flipv(),
+        }
     }
 }
 

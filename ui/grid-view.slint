@@ -35,9 +35,7 @@ export component GridView inherits Rectangle {
     callback batch-save-with-format(ImgFmt);
     callback pipeline-add-step(PipelineStepKind);
     callback pipeline-remove-step(int);
-    callback pipeline-update-rotate(int, RotateAngle);
-    callback pipeline-update-sigma(int, float);
-    callback pipeline-update-brighten(int, int);
+    callback pipeline-update-step(int, PipelineStep);
     callback pipeline-run();
 
     public function focus-search() {
@@ -306,14 +304,8 @@ export component GridView inherits Rectangle {
                     request-remove-step(i) => {
                         root.pipeline-remove-step(i);
                     }
-                    request-update-rotate(i, a) => {
-                        root.pipeline-update-rotate(i, a);
-                    }
-                    request-update-sigma(i, s) => {
-                        root.pipeline-update-sigma(i, s);
-                    }
-                    request-update-brighten(i, b) => {
-                        root.pipeline-update-brighten(i, b);
+                    request-update-step(i, s) => {
+                        root.pipeline-update-step(i, s);
                     }
                     run-pipeline() => {
                         root.pipeline-run();

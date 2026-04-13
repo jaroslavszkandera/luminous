@@ -10,6 +10,9 @@ export enum PipelineStepKind {
     Rotate,
     GaussianBlur,
     Brighten,
+    Resize,
+    Grayscale,
+    Flip,
 }
 
 export enum RotateAngle {
@@ -19,11 +22,19 @@ export enum RotateAngle {
     Random,
 }
 
+export enum FlipDirection {
+    Horizontal,
+    Vertical,
+}
+
 export struct PipelineStep {
     kind: PipelineStepKind,
     rotate-angle: RotateAngle,
     blur-sigma: float,
     brighten-value: int,
+    resize-width: int,
+    resize-height: int,
+    flip-direction: FlipDirection,
 }
 
 component CloseButton inherits Button {
@@ -68,7 +79,7 @@ component StepCard inherits Rectangle {
 export component RotateStepCard inherits StepCard {
     title: "Rotate";
     in-out property <RotateAngle> angle: RotateAngle.R90;
-    callback angle-changed(RotateAngle);
+    callback changed();
 
     HorizontalLayout {
         spacing: 6px;
@@ -84,7 +95,7 @@ export component RotateStepCard inherits StepCard {
             current-index: root.angle == RotateAngle.R90 ? 0 : root.angle == RotateAngle.R180 ? 1 : root.angle == RotateAngle.R270 ? 2 : 3;
             selected(val) => {
                 root.angle = val == "90°" ? RotateAngle.R90 : val == "180°" ? RotateAngle.R180 : val == "270°" ? RotateAngle.R270 : RotateAngle.Random;
-                root.angle-changed(root.angle);
+                root.changed();
             }
         }
     }
@@ -93,7 +104,7 @@ export component RotateStepCard inherits StepCard {
 export component GaussianBlurStepCard inherits StepCard {
     title: "Gaussian Blur";
     in-out property <float> sigma: 1.0;
-    callback sigma-changed(float);
+    callback changed();
 
     HorizontalLayout {
         spacing: 6px;
@@ -112,7 +123,7 @@ export component GaussianBlurStepCard inherits StepCard {
                 let f = val.to-float();
                 if (f > 0.0) {
                     root.sigma = f;
-                    root.sigma-changed(f);
+                    root.changed();
                 }
             }
         }
@@ -128,7 +139,7 @@ export component GaussianBlurStepCard inherits StepCard {
 export component BrightenStepCard inherits StepCard {
     title: "Brighten";
     in-out property <int> value: 10;
-    callback brighten-changed(int);
+    callback changed();
 
     HorizontalLayout {
         spacing: 6px;
@@ -144,9 +155,8 @@ export component BrightenStepCard inherits StepCard {
             input-type: number;
             placeholder-text: "10";
             edited(val) => {
-                let v = val.to-float();
-                root.value = v;
-                root.brighten-changed(root.value);
+                root.value = val.to-float();
+                root.changed();
             }
         }
 
@@ -158,22 +168,105 @@ export component BrightenStepCard inherits StepCard {
     }
 }
 
-component AddStepMenu inherits Rectangle {
-    callback add-rotate();
-    callback add-gaussian-blur();
-    callback add-brighten();
+export component ResizeStepCard inherits StepCard {
+    title: "Resize";
+    in-out property <int> w: 224;
+    in-out property <int> h: 224;
+    callback changed();
 
+    HorizontalLayout {
+        spacing: 6px;
+        Text {
+            text: "W:";
+            font-size: 12px;
+            vertical-alignment: center;
+            width: 16px;
+        }
+
+        LineEdit {
+            text: root.w;
+            input-type: number;
+            edited(val) => {
+                root.w = Math.max(1, val.to-float());
+                root.changed();
+            }
+        }
+
+        Text {
+            text: "H:";
+            font-size: 12px;
+            vertical-alignment: center;
+            width: 16px;
+        }
+
+        LineEdit {
+            text: root.h;
+            input-type: number;
+            edited(val) => {
+                root.h = Math.max(1, val.to-float());
+                root.changed();
+            }
+        }
+    }
+}
+
+export component FlipStepCard inherits StepCard {
+    title: "Flip";
+    in-out property <FlipDirection> direction: FlipDirection.Horizontal;
+    callback changed();
+
+    HorizontalLayout {
+        spacing: 6px;
+        Text {
+            text: "Dir:";
+            font-size: 12px;
+            vertical-alignment: center;
+            width: 30px;
+        }
+
+        ComboBox {
+            model: ["Horizontal", "Vertical"];
+            current-index: root.direction == FlipDirection.Horizontal ? 0 : 1;
+            selected(val) => {
+                root.direction = val == "Horizontal" ? FlipDirection.Horizontal : FlipDirection.Vertical;
+                root.changed();
+            }
+        }
+    }
+}
+
+export component GrayscaleStepCard inherits StepCard {
+    title: "Grayscale Conversion";
+    height: 40px;
+}
+
+component AddStepMenu inherits Rectangle {
+    callback add-step(PipelineStepKind);
     height: 28px;
 
     ComboBox {
-        model: ["Add step", "Rotate", "Brighten", "Gaussian Blur"];
+        model: [
+            "Add step",
+            "Rotate",
+            "Brighten",
+            "Gaussian Blur",
+            "Resize",
+            "Grayscale",
+            "Flip"
+        ];
         selected(val) => {
             if (val == "Rotate") {
-                root.add-rotate();
+                root.add-step(PipelineStepKind.Rotate);
             } else if (val == "Brighten") {
-                root.add-brighten();
+                root.add-step(PipelineStepKind.Brighten);
             } else if (val == "Gaussian Blur") {
-                root.add-gaussian-blur();
+                root.add-step(PipelineStepKind.GaussianBlur);
+            } else if (val == "Resize") {
+                root.add-step(PipelineStepKind.Resize);
+            } else if (val == "Grayscale") {
+                root.add-step(PipelineStepKind.Grayscale);
+            } else if (val == "Flip") {
+                root.add-step(PipelineStepKind.Flip);
             }
             self.current-index = 0;
         }
@@ -184,9 +277,7 @@ export component PipelinePanel inherits Rectangle {
     in-out property <[PipelineStep]> steps;
     callback request-add-step(PipelineStepKind);
     callback request-remove-step(int);
-    callback request-update-rotate(int, RotateAngle);
-    callback request-update-sigma(int, float);
-    callback request-update-brighten(int, int);
+    callback request-update-step(int, PipelineStep);
     callback run-pipeline();
 
     HorizontalLayout {
@@ -202,14 +293,8 @@ export component PipelinePanel inherits Rectangle {
                     }
 
                     AddStepMenu {
-                        add-rotate => {
-                            root.request-add-step(PipelineStepKind.Rotate);
-                        }
-                        add-gaussian-blur => {
-                            root.request-add-step(PipelineStepKind.GaussianBlur);
-                        }
-                        add-brighten => {
-                            root.request-add-step(PipelineStepKind.Brighten);
+                        add-step(k) => {
+                            root.request-add-step(k);
                         }
                     }
                 }
@@ -224,8 +309,9 @@ export component PipelinePanel inherits Rectangle {
                             remove => {
                                 root.request-remove-step(i);
                             }
-                            angle-changed(a) => {
-                                root.request-update-rotate(i, a);
+                            changed => {
+                                step.rotate-angle = self.angle;
+                                root.request-update-step(i, step);
                             }
                         }
                         if step.kind == PipelineStepKind.GaussianBlur: GaussianBlurStepCard {
@@ -233,8 +319,9 @@ export component PipelinePanel inherits Rectangle {
                             remove => {
                                 root.request-remove-step(i);
                             }
-                            sigma-changed(s) => {
-                                root.request-update-sigma(i, s);
+                            changed => {
+                                step.blur-sigma = self.sigma;
+                                root.request-update-step(i, step);
                             }
                         }
                         if step.kind == PipelineStepKind.Brighten: BrightenStepCard {
@@ -242,8 +329,36 @@ export component PipelinePanel inherits Rectangle {
                             remove => {
                                 root.request-remove-step(i);
                             }
-                            brighten-changed(v) => {
-                                root.request-update-brighten(i, v);
+                            changed => {
+                                step.brighten-value = self.value;
+                                root.request-update-step(i, step);
+                            }
+                        }
+                        if step.kind == PipelineStepKind.Resize: ResizeStepCard {
+                            w: step.resize-width;
+                            h: step.resize-height;
+                            remove => {
+                                root.request-remove-step(i);
+                            }
+                            changed => {
+                                step.resize-width = self.w;
+                                step.resize-height = self.h;
+                                root.request-update-step(i, step);
+                            }
+                        }
+                        if step.kind == PipelineStepKind.Flip: FlipStepCard {
+                            direction: step.flip-direction;
+                            remove => {
+                                root.request-remove-step(i);
+                            }
+                            changed => {
+                                step.flip-direction = self.direction;
+                                root.request-update-step(i, step);
+                            }
+                        }
+                        if step.kind == PipelineStepKind.Grayscale: GrayscaleStepCard {
+                            remove => {
+                                root.request-remove-step(i);
                             }
                         }
                     }
