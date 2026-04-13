@@ -27,7 +27,7 @@ export global GridViewState {
 
 export component GridView inherits Rectangle {
     in-out property <bool> panel-visible: false;
-    in-out property <length> side-panel-width: 240px;
+    in-out property <length> side-panel-width: 300px;
     in-out property <[PipelineStep]> pipeline-steps;
 
     property <int> last-clicked-index: -1;
@@ -291,6 +291,7 @@ export component GridView inherits Rectangle {
             }
 
             side-panel := SidePanel {
+                min-side-panel-width: 300px;
                 x: parent.width - self.width;
                 is-visible: root.panel-visible;
                 side-width <=> root.side-panel-width;

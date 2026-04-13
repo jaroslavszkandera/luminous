@@ -1,4 +1,10 @@
-import { Button, ScrollView, LineEdit, ComboBox } from "std-widgets.slint";
+import {
+    Button,
+    ScrollView,
+    LineEdit,
+    ComboBox,
+    Palette,
+} from "std-widgets.slint";
 
 export enum PipelineStepKind {
     Rotate,
@@ -30,6 +36,7 @@ component StepCard inherits Rectangle {
     callback remove();
 
     height: 76px;
+    border-color: Palette.border;
     border-radius: 6px;
     border-width: 1px;
 
@@ -182,66 +189,74 @@ export component PipelinePanel inherits Rectangle {
     callback request-update-brighten(int, int);
     callback run-pipeline();
 
-    VerticalLayout {
-        Text {
-            text: "Pipeline";
-            font-size: 14px;
-            font-weight: 700;
-        }
-
-        AddStepMenu {
-            add-rotate => {
-                root.request-add-step(PipelineStepKind.Rotate);
-            }
-            add-gaussian-blur => {
-                root.request-add-step(PipelineStepKind.GaussianBlur);
-            }
-            add-brighten => {
-                root.request-add-step(PipelineStepKind.Brighten);
-            }
-        }
-
-        ScrollView {
-            viewport-height: steps.length * 76px;
-            VerticalLayout {
-                for step[i] in root.steps: Rectangle {
-                    if step.kind == PipelineStepKind.Rotate: RotateStepCard {
-                        angle: step.rotate-angle;
-                        remove => {
-                            root.request-remove-step(i);
-                        }
-                        angle-changed(a) => {
-                            root.request-update-rotate(i, a);
-                        }
+    HorizontalLayout {
+        padding: 6px;
+        VerticalLayout {
+            spacing: 6px;
+            Rectangle {
+                VerticalLayout {
+                    Text {
+                        text: "Pipeline";
+                        font-size: 14px;
+                        font-weight: 700;
                     }
-                    if step.kind == PipelineStepKind.GaussianBlur: GaussianBlurStepCard {
-                        sigma: step.blur-sigma;
-                        remove => {
-                            root.request-remove-step(i);
+
+                    AddStepMenu {
+                        add-rotate => {
+                            root.request-add-step(PipelineStepKind.Rotate);
                         }
-                        sigma-changed(s) => {
-                            root.request-update-sigma(i, s);
+                        add-gaussian-blur => {
+                            root.request-add-step(PipelineStepKind.GaussianBlur);
                         }
-                    }
-                    if step.kind == PipelineStepKind.Brighten: BrightenStepCard {
-                        value: step.brighten-value;
-                        remove => {
-                            root.request-remove-step(i);
-                        }
-                        brighten-changed(v) => {
-                            root.request-update-brighten(i, v);
+                        add-brighten => {
+                            root.request-add-step(PipelineStepKind.Brighten);
                         }
                     }
                 }
             }
-        }
 
-        Button {
-            text: "Save";
-            height: 34px;
-            primary: true;
-            clicked => {
-                root.run-pipeline();
+            ScrollView {
+                viewport-height: steps.length * 76px;
+                VerticalLayout {
+                    for step[i] in root.steps: Rectangle {
+                        if step.kind == PipelineStepKind.Rotate: RotateStepCard {
+                            angle: step.rotate-angle;
+                            remove => {
+                                root.request-remove-step(i);
+                            }
+                            angle-changed(a) => {
+                                root.request-update-rotate(i, a);
+                            }
+                        }
+                        if step.kind == PipelineStepKind.GaussianBlur: GaussianBlurStepCard {
+                            sigma: step.blur-sigma;
+                            remove => {
+                                root.request-remove-step(i);
+                            }
+                            sigma-changed(s) => {
+                                root.request-update-sigma(i, s);
+                            }
+                        }
+                        if step.kind == PipelineStepKind.Brighten: BrightenStepCard {
+                            value: step.brighten-value;
+                            remove => {
+                                root.request-remove-step(i);
+                            }
+                            brighten-changed(v) => {
+                                root.request-update-brighten(i, v);
+                            }
+                        }
+                    }
+                }
+            }
+
+            Button {
+                text: "Save";
+                height: 34px;
+                primary: true;
+                clicked => {
+                    root.run-pipeline();
+                }
             }
         }
     }
