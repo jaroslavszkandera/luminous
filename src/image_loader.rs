@@ -1,7 +1,7 @@
 use dashmap::DashMap;
 use directories::ProjectDirs;
 use image::imageops::FilterType;
-use log::{debug, error, warn};
+use log::{debug, error, trace, warn};
 use rayon::ThreadPool;
 use sha2::{Digest, Sha256};
 use slint::{Image, Rgba8Pixel, SharedPixelBuffer};
@@ -173,7 +173,8 @@ impl ImageLoader {
         };
 
         if !dir.exists() {
-            return true;
+            error!("Failed to clear disk cache at {dir:?}: No directory");
+            return false;
         }
 
         if let Err(e) = fs::remove_dir_all(dir) {
@@ -212,7 +213,7 @@ impl ImageLoader {
 
         self.pool.spawn(move || {
             if epoch_counter.load(Ordering::Relaxed) != my_epoch {
-                debug!("Thumb job cancelled (epoch mismatch) index={index}");
+                trace!("Thumb job cancelled (epoch mismatch) index={index}");
                 return;
             }
 
@@ -220,11 +221,11 @@ impl ImageLoader {
             let buffer = Self::decode_thumb(&path, &plugin_manager, &cache_path, res);
 
             if epoch_counter.load(Ordering::Relaxed) != my_epoch {
-                debug!("Thumb job discarded after decode (epoch mismatch) index={index}");
+                trace!("Thumb job discarded after decode (epoch mismatch) index={index}");
                 return;
             }
 
-            debug!(
+            trace!(
                 "Thumb ({res}px) {:?} {:.1}ms",
                 path.file_name().unwrap_or_default(),
                 t.elapsed().as_secs_f64() * 1000.0
@@ -239,13 +240,18 @@ impl ImageLoader {
         None
     }
 
-    pub fn load_full_progressive(&self, index: usize) -> Image {
+    pub fn load_full_progressive(&self, index: usize, force_disk_reload: bool) -> Image {
         let my_token = self.next_full_token.fetch_add(1, Ordering::Relaxed);
         self.active_idx.store(index, Ordering::Relaxed);
 
-        if let Some(buf) = self.full_cache.get(&index) {
-            debug!("Full cache hit: {index}");
-            return Image::from_rgba8(buf.clone());
+        if !force_disk_reload {
+            if let Some(buf) = self.full_cache.get(&index) {
+                trace!("Full cache hit: {index}");
+                return Image::from_rgba8(buf.clone());
+            }
+        } else {
+            trace!("Forcing disk reload for index: {index}");
+            self.full_cache.remove(&index);
         }
 
         let backup = self
@@ -267,7 +273,7 @@ impl ImageLoader {
         self.pool.spawn(move || {
             let latest = token_counter.load(Ordering::Relaxed);
             if my_token + 1 < latest {
-                debug!(
+                trace!(
                     "Full job skipped before decode index={index} token={my_token} latest={latest}"
                 );
                 return;
@@ -276,7 +282,7 @@ impl ImageLoader {
             let t = Instant::now();
             let buffer = Self::decode_full(&path, &plugin_manager);
 
-            debug!(
+            trace!(
                 "Full {:?} {:.1}ms",
                 path.file_name().unwrap_or_default(),
                 t.elapsed().as_secs_f64() * 1000.0
@@ -286,7 +292,7 @@ impl ImageLoader {
 
             let latest = token_counter.load(Ordering::Relaxed);
             if my_token + 1 < latest {
-                debug!("Full UI update skipped index={index} token={my_token} latest={latest}");
+                trace!("Full UI update skipped index={index} token={my_token} latest={latest}");
                 return;
             }
 
@@ -320,7 +326,7 @@ impl ImageLoader {
         self.full_cache.retain(|k, _| {
             let keep = active.contains(k);
             if !keep {
-                debug!("Evicted full image: {k}");
+                trace!("Evicted full image: {k}");
             }
             keep
         });

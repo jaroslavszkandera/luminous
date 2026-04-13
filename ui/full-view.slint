@@ -2,7 +2,7 @@ import { Palette, TabWidget, Button } from "std-widgets.slint";
 import { ImgFmt, EditOp, EditOpKind } from "common.slint";
 import { SidePanel } from "side-panel.slint";
 import { EditsPanel } from "edits-panel.slint";
-import { SelectRect } from "select-rect.slint";
+import { SelectRect, ImgRect } from "select-rect.slint";
 import { InteractivePlugin } from "plugins.slint";
 import { ExifTable } from "exif.slint";
 
@@ -22,6 +22,7 @@ export global FullViewState {
 
     in property <[string]> encoder_extensions;
     callback save-with-format(string);
+    in property <ImgRect> selection;
     callback apply-edit(EditOp);
 }
 
@@ -29,7 +30,7 @@ export component FullView inherits TouchArea {
     in property <int> total-images;
     in property <bool> timer-running: false;
     in property <string> plugin-status;
-    in-out property <bool> panel-visible: true; // TMP: testing
+    in-out property <bool> panel-visible: false; // TMP: testing
 
     callback exit-full-view();
 
@@ -253,6 +254,7 @@ export component FullView inherits TouchArea {
                 img-offset-y: root.img-vis-y;
                 img-scale: root.img-render-scale;
                 confirmed => {
+                    debug("select-rect confirmed");
                     if (select-rect.selection.w > 2px && select-rect.selection.h > 2px) {
                         if interactive-plugin.select-active {
                             let r = select-rect.selection;
@@ -264,6 +266,7 @@ export component FullView inherits TouchArea {
                     select-rect.hide();
                 }
                 cancelled => {
+                    debug("select-rect cancelled");
                     select-rect.hide();
                 }
             }
@@ -285,6 +288,45 @@ export component FullView inherits TouchArea {
                     }
 
                     MenuItem {
+                        title: @tr("Crop");
+                        activated => {
+                            let r = select-rect.selection;
+                            if (r.w > 2px && r.h > 2px) {
+                                debug("Crop (x,y,w,h):", r.x, r.y, r.w, r.h);
+                                FullViewState.selection = { x: r.x, y: r.y, w: r.w, h: r.h };
+                                FullViewState.apply-edit({ kind: EditOpKind.Crop, int-val: 0, float-val: 0 });
+                                select-rect.hide();
+                                reset-zoom();
+                            } else {
+                                debug("Crop ignored, selection is none");
+                            }
+                        }
+                    }
+
+                    MenuItem {
+                        title: @tr("Flip Horizontal");
+                        activated => {
+                            FullViewState.apply-edit({ kind: EditOpKind.FlipH, int-val: 0, float-val: 0 });
+                        }
+                    }
+
+                    MenuItem {
+                        title: @tr("Flip Vertical");
+                        activated => {
+                            FullViewState.apply-edit({ kind: EditOpKind.FlipV, int-val: 0, float-val: 0 });
+                        }
+                    }
+
+                    MenuItem {
+                        title: @tr("Reset image edits");
+                        activated => {
+                            FullViewState.apply-edit({ kind: EditOpKind.Reset, int-val: 0, float-val: 0 });
+                        }
+                    }
+
+                    MenuSeparator { }
+
+                    MenuItem {
                         title: @tr("Reset zoom");
                         activated => {
                             root.reset-zoom();
@@ -298,6 +340,8 @@ export component FullView inherits TouchArea {
                         }
                     }
 
+                    // TODO
+                    // MenuItem {@tr("Save (overwrite)");}
                     Menu {
                         title: @tr("Save with format");
                         for ext in FullViewState.encoder_extensions: MenuItem {

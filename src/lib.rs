@@ -83,7 +83,7 @@ impl AppController {
         let weak_full = window_weak.clone();
         let pm = Arc::clone(&plugin_manager);
         loader.on_full_ready(move |index, buffer| {
-            if let Some(plugin) = pm.get_plugin_by_id("SAM2") {
+            if let Some(plugin) = pm.get_plugin_by_id("SAM3") {
                 let buf = buffer.clone();
                 std::thread::spawn(move || {
                     plugin.set_interactive_image(&buf);
@@ -183,7 +183,7 @@ impl AppController {
         let weak = self.window_weak.clone();
         let loader = self.loader.clone();
 
-        let display_img = loader.load_full_progressive(index);
+        let display_img = loader.load_full_progressive(index, false);
 
         if let Some(ui) = weak.upgrade() {
             let fv = ui.global::<FullViewState>();
@@ -228,7 +228,12 @@ impl AppController {
             return;
         };
         let loader = self.loader.clone();
+        let before_idx = loader.active_idx.load(Ordering::Relaxed);
         let weak = self.window_weak.clone();
+        let selection = weak
+            .upgrade()
+            .map(|window| window.global::<FullViewState>().get_selection())
+            .unwrap_or_default();
 
         self.loader.pool.spawn(move || {
             let bytes: &[u8] = bytemuck::cast_slice(buffer.as_slice());
@@ -262,6 +267,19 @@ impl AppController {
                 }
                 EditOpKind::Brighten => img.brighten(op.int_val),
                 EditOpKind::Contrast => img.adjust_contrast(op.float_val),
+                EditOpKind::Crop => {
+                    save_to_cache = true;
+                    img.crop_imm(
+                        selection.x as u32,
+                        selection.y as u32,
+                        selection.w as u32,
+                        selection.h as u32,
+                    )
+                }
+                EditOpKind::Reset => {
+                    loader.load_full_progressive(before_idx, true);
+                    return;
+                }
             };
 
             let new_buf = SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
@@ -270,17 +288,17 @@ impl AppController {
                 result.height(),
             );
 
-            // FIX: If next/prev image is requested quickly, it can be saved into a different
-            // cache idx.
-            if save_to_cache {
-                let active_idx = loader.active_idx.load(Ordering::Relaxed);
-                loader.cache_buffer(active_idx, new_buf.clone());
-            }
+            let active_idx = loader.active_idx.load(Ordering::Relaxed);
+            if before_idx == active_idx {
+                if save_to_cache {
+                    loader.cache_buffer(active_idx, new_buf.clone());
+                }
 
-            let _ = weak.upgrade_in_event_loop(move |ui| {
-                ui.global::<FullViewState>()
-                    .set_curr_image(Image::from_rgba8(new_buf));
-            });
+                let _ = weak.upgrade_in_event_loop(move |ui| {
+                    ui.global::<FullViewState>()
+                        .set_curr_image(Image::from_rgba8(new_buf));
+                });
+            }
         });
     }
 
@@ -415,7 +433,7 @@ impl AppController {
                 // TODO: make more ambiguous
                 // if let Some(plugin) = loader.plugin_manager.get_interactive_plugin() {
                 // if let Some(plugin) = loader.plugin_manager.get_plugin_by_id("SAM3") {
-                if let Some(plugin) = loader.plugin_manager.get_plugin_by_id("SAM2") {
+                if let Some(plugin) = loader.plugin_manager.get_plugin_by_id("SAM3") {
                     if txt.len() > 0 {
                         if let Some(mask) = plugin.text_to_mask(txt) {
                             if before_idx == loader.active_idx.load(Ordering::Relaxed) {
@@ -487,7 +505,7 @@ impl AppController {
         let curr_active_buffer = loader.get_curr_active_buffer();
         loader.pool.spawn(move || {
             // TODO:
-            if let Some(plugin) = plugin_manager.get_plugin_by_id("SAM2") {
+            if let Some(plugin) = plugin_manager.get_plugin_by_id("SAM3") {
                 if let Some(buf) = curr_active_buffer {
                     plugin.set_interactive_image(&buf);
                 }
