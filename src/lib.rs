@@ -148,7 +148,7 @@ impl AppController {
             if self.active_grid_indices.contains(&row) {
                 continue;
             }
-            // self.active_grid_indices.insert(row);
+            self.active_grid_indices.insert(row);
 
             let abs_idx = self.filtered_indices[row];
             if let Some(buf) = self.loader.load_grid_thumb(abs_idx) {

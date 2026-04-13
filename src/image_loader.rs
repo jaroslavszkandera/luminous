@@ -402,6 +402,15 @@ impl ImageLoader {
         };
 
         let (w, h) = (img.width(), img.height());
+
+        if res >= w || res >= h {
+            trace!(
+                "Not saving thumb {:?}, smaller than bucket res (res={res}, w={w}, h={h})",
+                path.file_name()
+            );
+            return to_pixel_buffer(img);
+        }
+
         let scale = (res as f64 / w.max(h) as f64).min(1.0);
         let resized = img.resize(
             (w as f64 * scale).round() as u32,
