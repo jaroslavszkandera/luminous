@@ -1,0 +1,6 @@
+{
+  "name": "WebDataset Encoder Plugin",
+  "version": "0.1.0",
+  "extensions": ["tar", "wds"],
+  "capabilities": ["encoder"]
+}

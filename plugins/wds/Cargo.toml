@@ -1,0 +1,11 @@
+[package]
+name = "wds"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+image = { version = "0.25.10", default-features = false, features = ["png"] }
+tar = "0.4.45"
