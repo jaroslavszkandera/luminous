@@ -1,5 +1,5 @@
-use crate::plugins::Backend;
 use crate::plugins::manifest::PluginManifest;
+use crate::plugins::Backend;
 use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use shared_memory::{Shmem, ShmemConf};

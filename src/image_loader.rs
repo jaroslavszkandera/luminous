@@ -377,7 +377,8 @@ impl ImageLoader {
         Some(cache_dir?.join(format!("{}_{res}.webp", hex::encode(h.finalize()))))
     }
 
-    // FIX: The image open and save thumbnail is not atomic, resulting in corrupt cache errors.
+    /// The image open and save thumbnail is not atomic, resulting in corrupt cache errors.
+    /// This needs to handled by the caller.
     fn decode_thumb(
         path: &Path,
         plugin_manager: &PluginManager,

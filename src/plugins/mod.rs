@@ -6,7 +6,7 @@ use image::DynamicImage;
 pub use ipc_daemon::{IpcStatus, PluginControl};
 pub use manifest::{BackendKind, PluginCapability, PluginManifest, load_manifest};
 
-use crate::fs_scan::{ImageFormat, ImageFormats};
+use crate::fs_scan::ImageFormat;
 use ipc_daemon::DaemonBackend;
 use log::{debug, error, info};
 use shared_lib::SharedLibBackend;
@@ -221,9 +221,7 @@ impl Backend for Arc<DaemonBackend> {
 }
 
 pub struct PluginManager {
-    // TODO: merge plugins backends
-    shlib_plugins: Vec<Arc<Plugin>>,
-    daemon_plugins: Vec<Arc<Plugin>>,
+    plugins: Vec<Arc<Plugin>>,
 }
 
 impl Default for PluginManager {
@@ -235,8 +233,7 @@ impl Default for PluginManager {
 impl PluginManager {
     pub fn new() -> Self {
         Self {
-            shlib_plugins: Vec::new(),
-            daemon_plugins: Vec::new(),
+            plugins: Vec::new(),
         }
     }
 
@@ -294,15 +291,15 @@ impl PluginManager {
     }
 
     pub fn get_all_plugins(&self) -> Vec<Arc<Plugin>> {
-        self.daemon_plugins.iter().cloned().collect()
+        self.plugins.iter().cloned().collect()
     }
 
     pub fn get_plugin_by_id(&self, id: &str) -> Option<Arc<Plugin>> {
-        self.daemon_plugins.iter().find(|&p| p.id == id).cloned()
+        self.plugins.iter().find(|&p| p.id == id).cloned()
     }
 
     pub fn get_interactive_plugins(&self) -> impl Iterator<Item = &Arc<Plugin>> {
-        self.daemon_plugins.iter().filter(|p| {
+        self.plugins.iter().filter(|p| {
             p.manifest
                 .capabilities
                 .contains(&PluginCapability::Interactive)
@@ -310,7 +307,7 @@ impl PluginManager {
     }
 
     pub fn get_search_plugins(&self) -> impl Iterator<Item = &Arc<Plugin>> {
-        self.daemon_plugins
+        self.plugins
             .iter()
             .filter(|p| p.manifest.capabilities.contains(&PluginCapability::Search))
     }
@@ -326,7 +323,7 @@ impl PluginManager {
     }
 
     pub fn get_supported_extensions(&self) -> Vec<ImageFormat> {
-        self.shlib_plugins
+        self.plugins
             .iter()
             .filter_map(|p| match p.image_format_support.read() {
                 Ok(support) => Some(support.clone()),
@@ -335,15 +332,12 @@ impl PluginManager {
             .collect()
     }
 
-    pub fn get_supprted_image_formats(&self) -> Vec<ImageFormats> {
-        unimplemented!();
-    }
+    // pub fn get_supprted_image_formats(&self) -> Vec<ImageFormats> {
+    //     unimplemented!();
+    // }
 
     pub fn get_plugins_manifests(&self) -> Vec<PluginManifest> {
-        self.daemon_plugins
-            .iter()
-            .map(|p| p.manifest.clone())
-            .collect()
+        self.plugins.iter().map(|p| p.manifest.clone()).collect()
     }
 
     // pub fn has_decoding(&self, path: &Path) -> bool {
@@ -353,7 +347,7 @@ impl PluginManager {
             None => return false,
         };
 
-        self.shlib_plugins.iter().any(|p| {
+        self.plugins.iter().any(|p| {
             if let Ok(support) = p.image_format_support.read() {
                 support.decoding_support && support.exts.contains(&ext)
             } else {
@@ -362,13 +356,14 @@ impl PluginManager {
         })
     }
 
+    // Has plugin for extension?
     pub fn has_encoding(&self, path: &Path) -> bool {
         let ext = match path.extension().and_then(|e| e.to_str()) {
             Some(e) => e.to_lowercase(),
             None => return false,
         };
 
-        self.shlib_plugins.iter().any(|p| {
+        self.plugins.iter().any(|p| {
             if let Ok(support) = p.image_format_support.read() {
                 support.encoding_support && support.exts.contains(&ext)
             } else {
@@ -395,7 +390,7 @@ impl PluginManager {
             }
         };
 
-        let plugin = self.shlib_plugins.iter().find(|p| {
+        let plugin = self.plugins.iter().find(|p| {
             if let Ok(support) = p.image_format_support.read() {
                 support.encoding_support && support.exts.contains(&ext)
             } else {
@@ -415,7 +410,7 @@ impl PluginManager {
 
     pub fn decode_dynamic(&self, path: &Path) -> Option<image::DynamicImage> {
         let ext = path.extension()?.to_str()?.to_lowercase();
-        let plugin = self.shlib_plugins.iter().find(|p| {
+        let plugin = self.plugins.iter().find(|p| {
             if let Ok(support) = p.image_format_support.read() {
                 support.decoding_support && support.exts.contains(&ext)
             } else {
@@ -464,16 +459,17 @@ impl PluginManager {
                     debug!("Encoder support for {:?}", manifest.extensions);
                 }
                 PluginCapability::Interactive => {
-                    self.daemon_plugins.push(plugin.clone());
                     debug!("Interactive plugin '{}'", manifest.name);
                 }
                 PluginCapability::Search => {
-                    self.daemon_plugins.push(plugin.clone());
                     debug!("Search plugin '{}'", manifest.name);
                 }
                 PluginCapability::Unknown => {
-                    // FIX: don't register plugins with Unknown capabilities
-                    error!("Unknown capability in plugin '{}'", manifest.name);
+                    error!(
+                        "Unknown capability in plugin '{}', not registering",
+                        manifest.name
+                    );
+                    return;
                 }
             }
         }
@@ -494,7 +490,7 @@ impl PluginManager {
                 }
                 Err(e) => error!("Failed to acquire write lock: {}", e),
             }
-            self.shlib_plugins.push(plugin.clone());
         }
+        self.plugins.push(plugin.clone());
     }
 }
