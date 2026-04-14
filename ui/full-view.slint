@@ -3,7 +3,7 @@ import { ImgFmt, EditOp, EditOpKind } from "common.slint";
 import { SidePanel } from "side-panel.slint";
 import { EditsPanel } from "edits-panel.slint";
 import { SelectRect, ImgRect } from "select-rect.slint";
-import { InteractivePlugin } from "plugins.slint";
+import { InteractivePlugin, Plugin } from "plugins.slint";
 import { ExifTable } from "exif.slint";
 
 export global FullViewState {
@@ -15,10 +15,11 @@ export global FullViewState {
     callback request-next-image();
     callback request-prev-image();
 
+    in property <[Plugin]> interactive-plugins;
     in property <image> mask-overlay;
     callback clear-curr-mask-overlay();
     callback save-curr-mask-overlay();
-    callback request-segmentation(int, int, int, int, string);
+    callback request-segmentation(string, int, int, int, int, string);
 
     in property <[string]> encoder_extensions;
     callback save-with-format(string);
@@ -29,13 +30,12 @@ export global FullViewState {
 export component FullView inherits TouchArea {
     in property <int> total-images;
     in property <bool> timer-running: false;
-    in property <string> plugin-status;
     in-out property <bool> panel-visible: false;
 
     callback exit-full-view();
 
-    in-out property <bool> click-active;
-    in-out property <bool> select-active;
+    // TODO: Not my proudest moments, but it works... revisit
+    property <int> interactive-plugins-idx: -1;
 
     property <string> display-coords: "0,0";
     property <float> zoom-scale: 1.0;
@@ -152,9 +152,10 @@ export component FullView inherits TouchArea {
                 if (select-rect.selection.w < 2px || select-rect.selection.h < 2px) {
                     if FullViewState.curr-image.width > 0 {
                         let coords = root.to-image-coords(root.mouse-x, root.mouse-y);
-                        if interactive-plugin.click-active {
-                            FullViewState.request-segmentation(coords.x, coords.y, -1, -1, "");
-                        } else if interactive-plugin.select-active && coords.x != coords.x + select-rect.selection.w / 1px {
+                        if interactive-plugins-idx > -1 && FullViewState.interactive-plugins[interactive-plugins-idx].click-active {
+                            debug("request-segmentation:", FullViewState.interactive-plugins[interactive-plugins-idx].id, interactive-plugins-idx);
+                            FullViewState.request-segmentation(FullViewState.interactive-plugins[interactive-plugins-idx].id, coords.x, coords.y, -1, -1, "");
+                        } else if interactive-plugins-idx > -1 && FullViewState.interactive-plugins[interactive-plugins-idx].select-active && coords.x != coords.x + select-rect.selection.w / 1px {
                             select-rect.confirmed();
                         }
                     }
@@ -256,9 +257,10 @@ export component FullView inherits TouchArea {
                 confirmed => {
                     debug("select-rect confirmed");
                     if (select-rect.selection.w > 2px && select-rect.selection.h > 2px) {
-                        if interactive-plugin.select-active {
+                        if interactive-plugins-idx > -1 && FullViewState.interactive-plugins[interactive-plugins-idx].select-active {
                             let r = select-rect.selection;
-                            FullViewState.request-segmentation(r.x / 1px, r.y / 1px, (r.x + r.w) / 1px, (r.y + r.h) / 1px, "");
+                            debug("request-segmentation:", FullViewState.interactive-plugins[interactive-plugins-idx].id, interactive-plugins-idx);
+                            FullViewState.request-segmentation(FullViewState.interactive-plugins[interactive-plugins-idx].id, r.x / 1px, r.y / 1px, (r.x + r.w) / 1px, (r.y + r.h) / 1px, "");
                         } else {
                             root.zoom-to-selection();
                         }
@@ -405,12 +407,35 @@ export component FullView inherits TouchArea {
                             }
                         }
 
-                        interactive-plugin := InteractivePlugin {
-                            click-active: root.click-active;
-                            select-active: root.select-active;
+                        // TODO: How do I make mutally exclusive checked buttons?
+                        for plugin[i] in FullViewState.interactive-plugins: InteractivePlugin {
+                            plugin: FullViewState.interactive-plugins[i];
+
                             interactive-text-submitted(txt) => {
-                                FullViewState.request-segmentation(0, 0, 0, 0, txt);
-                            };
+                                FullViewState.request-segmentation(plugin.id, 0, 0, 0, 0, txt);
+                            }
+                            click-active-changed(active) => {
+                                debug("click-active-changed", interactive-plugins-idx, i);
+                                FullViewState.interactive-plugins[i].click-active = active;
+                                if interactive-plugins-idx > -1 && interactive-plugins-idx != i {
+                                    // plugin.click-active = false;
+                                    // plugin.select-active = false;
+                                    FullViewState.interactive-plugins[i].click-active = false;
+                                    FullViewState.interactive-plugins[i].select-active = false;
+                                }
+                                interactive-plugins-idx = i;
+                            }
+                            select-active-changed(active) => {
+                                debug("select-active-changed", interactive-plugins-idx, i);
+                                FullViewState.interactive-plugins[i].select-active = active;
+                                if interactive-plugins-idx > -1 && interactive-plugins-idx != i {
+                                    // plugin.click-active = false;
+                                    // plugin.select-active = false;
+                                    FullViewState.interactive-plugins[i].click-active = false;
+                                    FullViewState.interactive-plugins[i].select-active = false;
+                                }
+                                interactive-plugins-idx = i;
+                            }
                         }
 
                         Rectangle { }

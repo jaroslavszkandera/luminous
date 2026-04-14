@@ -83,10 +83,12 @@ impl AppController {
         let weak_full = window_weak.clone();
         let pm = Arc::clone(&plugin_manager);
         loader.on_full_ready(move |index, buffer| {
-            if let Some(plugin) = pm.get_plugin_by_id("SAM3") {
+            // TODO: Auto set image in GUI
+            for plugin in pm.get_interactive_plugins() {
+                let p = Arc::clone(plugin);
                 let buf = buffer.clone();
                 std::thread::spawn(move || {
-                    plugin.set_interactive_image(&buf);
+                    p.set_interactive_image(&buf);
                 });
             }
             let _ = weak_full.upgrade_in_event_loop(move |ui| {
@@ -182,6 +184,7 @@ impl AppController {
     fn handle_full_view_load(&self, index: usize) {
         let weak = self.window_weak.clone();
         let loader = self.loader.clone();
+        let pm = self.loader.plugin_manager.clone();
 
         let display_img = loader.load_full_progressive(index, false);
 
@@ -194,7 +197,10 @@ impl AppController {
                 fv.set_curr_image_name(name.into());
             }
             if loader.full_cache_contains(index) {
-                Self::notify_interactive_plugin(&loader);
+                for plugin in pm.get_interactive_plugins() {
+                    // TODO: auto send image in GUI
+                    Self::notify_interactive_plugin(plugin.id.clone(), &loader);
+                }
             }
         }
 
@@ -501,7 +507,15 @@ impl AppController {
         }
     }
 
-    fn handle_segmentation(&self, x1: i32, y1: i32, x2: i32, y2: i32, txt: String) {
+    fn handle_segmentation(
+        &self,
+        plugin_id: String,
+        x1: i32,
+        y1: i32,
+        x2: i32,
+        y2: i32,
+        txt: String,
+    ) {
         let weak = self.window_weak.clone();
         let loader = self.loader.clone();
         let before_idx = loader.active_idx.load(Ordering::Relaxed);
@@ -509,10 +523,7 @@ impl AppController {
         std::thread::Builder::new()
             .name("segm".to_string())
             .spawn(move || {
-                // TODO: make more ambiguous
-                // if let Some(plugin) = loader.plugin_manager.get_interactive_plugin() {
-                // if let Some(plugin) = loader.plugin_manager.get_plugin_by_id("SAM3") {
-                if let Some(plugin) = loader.plugin_manager.get_plugin_by_id("SAM3") {
+                if let Some(plugin) = loader.plugin_manager.get_plugin_by_id(&plugin_id) {
                     if txt.len() > 0 {
                         if let Some(mask) = plugin.text_to_mask(txt) {
                             if before_idx == loader.active_idx.load(Ordering::Relaxed) {
@@ -578,13 +589,12 @@ impl AppController {
             .collect()
     }
 
-    fn notify_interactive_plugin(loader: &Arc<ImageLoader>) {
+    fn notify_interactive_plugin(plugin_id: String, loader: &Arc<ImageLoader>) {
         let loader = loader.clone();
         let plugin_manager = loader.plugin_manager.clone();
         let curr_active_buffer = loader.get_curr_active_buffer();
         loader.pool.spawn(move || {
-            // TODO:
-            if let Some(plugin) = plugin_manager.get_plugin_by_id("SAM3") {
+            if let Some(plugin) = plugin_manager.get_plugin_by_id(&plugin_id) {
                 if let Some(buf) = curr_active_buffer {
                     plugin.set_interactive_image(&buf);
                 }

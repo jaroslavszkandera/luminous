@@ -142,32 +142,13 @@ export component MainWindow inherits Window {
     }
 
     // ----- Full view -----
-    in property <string> plugin-status: "Initializing...";
-
-    // Plugins
-    // callback run(bool);
-    // callback interactive-text-submitted(string);
-    // callback update-run-state();
-
     full-ui := FullView {
         visible: root.view-mode == ViewMode.full;
         timer-running: root.view-mode == ViewMode.full;
         total-images: GridViewState.model.length;
-        plugin-status: root.plugin-status;
 
         exit-full-view => {
             root.view-mode = ViewMode.grid;
         }
-        // Plugins
-        // run(control) => {
-        //     run(control);
-        // }
-        // interactive-text-submitted(txt) => {
-        //     interactive-text-submitted(txt);
-        //     root.return-focus();
-        // }
-        // update-run-state() => {
-        //     update-run-state();
-        // }
     }
 }

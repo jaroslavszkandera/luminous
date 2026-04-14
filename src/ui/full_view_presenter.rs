@@ -72,8 +72,9 @@ pub fn register(window: &MainWindow, app_controller: Rc<RefCell<AppController>>)
     });
 
     let acc = app_controller.clone();
-    fv.on_request_segmentation(move |x1, y1, x2, y2, txt| {
+    fv.on_request_segmentation(move |plugin_id, x1, y1, x2, y2, txt| {
         acc.borrow().handle_segmentation(
+            plugin_id.to_string(),
             x1 as i32,
             y1 as i32,
             x2 as i32,
@@ -126,6 +127,35 @@ pub fn register(window: &MainWindow, app_controller: Rc<RefCell<AppController>>)
             }
         });
     });
+
+    refresh_interactive_plugins(&app_controller.clone());
+}
+
+fn refresh_interactive_plugins(app_controller: &Rc<RefCell<AppController>>) {
+    let c_ref = app_controller.borrow();
+    let weak = c_ref.window_weak.clone();
+    let plugin_manager = c_ref.loader.plugin_manager.clone();
+    let plugins_vec: Vec<crate::Plugin> = plugin_manager
+        .get_interactive_plugins()
+        .map(|p| crate::Plugin {
+            id: p.id.clone().into(),
+            enabled: false,
+            auto_start: false,
+            is_busy: false,
+            state: "".into(),
+            click_active: false,
+            select_active: false,
+        })
+        .collect();
+
+    if plugins_vec.is_empty() {
+        debug!("No interactive plugins found.");
+    }
+    if let Some(ui) = weak.upgrade() {
+        let model = std::rc::Rc::new(slint::VecModel::from(plugins_vec));
+        ui.global::<FullViewState>()
+            .set_interactive_plugins(model.into());
+    }
 }
 
 fn save_mask(mask_buffer: SharedPixelBuffer<Rgba8Pixel>, path: &Path, file_name: &str) -> bool {

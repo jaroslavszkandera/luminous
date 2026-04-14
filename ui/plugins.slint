@@ -7,6 +7,8 @@ export struct Plugin {
     auto-start: bool,
     is_busy: bool,
     state: string,
+    click-active: bool,
+    select-active: bool,
 }
 
 enum PluginControl {
@@ -17,13 +19,14 @@ enum PluginControl {
 }
 
 export component InteractivePlugin inherits Rectangle {
-    property <Plugin> plugin;
+    in-out property <Plugin> plugin;
     property <string> status: "Unknown";
-    property <bool> running: false; // TODO: replace with plugin.enabled
+    property <bool> running: plugin.enabled; // TODO: replace with plugin.enabled
+    // Only stop and hide/destroy
     property <bool> enable-control: control == PluginControl.Start || control == PluginControl.Stop;
-    in-out property <bool> click-active: false;
-    in-out property <bool> select-active: false;
     property <PluginControl> control;
+    // in property <bool> click-active;
+    // in property <bool> select-active;
 
     height: 120px;
     background: Palette.background.brighter(10%);
@@ -32,8 +35,8 @@ export component InteractivePlugin inherits Rectangle {
     border-radius: 3px;
 
     callback interactive-text-submitted(string);
-    callback click-active-changed();
-    callback select-active-changed();
+    callback click-active-changed(bool);
+    callback select-active-changed(bool);
     callback update-run-state();
     callback run(bool);
 
@@ -75,7 +78,7 @@ export component InteractivePlugin inherits Rectangle {
                     } else {
                         run(false);
                     }
-                    update-run-state(); // tmp simulate
+                    // update-run-state(); // tmp simulate
                 }
             }
         }
@@ -83,25 +86,27 @@ export component InteractivePlugin inherits Rectangle {
         HorizontalLayout {
             Button {
                 text: "click";
-                checked: click-active;
+                checked: plugin.click-active;
                 clicked => {
-                    click-active = !click-active;
-                    if (click-active) {
-                        select-active = false;
+                    plugin.click-active = !plugin.click-active;
+                    click-active-changed(plugin.click-active);
+                    if (plugin.click-active) {
+                        plugin.select-active = false;
                     }
-                    debug("click-active", click-active, "select-active", select-active);
+                    debug("click-active", plugin.click-active, "select-active", plugin.select-active);
                 }
             }
 
             Button {
                 text: "select";
-                checked: select-active;
+                checked: plugin.select-active;
                 clicked => {
-                    select-active = !select-active;
-                    if (select-active) {
-                        click-active = false;
+                    plugin.select-active = !plugin.select-active;
+                    select-active-changed(plugin.select-active);
+                    if (plugin.select-active) {
+                        plugin.click-active = false;
                     }
-                    debug("click-active", click-active, "select-active", select-active);
+                    debug("click-active", plugin.click-active, "select-active", plugin.select-active);
                 }
             }
         }
