@@ -38,6 +38,7 @@ export component FullView inherits TouchArea {
     property <int> interactive-plugins-idx: -1;
 
     property <string> display-coords: "0,0";
+    property <int> zoom-scale-percentage: 100;
     property <float> zoom-scale: 1.0;
     property <length> last-coords-x;
     property <length> last-coords-y;
@@ -74,6 +75,7 @@ export component FullView inherits TouchArea {
                     root.display-coords = x + "," + y;
                 }
             }
+            zoom-scale-percentage = round(zoom-scale * 100);
         }
     }
 
@@ -228,20 +230,22 @@ export component FullView inherits TouchArea {
             }
 
             footer := Rectangle {
-                visible: false;
-                height: 16px;
+                visible: true; // false DEBUG
+                height: 18px;
                 y: parent.height - self.height;
                 width: parent.width;
                 background: Palette.background.with-alpha(50%);
+
                 Text {
                     x: 5px;
-                    text: (FullViewState.curr-image-index + 1) + "/" + total-images;
+                    text: (FullViewState.curr-image-index + 1) + "/" + total-images + " - " + zoom-scale-percentage + "%";
                 }
 
                 Text {
                     horizontal-alignment: center;
                     vertical-alignment: center;
                     text: FullViewState.curr-image-name;
+                    overflow: elide;
                 }
 
                 Text {
