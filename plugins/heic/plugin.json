@@ -1,0 +1,6 @@
+{
+  "name": "HEIC image plugin",
+  "version": "0.1.0",
+  "extensions": ["heic", "heif"],
+  "capabilities": ["decoder"]
+}
