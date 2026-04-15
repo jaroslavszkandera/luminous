@@ -109,8 +109,7 @@ pub fn register(window: &MainWindow, app_controller: Rc<RefCell<AppController>>)
                             auto_start: p.auto_start,
                             state: state_str.into(),
                             is_busy: state_str == "Starting" || state_str == "Stopping",
-                            click_active: false,
-                            select_active: false,
+                            ..Default::default()
                         })
                     })
                     .collect();

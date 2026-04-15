@@ -17,10 +17,18 @@ impl Default for BackendKind {
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(rename_all = "lowercase")]
+pub enum InteractiveCapability {
+    Click,
+    Select,
+    Text,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "lowercase")]
 pub enum PluginCapability {
     Decoder,
     Encoder,
-    Interactive,
+    Interactive(Vec<InteractiveCapability>),
     Search,
     #[serde(other)]
     Unknown,
@@ -124,7 +132,7 @@ mod tests {
             version: "1.0.0".to_string(),
             backend: BackendKind::Daemon,
             extensions: vec![],
-            capabilities: vec![PluginCapability::Interactive],
+            capabilities: vec![PluginCapability::Interactive(vec![])],
             daemon_port: None,
             interpreter: Some("python".into()),
             entry: Some("main.py".into()),
@@ -143,7 +151,7 @@ mod tests {
             version: "1.0.0".to_string(),
             backend: BackendKind::Daemon,
             extensions: vec![],
-            capabilities: vec![PluginCapability::Interactive],
+            capabilities: vec![PluginCapability::Interactive(vec![])],
             daemon_port: Some(8080),
             interpreter: None,
             entry: Some("main.py".into()),
@@ -162,7 +170,7 @@ mod tests {
             version: "1.0.0".to_string(),
             backend: BackendKind::Daemon,
             extensions: vec![],
-            capabilities: vec![PluginCapability::Interactive],
+            capabilities: vec![PluginCapability::Interactive(vec![])],
             daemon_port: Some(8080),
             interpreter: Some("python".into()),
             entry: None,

@@ -302,7 +302,8 @@ impl PluginManager {
         self.plugins.iter().filter(|p| {
             p.manifest
                 .capabilities
-                .contains(&PluginCapability::Interactive)
+                .iter()
+                .any(|cap| matches!(cap, PluginCapability::Interactive(_)))
         })
     }
 
@@ -458,8 +459,11 @@ impl PluginManager {
                 PluginCapability::Encoder => {
                     debug!("Encoder support for {:?}", manifest.extensions);
                 }
-                PluginCapability::Interactive => {
-                    debug!("Interactive plugin '{}'", manifest.name);
+                PluginCapability::Interactive(interactive_capabilities) => {
+                    debug!(
+                        "Interactive plugin '{}': {:?}",
+                        manifest.name, interactive_capabilities
+                    );
                 }
                 PluginCapability::Search => {
                     debug!("Search plugin '{}'", manifest.name);

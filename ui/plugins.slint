@@ -1,37 +1,25 @@
 import { Palette, Button, LineEdit } from "std-widgets.slint";
 
-// TODO: state, turn off/on, auto-start (bool), show folder, capabilities, version, Optional<extensions>
 export struct Plugin {
     id: string,
-    enabled: bool, // TODO: replace with PluginControl
+    enabled: bool,
     auto-start: bool,
     is_busy: bool,
     state: string,
     click-active: bool,
     select-active: bool,
-}
-
-enum PluginControl {
-    Start,
-    Starting,
-    Stop,
-    Stopping,
+    click-capability-support: bool,
+    select-capability-support: bool,
+    text-capability-support: bool,
 }
 
 export component InteractivePlugin inherits Rectangle {
     in-out property <Plugin> plugin;
-    property <string> status: "Unknown";
-    property <bool> running: plugin.enabled; // TODO: replace with plugin.enabled
-    // Only stop and hide/destroy
-    property <bool> enable-control: control == PluginControl.Start || control == PluginControl.Stop;
-    property <PluginControl> control;
-    // in property <bool> click-active;
-    // in property <bool> select-active;
 
     height: 120px;
     background: Palette.background.brighter(10%);
     border-width: 1px;
-    border-color: Palette.accent-background;
+    border-color: Palette.border;
     border-radius: 3px;
 
     callback interactive-text-submitted(string);
@@ -40,78 +28,47 @@ export component InteractivePlugin inherits Rectangle {
     callback update-run-state();
     callback run(bool);
 
-    // tmp simulate
-    public function update-run-state-react() {
-        if control == PluginControl.Starting {
-            control = PluginControl.Stop;
-            running = true;
-        } else if control == PluginControl.Stopping {
-            control = PluginControl.Start;
-            running = false;
-        }
-    }
-
-    function plugin-control-string(control: PluginControl) -> string {
-        return control == PluginControl.Start ? "Start" : control == PluginControl.Starting ? "Starting" : control == PluginControl.Stop ? "Stop" : control == PluginControl.Stopping ? "Stopping" : "";
-    }
-
     VerticalLayout {
-        HorizontalLayout {
-            VerticalLayout {
-                Text {
-                    text: plugin.id;
-                }
+        padding: 2px;
+        spacing: 2px;
+        Text {
+            text: " " + plugin.id; // TODO: state
+            font-size: 14px;
+        }
 
-                Text {
-                    text: "Status: " + status;
-                }
-            }
+        Rectangle {
+            height: 1px;
+            width: 90%;
+            background: Palette.border;
+        }
 
-            Button {
-                text: plugin-control-string(control);
-                checked: running;
-                enabled: enable-control;
-                clicked => {
-                    control = control == PluginControl.Start ? PluginControl.Starting : PluginControl.Stopping;
-                    if (control == PluginControl.Starting) {
-                        run(true);
-                    } else {
-                        run(false);
-                    }
-                    // update-run-state(); // tmp simulate
+        if (plugin.click-capability-support): click-btn := Button {
+            text: "Click";
+            checked: plugin.click-active;
+            clicked => {
+                plugin.click-active = !plugin.click-active;
+                click-active-changed(plugin.click-active);
+                if (plugin.click-active) {
+                    plugin.select-active = false;
                 }
+                debug("click-active", plugin.click-active, "select-active", plugin.select-active);
             }
         }
 
-        HorizontalLayout {
-            Button {
-                text: "click";
-                checked: plugin.click-active;
-                clicked => {
-                    plugin.click-active = !plugin.click-active;
-                    click-active-changed(plugin.click-active);
-                    if (plugin.click-active) {
-                        plugin.select-active = false;
-                    }
-                    debug("click-active", plugin.click-active, "select-active", plugin.select-active);
+        if (plugin.select-capability-support): select-btn := Button {
+            text: "Select";
+            checked: plugin.select-active;
+            clicked => {
+                plugin.select-active = !plugin.select-active;
+                select-active-changed(plugin.select-active);
+                if (plugin.select-active) {
+                    plugin.click-active = false;
                 }
-            }
-
-            Button {
-                text: "select";
-                checked: plugin.select-active;
-                clicked => {
-                    plugin.select-active = !plugin.select-active;
-                    select-active-changed(plugin.select-active);
-                    if (plugin.select-active) {
-                        plugin.click-active = false;
-                    }
-                    debug("click-active", plugin.click-active, "select-active", plugin.select-active);
-                }
+                debug("click-active", plugin.click-active, "select-active", plugin.select-active);
             }
         }
 
-        LineEdit {
+        if (plugin.text-capability-support): text-line-edit := LineEdit {
             placeholder-text: "Enter text here";
             accepted(text) => {
                 debug("Accepted: ", text);

@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "backend": "daemon",
   "interpreter": "uv run",
-  "capabilities": ["interactive"],
+  "capabilities": [{ "interactive": ["select", "text"] }],
   "extensions": [],
   "daemon_port": 50023,
   "entry": "main.py"

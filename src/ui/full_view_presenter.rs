@@ -2,6 +2,7 @@ use crate::AppController;
 use crate::FullViewState;
 use crate::MainWindow;
 use crate::image_processing::save_image;
+use crate::plugins::{PluginCapability, manifest::InteractiveCapability};
 use cocotools::coco::object_detection::{
     Annotation, Bbox, Dataset, Image as CocoImage, Rle, Segmentation,
 };
@@ -134,17 +135,27 @@ pub fn register(window: &MainWindow, app_controller: Rc<RefCell<AppController>>)
 fn refresh_interactive_plugins(app_controller: &Rc<RefCell<AppController>>) {
     let c_ref = app_controller.borrow();
     let weak = c_ref.window_weak.clone();
-    let plugin_manager = c_ref.loader.plugin_manager.clone();
-    let plugins_vec: Vec<crate::Plugin> = plugin_manager
+    let pm = c_ref.loader.plugin_manager.clone();
+    let plugins_vec: Vec<crate::Plugin> = pm
         .get_interactive_plugins()
-        .map(|p| crate::Plugin {
-            id: p.id.clone().into(),
-            enabled: false,
-            auto_start: false,
-            is_busy: false,
-            state: "".into(),
-            click_active: false,
-            select_active: false,
+        .map(|p| {
+            let i_caps = p.manifest.capabilities.iter().find_map(|cap| {
+                if let PluginCapability::Interactive(inner) = cap {
+                    Some(inner)
+                } else {
+                    None
+                }
+            });
+            crate::Plugin {
+                id: p.id.clone().into(),
+                click_capability_support: i_caps
+                    .map_or(false, |c| c.contains(&InteractiveCapability::Click)),
+                select_capability_support: i_caps
+                    .map_or(false, |c| c.contains(&InteractiveCapability::Select)),
+                text_capability_support: i_caps
+                    .map_or(false, |c| c.contains(&InteractiveCapability::Text)),
+                ..Default::default()
+            }
         })
         .collect();
 
