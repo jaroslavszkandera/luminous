@@ -46,6 +46,7 @@ kamadak-exif = "0.6.1"
 log = "0.4.29"
 num_cpus = "1.17.0"
 palette = { version = "0.7.6" }
+pollster = "0.4.0"
 rayon = "1.11.0"
 rfd = "0.17.2"
 serde = { version = "1.0.228", features = ["derive"] }
@@ -55,6 +56,7 @@ shared_memory = "0.12.4"
 sysinfo = "0.38.4"
 toml = "0.9.11"
 walkdir = "2.5.0"
+wgpu = "29.0.1"
 
 [dev-dependencies]
 criterion = { version = "0.8.2", features = ["html_reports"] }
@@ -99,4 +101,8 @@ strip = false
 
 [[bench]]
 name = "image_loader_bench"
+harness = false
+
+[[bench]]
+name = "pipeline_bench"
 harness = false

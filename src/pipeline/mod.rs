@@ -1,11 +1,15 @@
+pub mod gpu_proc;
+
 use image::DynamicImage;
 use log::{debug, error};
 use rayon::prelude::*;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Instant;
 
 use crate::{Channel, FlipDirection, PipelineStep, PipelineStepKind, RotateAngle};
+use gpu_proc::GpuProcessor;
 
 pub trait ProcessingStep: Send + Sync {
     fn apply(&self, img: DynamicImage, params: &PipelineStep) -> DynamicImage;
@@ -14,12 +18,18 @@ pub trait ProcessingStep: Send + Sync {
 
 pub struct StepFactory {
     steps: HashMap<u32, Box<dyn ProcessingStep>>,
+    gpu: Option<Arc<GpuProcessor>>,
 }
 
 impl StepFactory {
-    pub fn new() -> Self {
+    pub fn new(use_gpu: bool) -> Self {
         let mut f = Self {
             steps: HashMap::new(),
+            gpu: if use_gpu {
+                pollster::block_on(GpuProcessor::new()).map(Arc::new)
+            } else {
+                None
+            },
         };
         f.register(PipelineStepKind::Rotate, RotateStep);
         f.register(PipelineStepKind::GaussianBlur, GaussianBlurStep);
@@ -35,9 +45,23 @@ impl StepFactory {
     }
 
     pub fn apply(&self, img: DynamicImage, step: &PipelineStep) -> DynamicImage {
+        if let Some(gpu) = &self.gpu {
+            match step.kind {
+                PipelineStepKind::GaussianBlur => {
+                    debug!("Pipeline applying step (GPU): GaussianBlur");
+                    return gpu.blur(img, step.blur_sigma.max(0.1));
+                }
+                PipelineStepKind::Resize => {
+                    debug!("Pipeline applying step (GPU): Resize");
+                    return gpu.resize(img, step.resize_width as u32, step.resize_height as u32);
+                }
+                _ => {}
+            }
+        }
+
         match self.steps.get(&(step.kind as u32)) {
             Some(handler) => {
-                debug!("Pipeline applying step: {}", handler.name());
+                debug!("Pipeline applying step (CPU): {}", handler.name());
                 handler.apply(img, step)
             }
             None => {
@@ -194,7 +218,7 @@ impl ProcessingStep for ExtractChannelStep {
 pub fn run_pipeline_on_selection(
     paths: Vec<PathBuf>,
     steps: Vec<PipelineStep>,
-    factory: std::sync::Arc<StepFactory>,
+    factory: Arc<StepFactory>,
 ) {
     if paths.is_empty() {
         debug!("Pipeline: no images selected");
@@ -237,7 +261,7 @@ pub fn run_pipeline_on_selection(
             }
 
             debug!(
-                "Pipeline: {:?} → {:?} in {:.2}ms",
+                "Pipeline: {:?} -> {:?} in {:.2}ms",
                 file_name,
                 dst_file,
                 start.elapsed().as_secs_f64() * 1000.0
@@ -246,7 +270,6 @@ pub fn run_pipeline_on_selection(
     });
 }
 
-// TODO: Format conversion
 fn save_result(img: DynamicImage, dst: &PathBuf) -> Result<(), image::ImageError> {
     img.save(dst)
 }

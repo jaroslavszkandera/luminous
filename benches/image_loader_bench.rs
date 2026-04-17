@@ -63,7 +63,12 @@ fn images() -> &'static Vec<PathBuf> {
 }
 
 fn make_loader() -> ImageLoader {
-    ImageLoader::new(images().clone(), WORKERS, WINDOW_SIZE, PluginManager::new())
+    ImageLoader::new(
+        images().clone(),
+        WORKERS,
+        WINDOW_SIZE,
+        PluginManager::new().into(),
+    )
 }
 
 #[derive(Clone)]
@@ -120,7 +125,7 @@ fn bench_warm_cache_decode(c: &mut Criterion) {
     for idx in 0..IMAGE_COUNT {
         let f = FlagLatch::new(idx);
         loader.on_full_ready(f.hook());
-        loader.load_full_progressive(idx);
+        loader.load_full_progressive(idx, false);
         assert!(f.wait(ITER_TIMEOUT), "Warm-up timed out at idx={idx}");
     }
 
@@ -132,7 +137,7 @@ fn bench_warm_cache_decode(c: &mut Criterion) {
             for i in 0..iters {
                 let idx = (i as usize) % IMAGE_COUNT;
                 let start = Instant::now();
-                let img = loader.load_full_progressive(idx);
+                let img = loader.load_full_progressive(idx, false);
                 std::hint::black_box(img);
                 total += start.elapsed();
             }
@@ -162,7 +167,7 @@ fn bench_sequential_browse(c: &mut Criterion) {
                     let idx = (start_idx + step) % IMAGE_COUNT;
                     let flag = FlagLatch::new(idx);
                     loader.on_full_ready(flag.hook());
-                    loader.load_full_progressive(idx);
+                    loader.load_full_progressive(idx, false);
                     assert!(flag.wait(ITER_TIMEOUT), "Timed out at idx={idx}");
                 }
                 total += start.elapsed();

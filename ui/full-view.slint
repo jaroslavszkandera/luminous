@@ -1,4 +1,4 @@
-import { Palette, TabWidget, Button } from "std-widgets.slint";
+import { Palette, TabWidget, Button, StandardButton } from "std-widgets.slint";
 import { ImgFmt, EditOp, EditOpKind } from "common.slint";
 import { SidePanel } from "side-panel.slint";
 import { EditsPanel } from "edits-panel.slint";
@@ -25,6 +25,31 @@ export global FullViewState {
     callback save-with-format(string);
     in property <ImgRect> selection;
     callback apply-edit(EditOp);
+}
+
+export component DeleteConfirmDialog inherits Dialog {
+    callback confirmed();
+    callback canceled();
+
+    title: "Confirm Delete";
+
+    Text {
+        text: "Move image to trash?";
+    }
+
+    StandardButton {
+        kind: ok;
+        clicked => {
+            confirmed();
+        }
+    }
+
+    StandardButton {
+        kind: cancel;
+        clicked => {
+            canceled();
+        }
+    }
 }
 
 export component FullView inherits TouchArea {
@@ -282,14 +307,14 @@ export component FullView inherits TouchArea {
                     MenuItem {
                         title: @tr("Rotate +90");
                         activated => {
-                            FullViewState.apply-edit({ kind: EditOpKind.RotateCW, int-val: 0, float-val: 0 });
+                            FullViewState.apply-edit({ kind: EditOpKind.RotateCW });
                         }
                     }
 
                     MenuItem {
                         title: @tr("Rotate -90");
                         activated => {
-                            FullViewState.apply-edit({ kind: EditOpKind.RotateCCW, int-val: 0, float-val: 0 });
+                            FullViewState.apply-edit({ kind: EditOpKind.RotateCCW });
                         }
                     }
 
@@ -300,7 +325,7 @@ export component FullView inherits TouchArea {
                             if (r.w > 2px && r.h > 2px && select-rect.visible) {
                                 debug("Crop (x,y,w,h):", r.x, r.y, r.w, r.h);
                                 FullViewState.selection = { x: r.x, y: r.y, w: r.w, h: r.h };
-                                FullViewState.apply-edit({ kind: EditOpKind.Crop, int-val: 0, float-val: 0 });
+                                FullViewState.apply-edit({ kind: EditOpKind.Crop });
                                 select-rect.hide();
                                 reset-zoom();
                             } else {
@@ -312,21 +337,29 @@ export component FullView inherits TouchArea {
                     MenuItem {
                         title: @tr("Flip Horizontal");
                         activated => {
-                            FullViewState.apply-edit({ kind: EditOpKind.FlipH, int-val: 0, float-val: 0 });
+                            FullViewState.apply-edit({ kind: EditOpKind.FlipH });
                         }
                     }
 
                     MenuItem {
                         title: @tr("Flip Vertical");
                         activated => {
-                            FullViewState.apply-edit({ kind: EditOpKind.FlipV, int-val: 0, float-val: 0 });
+                            FullViewState.apply-edit({ kind: EditOpKind.FlipV });
                         }
                     }
 
                     MenuItem {
                         title: @tr("Reset image edits");
                         activated => {
-                            FullViewState.apply-edit({ kind: EditOpKind.Reset, int-val: 0, float-val: 0 });
+                            FullViewState.apply-edit({ kind: EditOpKind.Reset });
+                        }
+                    }
+
+                    MenuItem {
+                        title: @tr("Delete");
+                        activated => {
+                            FullViewState.apply-edit({ kind: EditOpKind.Delete });
+                            // delete-dialog.show();
                         }
                     }
 
@@ -412,7 +445,7 @@ export component FullView inherits TouchArea {
                         }
 
                         // TODO: How do I make mutally exclusive checked buttons?
-                                for plugin[i] in FullViewState.interactive-plugins: InteractivePlugin {
+                        for plugin[i] in FullViewState.interactive-plugins: InteractivePlugin {
                             plugin: FullViewState.interactive-plugins[i];
 
                             interactive-text-submitted(txt) => {
@@ -448,4 +481,6 @@ export component FullView inherits TouchArea {
             }
         }
     }
+
+    // delete-dialog := DeleteConfirmDialog { }
 }

@@ -364,6 +364,7 @@ impl AppController {
                     loader.load_full_progressive(before_idx, true);
                     return;
                 }
+                EditOpKind::Delete => todo!(),
             };
 
             let new_buf = SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
@@ -663,7 +664,7 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
         &main_window,
     )));
 
-    let factory = Arc::new(StepFactory::new());
+    let factory = Arc::new(StepFactory::new(false));
 
     ui::grid_view_presenter::register(&main_window, app_controller.clone());
     ui::full_view_presenter::register(&main_window, app_controller.clone());
