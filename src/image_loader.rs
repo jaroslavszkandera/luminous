@@ -170,9 +170,21 @@ impl ImageLoader {
     pub fn rm_img(&self, idx: usize) {
         self.full_cache.remove(&idx);
         self.thumb_cache.remove(&idx);
-        if let Ok(mut paths) = self.paths.write() {
+        let len = if let Ok(mut paths) = self.paths.write() {
             if idx < paths.len() {
                 paths.remove(idx);
+            }
+            paths.len()
+        } else {
+            0
+        };
+
+        for i in idx..len {
+            if let Some((_, buf)) = self.full_cache.remove(&(i + 1)) {
+                self.full_cache.insert(i, buf);
+            }
+            if let Some((_, buf)) = self.thumb_cache.remove(&(i + 1)) {
+                self.thumb_cache.insert(i, buf);
             }
         }
     }
