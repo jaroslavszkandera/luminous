@@ -369,6 +369,13 @@ export component FullView inherits TouchArea {
                     }
 
                     MenuItem {
+                        title: @tr("Copy to clipboard");
+                        activated => {
+                            FullViewState.apply-edit({ kind: EditOpKind.Copy });
+                        }
+                    }
+
+                    MenuItem {
                         title: @tr("Delete");
                         activated => {
                             delete-popup.show();

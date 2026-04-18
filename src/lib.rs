@@ -416,6 +416,29 @@ impl AppController {
                     loader.load_full_progressive(before_idx, true);
                     return;
                 }
+                EditOpKind::Copy => {
+                    match arboard::Clipboard::new() {
+                        Ok(mut clipboard) => {
+                            let image_data = arboard::ImageData {
+                                width: buffer.width() as usize,
+                                height: buffer.height() as usize,
+                                bytes: std::borrow::Cow::Borrowed(bytemuck::cast_slice(
+                                    buffer.as_slice(),
+                                )),
+                            };
+                            if let Err(e) = clipboard.set_image(image_data) {
+                                error!("Clipboard copy failed: {e}");
+                            } else {
+                                debug!(
+                                    "Clipboard copy of {:?} successful",
+                                    loader.get_file_name(before_idx)
+                                );
+                            }
+                        }
+                        Err(e) => error!("Could not initialize clipboard: {e}"),
+                    }
+                    return;
+                }
                 EditOpKind::Delete => {
                     unreachable!("Delete should have been handled already");
                 }
