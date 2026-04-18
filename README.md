@@ -10,19 +10,22 @@ cargo run --release -- ./path/to/your/images
 
 ## Controls
 
-| Key           | Action                         |
-| ------------- | ------------------------------ |
-| Esc           | Switch between Grid/Full View  |
-| q             | Quit Application               |
-| f             | Toggle Fullscreen              |
-| Left Arrow/h  | Previous Image                 |
-| Right Arrow/l | Next Image                     |
-| Ctrl + Scroll | Increase/Decrease Grid Columns |
-| Scroll        | Navigate Images                |
-| PgUp/PgDn     | Scroll Grid Up/Down            |
-| Right Click   | Context Menu                   |
-| /             | Search                         |
-| s             | Toggle Side Panel              |
+| Key                    | Action                         |
+| ---------------------- | ------------------------------ |
+| Esc                    | Switch between Grid/Full View  |
+| q                      | Quit Application               |
+| f                      | Toggle Fullscreen              |
+| Left Arrow/h           | Previous Image                 |
+| Right Arrow/l          | Next Image                     |
+| Ctrl + Scroll/\_/-/=/+ | Increase/Decrease Grid Columns |
+| Scroll                 | Navigate Images                |
+| PgUp/PgDn              | Scroll Grid Up/Down            |
+| Right Click            | Context Menu                   |
+| z                      | Reset Zoom                     |
+| /                      | Search                         |
+| s                      | Toggle Side Panel              |
+| y                      | Copy to Clipboard              |
+| Delete                 | Delete                         |
 
 ## Configuration
 

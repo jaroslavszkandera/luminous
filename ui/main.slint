@@ -1,7 +1,7 @@
 import { GridView, GridViewState } from "grid-view.slint";
 import { FullView, FullViewState } from "full-view.slint";
 import { Palette } from "std-widgets.slint";
-import { ImgFmt, EditOp, GridItem, ViewMode } from "common.slint";
+import { ImgFmt, EditOp, EditOpKind, GridItem, ViewMode } from "common.slint";
 import { PipelineStep, PipelineStepKind, RotateAngle } from "side-panel.slint";
 
 export { GridItem, ViewMode } from "common.slint";
@@ -39,6 +39,8 @@ export component MainWindow inherits Window {
     in property <string> bind-grid-pg-dn;
     in property <string> bind-grid-pg-up;
     in property <string> bind-toggle-side-panel;
+    in property <string> bind-copy-to-clipboard;
+    in property <string> bind-delete;
 
     public function return-focus() {
         key-handler.focus();
@@ -78,6 +80,12 @@ export component MainWindow inherits Window {
                 if (event.text == root.bind-toggle-side-panel) {
                     full-ui.panel-visible = !full-ui.panel-visible;
                     return accept;
+                }
+                if (event.text == root.bind-copy-to-clipboard) {
+                    FullViewState.apply-edit({ kind: EditOpKind.Copy });
+                }
+                if (event.text == root.bind-delete) {
+                    full-ui.show-delete-popup();
                 }
             } else if (root.view-mode == ViewMode.grid) {
                 if (event.text == root.bind-grid-pg-dn) {

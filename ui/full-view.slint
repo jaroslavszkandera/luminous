@@ -310,7 +310,7 @@ export component FullView inherits TouchArea {
                     select-rect.hide();
                 }
                 cancelled => {
-                    debug("select-rect cancelled");
+                    // debug("select-rect cancelled");
                     select-rect.hide();
                 }
             }
@@ -378,7 +378,7 @@ export component FullView inherits TouchArea {
                     MenuItem {
                         title: @tr("Delete");
                         activated => {
-                            delete-popup.show();
+                            show-delete-popup();
                         }
                     }
 
@@ -507,5 +507,9 @@ export component FullView inherits TouchArea {
         confirmed => {
             FullViewState.apply-edit({ kind: EditOpKind.Delete });
         }
+    }
+
+    public function show-delete-popup() {
+        delete-popup.show();
     }
 }

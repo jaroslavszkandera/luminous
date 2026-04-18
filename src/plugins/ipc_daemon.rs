@@ -1,6 +1,6 @@
-use crate::plugins::manifest::PluginManifest;
 use crate::plugins::Backend;
-use log::{debug, error, info, warn};
+use crate::plugins::manifest::PluginManifest;
+use log::{debug, error, info, trace, warn};
 use serde::{Deserialize, Serialize};
 use shared_memory::{Shmem, ShmemConf};
 use slint::{Rgba8Pixel, SharedPixelBuffer};
@@ -476,7 +476,7 @@ impl Backend for DaemonBackend {
     }
 
     fn set_image(&self, buf: &SharedPixelBuffer<Rgba8Pixel>) -> bool {
-        debug!("set_image inside ipc daemon");
+        trace!("set_image inside ipc daemon");
         let token = self
             .image_token
             .fetch_add(1, std::sync::atomic::Ordering::AcqRel)
@@ -493,7 +493,8 @@ impl Backend for DaemonBackend {
                 true
             }
             Err(mpsc::TrySendError::Full(_)) => {
-                warn!("Worker queue full, image pending in mutex");
+                // TODO: implement auto-send toggle
+                // warn!("Worker queue full, image pending in mutex");
                 false
             }
             Err(mpsc::TrySendError::Disconnected(_)) => {

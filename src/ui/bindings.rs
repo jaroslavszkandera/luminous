@@ -17,4 +17,6 @@ pub fn setup(window: &MainWindow, config: &Config) {
     window.set_bind_grid_pg_dn(get_key("grid_page_down"));
     window.set_bind_grid_pg_up(get_key("grid_page_up"));
     window.set_bind_toggle_side_panel(get_key("toggle_side_panel"));
+    window.set_bind_copy_to_clipboard(get_key("copy_to_clipboard"));
+    window.set_bind_delete(get_key("delete"));
 }
