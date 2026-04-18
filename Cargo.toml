@@ -55,6 +55,7 @@ sha2 = "0.10.9"
 shared_memory = "0.12.4"
 sysinfo = "0.38.4"
 toml = "0.9.11"
+trash = "5.2.5"
 walkdir = "2.5.0"
 wgpu = "29.0.1"
 

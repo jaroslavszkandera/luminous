@@ -27,27 +27,40 @@ export global FullViewState {
     callback apply-edit(EditOp);
 }
 
-export component DeleteConfirmDialog inherits Dialog {
+export component DeleteConfirmPopup inherits PopupWindow {
+    width: 225px;
+    height: 100px;
     callback confirmed();
     callback canceled();
 
-    title: "Confirm Delete";
+    Rectangle {
+        background: Palette.background;
+        border-color: Palette.border;
+        border-radius: 5px;
+        border-width: 1px;
 
-    Text {
-        text: "Move image to trash?";
-    }
+        VerticalLayout {
+            Text {
+                text: "Move image to trash?";
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
 
-    StandardButton {
-        kind: ok;
-        clicked => {
-            confirmed();
-        }
-    }
+            HorizontalLayout {
+                StandardButton {
+                    kind: cancel;
+                    clicked => {
+                        canceled();
+                    }
+                }
 
-    StandardButton {
-        kind: cancel;
-        clicked => {
-            canceled();
+                StandardButton {
+                    kind: ok;
+                    clicked => {
+                        confirmed();
+                    }
+                }
+            }
         }
     }
 }
@@ -149,7 +162,7 @@ export component FullView inherits TouchArea {
         zoom(zoom-factor, cx, cy);
     }
 
-    function to-image-coords(screen-x: length, screen-y: length) -> {x: int, y: int} {
+    function to-image-coords(screen-x: length, screen-y: length) -> { x: int, y: int} {
         let rel-x = screen-x - img-rect.x;
         let rel-y = screen-y - img-rect.y;
         return {
@@ -255,7 +268,7 @@ export component FullView inherits TouchArea {
             }
 
             footer := Rectangle {
-                visible: true; // false DEBUG
+                visible: true;
                 height: 18px;
                 y: parent.height - self.height;
                 width: parent.width;
@@ -358,8 +371,7 @@ export component FullView inherits TouchArea {
                     MenuItem {
                         title: @tr("Delete");
                         activated => {
-                            FullViewState.apply-edit({ kind: EditOpKind.Delete });
-                            // delete-dialog.show();
+                            delete-popup.show();
                         }
                     }
 
@@ -482,5 +494,11 @@ export component FullView inherits TouchArea {
         }
     }
 
-    // delete-dialog := DeleteConfirmDialog { }
+    delete-popup := DeleteConfirmPopup {
+        x: (root.width - self.width) / 2;
+        y: (root.height - self.height) / 2;
+        confirmed => {
+            FullViewState.apply-edit({ kind: EditOpKind.Delete });
+        }
+    }
 }

@@ -28,7 +28,7 @@ use std::sync::atomic::Ordering;
 
 pub(crate) struct AppController {
     pub(crate) loader: Arc<ImageLoader>,
-    pub(crate) scan: Rc<ScanResult>,
+    pub(crate) scan: Arc<ScanResult>,
     pub(crate) active_grid_indices: HashSet<usize>,
     pub(crate) filtered_indices: Vec<usize>,
     pub(crate) window_weak: slint::Weak<MainWindow>,
@@ -37,7 +37,7 @@ pub(crate) struct AppController {
 impl AppController {
     fn new(
         plugin_manager: PluginManager,
-        scan: Rc<ScanResult>,
+        scan: Arc<ScanResult>,
         config: &Config,
         window: &MainWindow,
     ) -> Self {
@@ -230,12 +230,64 @@ impl AppController {
     }
 
     // TODO: How to not reload images from disk and keep the cache consistent?
-    fn handle_edit_op(&self, op: EditOp) {
+    fn handle_edit_op(&mut self, op: EditOp) {
         let Some(buffer) = self.loader.get_curr_active_buffer() else {
             return;
         };
+
         let loader = self.loader.clone();
         let before_idx = loader.active_idx.load(Ordering::Relaxed);
+        if let EditOpKind::Delete = op.kind {
+            if let Some(p) = loader.get_path(before_idx) {
+                let _ = trash::delete(&p);
+            }
+            loader.rm_img(before_idx);
+
+            let pos = self.filtered_indices.iter().position(|&i| i == before_idx);
+            if let Some(p) = pos {
+                self.filtered_indices.remove(p);
+            }
+            self.filtered_indices.iter_mut().for_each(|idx| {
+                if *idx > before_idx {
+                    *idx -= 1;
+                }
+            });
+
+            self.active_grid_indices.clear();
+            loader.clear_thumbs();
+
+            if let Some(ui) = self.window_weak.upgrade() {
+                let filtered_items: Vec<GridItem> = self
+                    .filtered_indices
+                    .iter()
+                    .enumerate()
+                    .map(|(r, &idx)| GridItem {
+                        image: Image::default(),
+                        index: r as i32,
+                        abs_index: idx as i32,
+                        selected: false,
+                    })
+                    .collect();
+
+                let gv = ui.global::<GridViewState>();
+                gv.set_model(Rc::new(VecModel::from(filtered_items)).into());
+
+                if self.filtered_indices.is_empty() {
+                    let fv = ui.global::<FullViewState>();
+                    fv.set_curr_image(Image::default());
+                    fv.set_curr_image_name("No images".into());
+                } else {
+                    let next_pos = pos
+                        .unwrap_or(0)
+                        .min(self.filtered_indices.len().saturating_sub(1));
+                    let next_abs = self.filtered_indices[next_pos];
+                    self.handle_full_view_load(next_abs);
+                }
+                self.handle_grid_request(0, 50);
+            }
+            return;
+        }
+
         let weak = self.window_weak.clone();
         let selection = weak
             .upgrade()
@@ -364,7 +416,9 @@ impl AppController {
                     loader.load_full_progressive(before_idx, true);
                     return;
                 }
-                EditOpKind::Delete => todo!(),
+                EditOpKind::Delete => {
+                    unreachable!("Delete should have been handled already");
+                }
             };
 
             let new_buf = SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
@@ -656,10 +710,10 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
         .global::<GridViewState>()
         .set_model(Rc::new(VecModel::from(grid_data)).into());
 
-    let scan_rc = Rc::new(scan);
+    let scan = Arc::new(scan);
     let app_controller = Rc::new(RefCell::new(AppController::new(
         plugin_manager,
-        scan_rc.clone(),
+        scan.clone(),
         &config,
         &main_window,
     )));
@@ -677,16 +731,16 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
     });
 
     main_window.set_app_background(config.background);
-    main_window.set_view_mode(if scan_rc.is_dir {
+    main_window.set_view_mode(if scan.is_dir {
         ViewMode::Grid
     } else {
         ViewMode::Full
     });
 
-    if !scan_rc.paths.is_empty() {
+    if !scan.paths.is_empty() {
         app_controller
             .borrow()
-            .handle_full_view_load(scan_rc.start_index);
+            .handle_full_view_load(scan.start_index);
         ui::full_view_presenter::set_exif(app_controller);
     }
 

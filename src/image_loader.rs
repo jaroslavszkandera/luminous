@@ -9,7 +9,7 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::Instant;
 
 use crate::plugins::PluginManager;
@@ -33,7 +33,7 @@ pub struct ImageLoader {
     thumb_cache: Arc<DashMap<usize, SharedPixelBuffer<Rgba8Pixel>>>,
     full_cache: Arc<DashMap<usize, SharedPixelBuffer<Rgba8Pixel>>>,
 
-    pub paths: Vec<PathBuf>,
+    pub paths: RwLock<Vec<PathBuf>>,
     pub pool: Arc<ThreadPool>,
     pub active_idx: Arc<AtomicUsize>,
     pub window_size: usize,
@@ -75,7 +75,7 @@ impl ImageLoader {
         Self {
             thumb_cache: Arc::new(DashMap::new()),
             full_cache: Arc::new(DashMap::new()),
-            paths,
+            paths: RwLock::new(paths),
             pool: Arc::new(pool),
             active_idx: Arc::new(AtomicUsize::new(0)),
             active_window: Arc::new(Mutex::new(HashSet::new())),
@@ -144,12 +144,41 @@ impl ImageLoader {
         })
     }
 
-    pub fn get_file_name(&self, idx: usize) -> Option<&str> {
-        self.paths.get(idx)?.file_name()?.to_str()
+    pub fn get_file_name(&self, idx: usize) -> Option<String> {
+        self.paths
+            .read()
+            .ok()?
+            .get(idx)?
+            .file_name()?
+            .to_str()
+            .map(|s| s.to_string())
     }
 
-    pub fn get_curr_img_path(&self) -> Option<&PathBuf> {
-        self.paths.get(self.active_idx.load(Ordering::Relaxed))
+    pub fn get_path(&self, idx: usize) -> Option<PathBuf> {
+        let paths = self.paths.read().ok()?;
+        paths.get(idx).cloned()
+    }
+
+    pub fn get_curr_img_path(&self) -> Option<PathBuf> {
+        self.paths
+            .read()
+            .ok()?
+            .get(self.active_idx.load(Ordering::Relaxed))
+            .cloned()
+    }
+
+    pub fn rm_img(&self, idx: usize) {
+        self.full_cache.remove(&idx);
+        self.thumb_cache.remove(&idx);
+        if let Ok(mut paths) = self.paths.write() {
+            if idx < paths.len() {
+                paths.remove(idx);
+            }
+        }
+    }
+
+    pub fn full_len(&self) -> usize {
+        self.full_cache.len()
     }
 
     pub fn get_image_disk_cache_count(&self) -> u64 {
@@ -202,7 +231,7 @@ impl ImageLoader {
             return Some(buf.clone());
         }
 
-        let path = self.paths.get(index)?.clone();
+        let path = self.paths.read().ok()?.get(index)?.clone();
         let cache_clone = self.thumb_cache.clone();
         let cache_path = Self::disk_cache_path(self.cache_dir.as_ref(), &path, res);
         let plugin_manager = self.plugin_manager.clone();
@@ -260,7 +289,7 @@ impl ImageLoader {
             .map(|buf| Image::from_rgba8(buf.clone()))
             .unwrap_or_default();
 
-        let path = match self.paths.get(index) {
+        let path = match self.paths.read().unwrap().get(index) {
             Some(p) => p.clone(),
             None => return backup,
         };
@@ -305,7 +334,7 @@ impl ImageLoader {
     }
 
     pub fn update_sliding_window(&self, center_idx: usize, window_indices: Vec<usize>) {
-        if self.paths.is_empty() {
+        if self.paths.read().unwrap().is_empty() {
             return;
         }
 
@@ -336,7 +365,7 @@ impl ImageLoader {
         if self.full_cache.contains_key(&index) {
             return;
         }
-        let path = match self.paths.get(index) {
+        let path = match self.paths.read().unwrap().get(index) {
             Some(p) => p.clone(),
             None => return,
         };

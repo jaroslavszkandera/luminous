@@ -48,7 +48,7 @@ pub fn register(window: &MainWindow, app_controller: Rc<RefCell<AppController>>)
 
     let acc = app_controller.clone();
     fv.on_apply_edit(move |op| {
-        acc.borrow().handle_edit_op(op);
+        acc.borrow_mut().handle_edit_op(op);
     });
 
     let acc = app_controller.clone();
@@ -58,7 +58,7 @@ pub fn register(window: &MainWindow, app_controller: Rc<RefCell<AppController>>)
             let idx = c_ref.loader.active_idx.load(Ordering::Relaxed);
             (
                 c_ref.loader.get_curr_active_buffer(),
-                c_ref.loader.paths.get(idx).cloned(),
+                c_ref.loader.get_path(idx),
                 c_ref.window_weak.clone(),
                 c_ref.loader.plugin_manager.clone(),
             )
