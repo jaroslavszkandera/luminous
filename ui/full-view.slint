@@ -96,6 +96,9 @@ export component FullView inherits TouchArea {
     property <length> img-vis-x: img-el.x + (img-el.width - FullViewState.curr-image.width * 1px * img-render-scale) / 2;
     property <length> img-vis-y: img-el.y + (img-el.height - FullViewState.curr-image.height * 1px * img-render-scale) / 2;
 
+    property <bool> rmb-down;
+    property <bool> show-context-menu;
+
     mouse-cursor: (root.dragging && zoom-scale > 1.0) ? grabbing : crosshair;
 
     coords-timer := Timer {
@@ -172,6 +175,7 @@ export component FullView inherits TouchArea {
     }
 
     pointer-event(event) => {
+        context-menu.enabled = false;
         if (event.button == PointerEventButton.middle) {
             if (event.kind == PointerEventKind.down) {
                 root.start-drag-x = root.mouse-x;
@@ -203,10 +207,29 @@ export component FullView inherits TouchArea {
                 }
             }
         }
+        if (event.button == PointerEventButton.right) {
+            if (event.kind == PointerEventKind.down) {
+                root.start-drag-x = root.mouse-x;
+                root.start-drag-y = root.mouse-y;
+                root.start-pan-x = root.pan-pos-x;
+                root.start-pan-y = root.pan-pos-y;
+                root.dragging = true;
+                rmb-down = true;
+                show-context-menu = true;
+            } else if (event.kind == PointerEventKind.up) {
+                root.dragging = false;
+                rmb-down = false;
+                if (show-context-menu) {
+                    context-menu.enabled = true;
+                    context-menu.show({ x: root.mouse-x, y: root.mouse-y });
+                }
+            }
+        }
     }
 
     moved => {
         if (dragging && zoom-scale > 1.0) {
+            show-context-menu = false;
             let dx = root.mouse-x - root.start-drag-x;
             let dy = root.mouse-y - root.start-drag-y;
             let overflow-x = img-rect.width * (zoom-scale - 1);
@@ -228,8 +251,14 @@ export component FullView inherits TouchArea {
 
     scroll-event(event) => {
         let scroll-up = event.delta-y > 0;
-        if (event.modifiers.control) {
+        if (event.modifiers.control || rmb-down) {
             zoom(scroll-up ? 1.1 : 0.9, root.mouse-x, root.mouse-y);
+            show-context-menu = false;
+
+            root.start-pan-x = root.pan-pos-x;
+            root.start-pan-y = root.pan-pos-y;
+            root.start-drag-x = root.mouse-x;
+            root.start-drag-y = root.mouse-y;
         } else {
             if (zoom-scale > 1) {
                 return reject;
@@ -315,7 +344,7 @@ export component FullView inherits TouchArea {
                 }
             }
 
-            ContextMenuArea {
+            context-menu := ContextMenuArea {
                 Menu {
                     MenuItem {
                         title: @tr("Rotate +90");
