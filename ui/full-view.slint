@@ -227,6 +227,10 @@ export component FullView inherits TouchArea {
         }
     }
 
+    double-clicked => {
+        exit-full-view();
+    }
+
     moved => {
         if (dragging && zoom-scale > 1.0) {
             show-context-menu = false;
