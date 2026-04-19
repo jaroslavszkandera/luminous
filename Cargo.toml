@@ -64,24 +64,24 @@ criterion = { version = "0.8.2", features = ["html_reports"] }
 tempfile = "3.26.0"
 
 [dependencies.slint]
-version = "1.15.0"
+version = "1.16.0"
 default-features = false
 features = ["std", "compat-1-2", "log", "renderer-skia-opengl"]
 
 [target.'cfg(target_os = "linux")'.dependencies]
 arboard = { version = "3.6.1", features = ["wayland-data-control"] }
-slint = { version = "1.15.0", default-features = false, features = [
+slint = { version = "1.16.0", default-features = false, features = [
   "backend-winit",
 ] }
 
 [target.'cfg(not(target_os = "linux"))'.dependencies]
 arboard = "3.6.1"
-slint = { version = "1.15.0", default-features = false, features = [
+slint = { version = "1.16.0", default-features = false, features = [
   "backend-default",
 ] }
 
 [build-dependencies]
-slint-build = "1.15.0"
+slint-build = "1.16.0"
 
 [profile.dev]
 opt-level = 3
