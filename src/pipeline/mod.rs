@@ -45,33 +45,60 @@ impl StepFactory {
     }
 
     pub fn apply(&self, img: DynamicImage, step: &PipelineStep) -> DynamicImage {
-        if let Some(gpu) = &self.gpu {
-            match step.kind {
-                PipelineStepKind::GaussianBlur => {
-                    debug!("Pipeline applying step (GPU): GaussianBlur");
-                    return gpu.blur(img, step.blur_sigma.max(0.1));
-                }
-                PipelineStepKind::Resize => {
-                    debug!("Pipeline applying step (GPU): Resize");
-                    return gpu.resize(img, step.resize_width as u32, step.resize_height as u32);
-                }
-                _ => {}
-            }
+        match self.steps.get(&(step.kind as u32)) {
+            Some(handler) => handler.apply(img, step),
+            None => img,
+        }
+    }
+
+    pub fn apply_pipeline(&self, img: DynamicImage, steps: &[PipelineStep]) -> DynamicImage {
+        if steps.is_empty() {
+            return img;
         }
 
-        match self.steps.get(&(step.kind as u32)) {
-            Some(handler) => {
-                debug!("Pipeline applying step (CPU): {}", handler.name());
-                handler.apply(img, step)
+        if let Some(gpu) = &self.gpu {
+            debug!("Pipeline: Running on GPU");
+            let mut gpu_tex = gpu.upload(&img);
+
+            for step in steps {
+                gpu_tex = match step.kind {
+                    PipelineStepKind::GaussianBlur => {
+                        gpu.blur_gpu(&gpu_tex, step.blur_sigma.max(0.1))
+                    }
+                    PipelineStepKind::Resize => gpu.resize_gpu(
+                        &gpu_tex,
+                        step.resize_width as u32,
+                        step.resize_height as u32,
+                    ),
+                    PipelineStepKind::Rotate => {
+                        gpu.rotate_gpu(&gpu_tex, resolve_random_angle(step.rotate_angle))
+                    }
+                    PipelineStepKind::Brighten => gpu.brighten_gpu(&gpu_tex, step.brighten_value),
+                    PipelineStepKind::Flip => gpu.flip_gpu(&gpu_tex, step.flip_direction),
+                    PipelineStepKind::ExtractChannel => {
+                        gpu.extract_channel_gpu(&gpu_tex, step.extract_channel)
+                    }
+                };
             }
-            None => {
-                error!(
-                    "Pipeline: no handler registered for step kind {:?}",
-                    step.kind as u32
-                );
-                img
-            }
+
+            return gpu.download(&gpu_tex);
         }
+
+        steps
+            .iter()
+            .fold(img, |acc, step| match self.steps.get(&(step.kind as u32)) {
+                Some(handler) => {
+                    debug!("Pipeline applying step (CPU): {}", handler.name());
+                    handler.apply(acc, step)
+                }
+                None => {
+                    error!(
+                        "Pipeline: no handler registered for step kind {:?}",
+                        step.kind as u32
+                    );
+                    acc
+                }
+            })
     }
 }
 
@@ -250,7 +277,7 @@ pub fn run_pipeline_on_selection(
                 }
             };
 
-            let result = steps.iter().fold(img, |acc, step| factory.apply(acc, step));
+            let result = factory.apply_pipeline(img, &steps);
 
             let file_name = path.file_name().unwrap_or_default();
             let dst_file = dst_dir.join(file_name);

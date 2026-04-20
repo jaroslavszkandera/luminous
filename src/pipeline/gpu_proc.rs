@@ -1,9 +1,15 @@
+use crate::{Channel, FlipDirection, RotateAngle};
 use image::{DynamicImage, GenericImageView};
 use log::info;
 use std::borrow::Cow;
 
+// source: inspired by blog post: https://blog.redwarp.app/image-filters/ and github repo: https://github.com/redwarp/filters
 const BLUR_SHADER: &str = include_str!("shaders/blur.wgsl");
 const RESIZE_SHADER: &str = include_str!("shaders/resize.wgsl");
+const ROTATE_SHADER: &str = include_str!("shaders/rotate.wgsl");
+const BRIGHTEN_SHADER: &str = include_str!("shaders/brighten.wgsl");
+const FLIP_SHADER: &str = include_str!("shaders/flip.wgsl");
+const EXTRACT_CHANNEL_SHADER: &str = include_str!("shaders/extract_channel.wgsl");
 
 pub struct GpuTexture {
     pub(crate) tex: wgpu::Texture,
@@ -25,6 +31,10 @@ pub struct GpuProcessor {
     queue: wgpu::Queue,
     blur_pipeline: wgpu::ComputePipeline,
     resize_pipeline: wgpu::ComputePipeline,
+    rotate_pipeline: wgpu::ComputePipeline,
+    brighten_pipeline: wgpu::ComputePipeline,
+    flip_pipeline: wgpu::ComputePipeline,
+    extract_channel_pipeline: wgpu::ComputePipeline,
 }
 
 impl GpuProcessor {
@@ -56,12 +66,20 @@ impl GpuProcessor {
 
         let blur_pipeline = make_pipeline(&device, BLUR_SHADER, "main");
         let resize_pipeline = make_pipeline(&device, RESIZE_SHADER, "main");
+        let rotate_pipeline = make_pipeline(&device, ROTATE_SHADER, "main");
+        let brighten_pipeline = make_pipeline(&device, BRIGHTEN_SHADER, "main");
+        let flip_pipeline = make_pipeline(&device, FLIP_SHADER, "main");
+        let extract_channel_pipeline = make_pipeline(&device, EXTRACT_CHANNEL_SHADER, "main");
 
         Some(Self {
             device,
             queue,
             blur_pipeline,
             resize_pipeline,
+            rotate_pipeline,
+            brighten_pipeline,
+            flip_pipeline,
+            extract_channel_pipeline,
         })
     }
 
@@ -84,11 +102,9 @@ impl GpuProcessor {
         let kernel_half_size = (sigma * 2.0).ceil() as u32;
         let (w, h) = (src.width, src.height);
 
-        // horizontal pass
         let mid = storage_tex(&self.device, w, h);
         self.blur_pass(&src.tex, &mid, w, h, kernel_half_size, 0);
 
-        // vertical pass
         let dst = storage_tex(&self.device, w, h);
         self.blur_pass(&mid, &dst, w, h, kernel_half_size, 1);
 
@@ -164,6 +180,171 @@ impl GpuProcessor {
             tex: dst,
             width: dst_w,
             height: dst_h,
+        }
+    }
+
+    pub fn rotate_gpu(&self, src: &GpuTexture, angle: RotateAngle) -> GpuTexture {
+        let (dst_w, dst_h) = match angle {
+            RotateAngle::R90 | RotateAngle::R270 => (src.height, src.width),
+            _ => (src.width, src.height),
+        };
+
+        #[repr(C)]
+        #[derive(bytemuck::Pod, bytemuck::Zeroable, Clone, Copy)]
+        struct Params {
+            angle: u32,
+            _pad: [u32; 3],
+        }
+
+        let angle_val = match angle {
+            RotateAngle::R90 => 1,
+            RotateAngle::R180 => 2,
+            RotateAngle::R270 => 3,
+            _ => 0,
+        };
+
+        let dst = storage_tex(&self.device, dst_w, dst_h);
+        let ub = uniform_buf(
+            &self.device,
+            bytemuck::bytes_of(&Params {
+                angle: angle_val,
+                _pad: [0; 3],
+            }),
+        );
+        let bg = bind_group(&self.device, &self.rotate_pipeline, &src.tex, &dst, &ub);
+        dispatch(
+            &self.device,
+            &self.queue,
+            &self.rotate_pipeline,
+            &bg,
+            dst_w,
+            dst_h,
+        );
+
+        GpuTexture {
+            tex: dst,
+            width: dst_w,
+            height: dst_h,
+        }
+    }
+
+    pub fn brighten_gpu(&self, src: &GpuTexture, value: i32) -> GpuTexture {
+        #[repr(C)]
+        #[derive(bytemuck::Pod, bytemuck::Zeroable, Clone, Copy)]
+        struct Params {
+            value: i32,
+            _pad: [i32; 3],
+        }
+
+        let dst = storage_tex(&self.device, src.width, src.height);
+        let ub = uniform_buf(
+            &self.device,
+            bytemuck::bytes_of(&Params {
+                value,
+                _pad: [0; 3],
+            }),
+        );
+        let bg = bind_group(&self.device, &self.brighten_pipeline, &src.tex, &dst, &ub);
+        dispatch(
+            &self.device,
+            &self.queue,
+            &self.brighten_pipeline,
+            &bg,
+            src.width,
+            src.height,
+        );
+
+        GpuTexture {
+            tex: dst,
+            width: src.width,
+            height: src.height,
+        }
+    }
+
+    pub fn flip_gpu(&self, src: &GpuTexture, dir: FlipDirection) -> GpuTexture {
+        #[repr(C)]
+        #[derive(bytemuck::Pod, bytemuck::Zeroable, Clone, Copy)]
+        struct Params {
+            dir: u32,
+            _pad: [u32; 3],
+        }
+
+        let dir_val = match dir {
+            FlipDirection::Horizontal => 0,
+            FlipDirection::Vertical => 1,
+        };
+
+        let dst = storage_tex(&self.device, src.width, src.height);
+        let ub = uniform_buf(
+            &self.device,
+            bytemuck::bytes_of(&Params {
+                dir: dir_val,
+                _pad: [0; 3],
+            }),
+        );
+        let bg = bind_group(&self.device, &self.flip_pipeline, &src.tex, &dst, &ub);
+        dispatch(
+            &self.device,
+            &self.queue,
+            &self.flip_pipeline,
+            &bg,
+            src.width,
+            src.height,
+        );
+
+        GpuTexture {
+            tex: dst,
+            width: src.width,
+            height: src.height,
+        }
+    }
+
+    pub fn extract_channel_gpu(&self, src: &GpuTexture, channel: Channel) -> GpuTexture {
+        #[repr(C)]
+        #[derive(bytemuck::Pod, bytemuck::Zeroable, Clone, Copy)]
+        struct Params {
+            channel: u32,
+            _pad: [u32; 3],
+        }
+
+        let chan_val = match channel {
+            Channel::Gray => 0,
+            Channel::Red => 1,
+            Channel::Green => 2,
+            Channel::Blue => 3,
+            Channel::Hue => 4,
+            Channel::Saturation => 5,
+            Channel::Value => 6,
+        };
+
+        let dst = storage_tex(&self.device, src.width, src.height);
+        let ub = uniform_buf(
+            &self.device,
+            bytemuck::bytes_of(&Params {
+                channel: chan_val,
+                _pad: [0; 3],
+            }),
+        );
+        let bg = bind_group(
+            &self.device,
+            &self.extract_channel_pipeline,
+            &src.tex,
+            &dst,
+            &ub,
+        );
+        dispatch(
+            &self.device,
+            &self.queue,
+            &self.extract_channel_pipeline,
+            &bg,
+            src.width,
+            src.height,
+        );
+
+        GpuTexture {
+            tex: dst,
+            width: src.width,
+            height: src.height,
         }
     }
 
@@ -354,6 +535,7 @@ fn extent(w: u32, h: u32) -> wgpu::Extent3d {
     }
 }
 
+// TODO: tests for every operation and full pipeline
 #[cfg(test)]
 mod tests {
     use super::*;
