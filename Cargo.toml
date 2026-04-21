@@ -41,7 +41,6 @@ dlopen2 = "0.8.2"
 env_logger = "0.11.8"
 hex = "0.4.3"
 image = { version = "0.25.9", default-features = false }
-imageproc = { version = "0.26.1", default-features = false }
 kamadak-exif = "0.6.1"
 log = "0.4.29"
 num_cpus = "1.17.0"
