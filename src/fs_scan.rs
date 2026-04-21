@@ -101,14 +101,6 @@ fn is_image(path: &Path, extensions: &HashSet<String>) -> bool {
 }
 
 pub fn scan(path_str: &str, extra_image_formats: &Vec<ImageFormat>) -> ScanResult {
-    let main_path = Path::new(&path_str);
-    let metadata = fs::metadata(main_path).unwrap();
-    let mut is_dir = false;
-
-    let mut paths: Vec<PathBuf> = Vec::new();
-    let mut start_index: usize = 0;
-    let mut start_img_path: Option<PathBuf> = None;
-
     let mut image_formats = ImageFormats::new();
     debug!(
         "Active decoding extensions: {:?}",
@@ -132,6 +124,26 @@ pub fn scan(path_str: &str, extra_image_formats: &Vec<ImageFormat>) -> ScanResul
         "Active encoding extensions (with plugins): {:?}",
         image_formats.get_all_encoding_exts()
     );
+
+    let main_path = Path::new(&path_str);
+    let metadata = match fs::metadata(main_path) {
+        Ok(m) => m,
+        Err(e) => {
+            error!("Failed to get metadata for {}: {}", main_path.display(), e);
+            return ScanResult {
+                paths: vec![],
+                start_index: 0,
+                is_dir: false,
+                image_formats,
+            };
+        }
+    };
+
+    let mut is_dir = false;
+
+    let mut paths: Vec<PathBuf> = Vec::new();
+    let mut start_index: usize = 0;
+    let mut start_img_path: Option<PathBuf> = None;
 
     let scan_dir = if metadata.is_file() {
         if !is_image(&main_path, &decode_extensions) {
