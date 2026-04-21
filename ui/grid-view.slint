@@ -1,5 +1,5 @@
 import { ScrollView, LineEdit, Button, Palette } from "std-widgets.slint";
-import { ImgFmt, GridItem } from "common.slint";
+import { ImgFmt, GridItem, NoImage } from "common.slint";
 import {
     SidePanel,
     PipelinePanel,
@@ -32,11 +32,19 @@ export component GridView inherits Rectangle {
 
     property <int> last-clicked-index: -1;
 
+    callback open-images();
+
     callback batch-save-with-format(ImgFmt);
     callback pipeline-add-step(PipelineStepKind);
     callback pipeline-remove-step(int);
     callback pipeline-update-step(int, PipelineStep);
     callback pipeline-run();
+
+    if GridViewState.model.length == 0: NoImage {
+        open-clicked => {
+            open-images();
+        }
+    }
 
     public function focus-search() {
         search-input.focus();
@@ -53,6 +61,15 @@ export component GridView inherits Rectangle {
         scroll-area.viewport-y = Math.min(
             scroll-area.viewport-y + scroll-area.height,
             0px);
+        update-visible-rows();
+    }
+
+    public function page-top() {
+        scroll-area.viewport-y = 0;
+        update-visible-rows();
+    }
+    public function page-bottom() {
+        scroll-area.viewport-y = scroll-area.height - scroll-area.viewport-height;
         update-visible-rows();
     }
 

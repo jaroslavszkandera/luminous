@@ -111,9 +111,24 @@ impl ImageLoader {
         self.thumb_cache.clear();
     }
 
-    pub fn clear_thumbs(&self) {
-        self.thumb_epoch.fetch_add(1, Ordering::Relaxed);
+    pub fn update_paths(&self, new_paths: Vec<PathBuf>) {
+        let mut paths = self.paths.write().unwrap();
+        *paths = new_paths;
+
         self.thumb_cache.clear();
+        self.full_cache.clear();
+
+        let mut window = self.active_window.lock().unwrap();
+        window.clear();
+
+        self.thumb_epoch.fetch_add(1, Ordering::SeqCst);
+        self.window_epoch.fetch_add(1, Ordering::SeqCst);
+        self.active_idx.store(0, Ordering::SeqCst);
+    }
+
+    pub fn clear_thumbs(&self) {
+        self.thumb_cache.clear();
+        self.thumb_epoch.fetch_add(1, Ordering::Relaxed);
     }
 
     pub fn prune_grid_thumbs(&self, start: usize, count: usize) {

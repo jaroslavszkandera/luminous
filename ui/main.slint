@@ -25,6 +25,7 @@ export component MainWindow inherits Window {
 
     // App Callbacks
     callback quit-app();
+    callback open-images();
 
     // App State
     in property <color> app-background: Palette.background;
@@ -48,6 +49,24 @@ export component MainWindow inherits Window {
 
     forward-focus: key-handler;
     key-handler := FocusScope {
+        KeyBinding {
+            keys: @keys(Home);
+            activated => {
+                if (root.view-mode == ViewMode.grid) {
+                    grid-ui.page-top();
+                }
+            }
+        }
+
+        KeyBinding {
+            keys: @keys(End);
+            activated => {
+                if (root.view-mode == ViewMode.grid) {
+                    grid-ui.page-bottom();
+                }
+            }
+        }
+
         key-pressed(event) => {
             if (event.text == root.bind-quit) {
                 root.quit-app();
@@ -147,6 +166,9 @@ export component MainWindow inherits Window {
         pipeline-run() => {
             root.pipeline-run();
         }
+        open-images => {
+            open-images();
+        }
     }
 
     // ----- Full view -----
@@ -157,6 +179,9 @@ export component MainWindow inherits Window {
 
         exit-full-view => {
             root.view-mode = ViewMode.grid;
+        }
+        open-images => {
+            open-images();
         }
     }
 }

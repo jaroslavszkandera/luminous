@@ -1,3 +1,4 @@
+import { Button, Palette } from "std-widgets.slint";
 export enum ViewMode {
     full,
     grid,
@@ -45,4 +46,31 @@ export struct GridItem {
     index: int,
     abs_index: int,
     selected: bool,
+}
+
+export component NoImage inherits Rectangle {
+    background: Palette.background;
+    height: 100px;
+    width: 250px;
+    border-radius: 5px;
+
+    callback open-clicked();
+
+    VerticalLayout {
+        spacing: 10px;
+
+        Text {
+            font-size: 16px;
+            text: "No Images";
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+
+        open-folder-btn := Button {
+            text: "Open folder";
+            clicked => {
+                open-clicked();
+            }
+        }
+    }
 }

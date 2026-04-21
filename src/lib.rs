@@ -696,6 +696,63 @@ impl AppController {
             })
             .collect()
     }
+
+    fn handle_open_images(controller_rc: Rc<RefCell<Self>>) {
+        let extra_exts = controller_rc
+            .borrow()
+            .loader
+            .plugin_manager
+            .get_supported_extensions();
+
+        if let Some(path) = rfd::FileDialog::new()
+            .pick_folder()
+            .and_then(|p| p.to_str().map(|s| s.to_string()))
+        {
+            let scan = Arc::new(fs_scan::scan(&path, &extra_exts));
+            if scan.paths.is_empty() {
+                return;
+            }
+
+            controller_rc.borrow_mut().replace_scan(scan);
+        }
+    }
+
+    fn replace_scan(&mut self, scan: Arc<ScanResult>) {
+        self.scan = scan.clone();
+        self.loader.update_paths(scan.paths.clone());
+        self.filtered_indices = (0..scan.paths.len()).collect();
+        self.active_grid_indices.clear();
+
+        if let Some(ui) = self.window_weak.upgrade() {
+            let grid_data: Vec<GridItem> = scan
+                .paths
+                .iter()
+                .enumerate()
+                .map(|(i, _)| GridItem {
+                    image: Image::default(),
+                    index: i as i32,
+                    abs_index: i as i32,
+                    selected: false,
+                })
+                .collect();
+
+            let gv = ui.global::<GridViewState>();
+            gv.set_model(Rc::new(VecModel::from(grid_data)).into());
+            gv.set_selected_count(0);
+
+            ui.set_view_mode(if scan.is_dir {
+                ViewMode::Grid
+            } else {
+                ViewMode::Full
+            });
+
+            if !scan.paths.is_empty() {
+                self.handle_full_view_load(scan.start_index);
+            }
+
+            self.handle_grid_request(0, 50);
+        }
+    }
 }
 
 pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
@@ -711,10 +768,6 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
 
     let extra_exts = plugin_manager.get_supported_extensions();
     let scan = fs_scan::scan(&config.path, &extra_exts);
-    if scan.paths.is_empty() {
-        error!("No supported images found in {}", config.path);
-        return Err(format!("No images in {}", config.path).into());
-    }
 
     let main_window = MainWindow::new()?;
 
@@ -749,6 +802,10 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
     ui::settings_presenter::register(&main_window, app_controller.clone());
     ui::bindings::setup(&main_window, &config);
 
+    let acc = app_controller.clone();
+    main_window.on_open_images(move || {
+        AppController::handle_open_images(acc.clone());
+    });
     main_window.on_quit_app(move || {
         let _ = slint::quit_event_loop();
     });

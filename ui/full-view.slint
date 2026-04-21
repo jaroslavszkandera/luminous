@@ -1,5 +1,5 @@
 import { Palette, TabWidget, Button, StandardButton } from "std-widgets.slint";
-import { ImgFmt, EditOp, EditOpKind } from "common.slint";
+import { ImgFmt, EditOp, EditOpKind, NoImage } from "common.slint";
 import { SidePanel } from "side-panel.slint";
 import { EditsPanel } from "edits-panel.slint";
 import { SelectRect, ImgRect } from "select-rect.slint";
@@ -71,6 +71,7 @@ export component FullView inherits TouchArea {
     in-out property <bool> panel-visible: false;
 
     callback exit-full-view();
+    callback open-images();
 
     // TODO: Not my proudest moments, but it works... revisit
     property <int> interactive-plugins-idx: -1;
@@ -275,6 +276,12 @@ export component FullView inherits TouchArea {
             }
         }
         accept
+    }
+
+    if FullViewState.curr-image-name.is-empty: NoImage {
+        open-clicked => {
+            open-images();
+        }
     }
 
     HorizontalLayout {
