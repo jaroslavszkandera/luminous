@@ -80,16 +80,17 @@ impl AppController {
         });
 
         let weak_full = window_weak.clone();
-        let pm = Arc::clone(&plugin_manager);
+        // let pm = Arc::clone(&plugin_manager);
         loader.on_full_ready(move |index, buffer| {
+            // NOTE: Why is it here?
             // TODO: Auto set image in GUI
-            for plugin in pm.get_interactive_plugins() {
-                let p = Arc::clone(plugin);
-                let buf = buffer.clone();
-                std::thread::spawn(move || {
-                    p.set_interactive_image(&buf);
-                });
-            }
+            // for plugin in pm.get_interactive_plugins() {
+            //     let p = Arc::clone(plugin);
+            //     let buf = buffer.clone();
+            //     std::thread::spawn(move || {
+            //         p.set_interactive_image(&buf);
+            //     });
+            // }
             let _ = weak_full.upgrade_in_event_loop(move |ui| {
                 let img = Image::from_rgba8(buffer);
                 let fv = ui.global::<FullViewState>();
@@ -673,11 +674,14 @@ impl AppController {
     fn notify_interactive_plugin(plugin_id: String, loader: &Arc<ImageLoader>) {
         let loader = loader.clone();
         let plugin_manager = loader.plugin_manager.clone();
+        let curr_active_path = loader.get_curr_img_path();
         let curr_active_buffer = loader.get_curr_active_buffer();
         loader.pool.spawn(move || {
             if let Some(plugin) = plugin_manager.get_plugin_by_id(&plugin_id) {
-                if let Some(buf) = curr_active_buffer {
-                    plugin.set_interactive_image(&buf);
+                if let Some(buf) = curr_active_buffer
+                    && let Some(path) = curr_active_path
+                {
+                    plugin.set_interactive_image(&buf, &path);
                 }
             }
         });

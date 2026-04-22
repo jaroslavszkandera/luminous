@@ -13,6 +13,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::{Arc, Mutex, RwLock};
 
+const USE_SHM_TRANSFER: bool = true;
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum PluginControl {
     Enable, // Can be enabled
@@ -35,18 +37,26 @@ impl PluginControl {
 #[derive(Serialize, Debug)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub(crate) enum IpcCmd {
-    // Ping,
-    SetImage {
+    SetImageShm {
+        path: PathBuf,
         shm_name: String,
         width: u32,
         height: u32,
     },
+    SetImageTcp {
+        path: PathBuf,
+        pixels: Vec<u8>,
+        width: u32,
+        height: u32,
+    },
     Click {
+        path: PathBuf,
         shm_name: String,
         x: u32,
         y: u32,
     },
     RectSelect {
+        path: PathBuf,
         shm_name: String,
         x1: u32,
         y1: u32,
@@ -54,6 +64,7 @@ pub(crate) enum IpcCmd {
         y2: u32,
     },
     TextToMask {
+        path: PathBuf,
         shm_name: String,
         text: String,
     },
@@ -69,7 +80,6 @@ pub(crate) enum IpcCmd {
 pub(crate) enum IpcResponse {
     Ok,
     Busy,
-    // SearchResult { paths: Vec<PathBuf> },
     Error { message: String },
 }
 
@@ -94,14 +104,17 @@ unsafe impl Sync for ShmemWrapper {}
 
 pub(crate) struct ActiveShmem {
     #[allow(dead_code)]
-    pub img: ShmemWrapper,
+    pub img: Option<ShmemWrapper>,
     pub mask: ShmemWrapper,
     pub width: u32,
     pub height: u32,
+    #[allow(dead_code)]
+    pub path: PathBuf,
 }
 
 struct PendingImage {
     buffer: SharedPixelBuffer<Rgba8Pixel>,
+    path: PathBuf,
     token: u32,
 }
 
@@ -329,12 +342,12 @@ impl Backend for DaemonBackend {
                                 continue;
                             }
                             set_status(IpcStatus::Busy);
-                            match ipc_send_image(&mut stream, &pending.buffer) {
+                            match ipc_send_image(&mut stream, &pending.buffer, pending.path) {
                                 Ok(shm) => {
                                     if pending.token
                                         == image_token.load(std::sync::atomic::Ordering::Acquire)
                                     {
-                                        active_shm = Some(shm);
+                                        active_shm = shm;
                                         set_status(IpcStatus::Ready);
                                     } else {
                                         debug!("Embedding done but image changed, discarding");
@@ -475,7 +488,7 @@ impl Backend for DaemonBackend {
         self.running.store(false, Ordering::SeqCst);
     }
 
-    fn set_image(&self, buf: &SharedPixelBuffer<Rgba8Pixel>) -> bool {
+    fn set_image(&self, buf: &SharedPixelBuffer<Rgba8Pixel>, path: &PathBuf) -> bool {
         trace!("set_image inside ipc daemon");
         let token = self
             .image_token
@@ -484,6 +497,7 @@ impl Backend for DaemonBackend {
 
         *self.pending_image.lock().unwrap() = Some(PendingImage {
             buffer: buf.clone(),
+            path: path.clone(),
             token,
         });
 
@@ -644,37 +658,71 @@ pub(crate) fn recv_msg(stream: &mut TcpStream) -> Result<Vec<u8>, Box<dyn std::e
 fn ipc_send_image(
     stream: &mut TcpStream,
     buf: &SharedPixelBuffer<Rgba8Pixel>,
-) -> Result<ActiveShmem, Box<dyn std::error::Error>> {
+    path: PathBuf,
+) -> Result<Option<ActiveShmem>, Box<dyn std::error::Error>> {
     let (w, h) = (buf.width(), buf.height());
-    let img_mem = ShmemConf::new().size((w * h * 4) as usize).create()?;
-    let mask_mem = ShmemConf::new().size((w * h) as usize).create()?;
 
-    unsafe {
-        std::ptr::copy_nonoverlapping(
-            buf.as_slice().as_ptr() as *const u8,
-            img_mem.as_ptr(),
-            (w * h * 4) as usize,
-        );
-    }
+    if USE_SHM_TRANSFER {
+        let img_mem = ShmemConf::new().size((w * h * 4) as usize).create()?;
+        let mask_mem = ShmemConf::new().size((w * h) as usize).create()?;
 
-    send_msg(
-        stream,
-        &IpcCmd::SetImage {
-            shm_name: img_mem.get_os_id().into(),
-            width: w,
-            height: h,
-        },
-    )?;
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                buf.as_slice().as_ptr() as *const u8,
+                img_mem.as_ptr(),
+                (w * h * 4) as usize,
+            );
+        }
 
-    match serde_json::from_slice::<IpcResponse>(&recv_msg(stream)?)? {
-        IpcResponse::Ok => Ok(ActiveShmem {
-            img: ShmemWrapper(img_mem),
-            mask: ShmemWrapper(mask_mem),
-            width: w,
-            height: h,
-        }),
-        IpcResponse::Busy => Err("daemon busy".into()),
-        IpcResponse::Error { message } => Err(message.into()),
+        send_msg(
+            stream,
+            &IpcCmd::SetImageShm {
+                path: path.clone(),
+                shm_name: img_mem.get_os_id().into(),
+                width: w,
+                height: h,
+            },
+        )?;
+
+        match serde_json::from_slice::<IpcResponse>(&recv_msg(stream)?)? {
+            IpcResponse::Ok => Ok(Some(ActiveShmem {
+                img: Some(ShmemWrapper(img_mem)),
+                mask: ShmemWrapper(mask_mem),
+                width: w,
+                height: h,
+                path,
+            })),
+            IpcResponse::Busy => Err("daemon busy".into()),
+            IpcResponse::Error { message } => Err(message.into()),
+        }
+    } else {
+        let mask_mem = ShmemConf::new().size((w * h) as usize).create()?;
+        let raw_pixels = unsafe {
+            std::slice::from_raw_parts(buf.as_slice().as_ptr() as *const u8, (w * h * 4) as usize)
+                .to_vec()
+        };
+
+        send_msg(
+            stream,
+            &IpcCmd::SetImageTcp {
+                path: path.clone(),
+                pixels: raw_pixels,
+                width: w,
+                height: h,
+            },
+        )?;
+
+        match serde_json::from_slice::<IpcResponse>(&recv_msg(stream)?)? {
+            IpcResponse::Ok => Ok(Some(ActiveShmem {
+                img: None,
+                mask: ShmemWrapper(mask_mem),
+                width: w,
+                height: h,
+                path,
+            })),
+            IpcResponse::Busy => Err("daemon busy".into()),
+            IpcResponse::Error { message } => Err(message.into()),
+        }
     }
 }
 
@@ -687,6 +735,7 @@ fn ipc_click(
     send_msg(
         stream,
         &IpcCmd::Click {
+            path: shm.path.clone(),
             shm_name: shm.mask.0.get_os_id().into(),
             x,
             y,
@@ -706,6 +755,7 @@ fn ipc_rect_select(
     send_msg(
         stream,
         &IpcCmd::RectSelect {
+            path: shm.path.clone(),
             shm_name: shm.mask.0.get_os_id().into(),
             x1,
             y1,
@@ -724,6 +774,7 @@ fn ipc_text_to_mask(
     send_msg(
         stream,
         &IpcCmd::TextToMask {
+            path: shm.path.clone(),
             shm_name: shm.mask.0.get_os_id().into(),
             text,
         },

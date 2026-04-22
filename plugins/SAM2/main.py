@@ -42,10 +42,17 @@ def recv_msg(conn: socket.socket) -> dict | None:
         return None
 
 
-def send_resp(conn: socket.socket, status: str, message: str | None = None) -> None:
+def send_resp(
+    conn: socket.socket,
+    status: str,
+    message: str | None = None,
+    timing: dict | None = None,
+) -> None:
     resp: dict = {"status": status}
     if message:
         resp["message"] = message
+    if timing:
+        resp["timing"] = timing
     payload = json.dumps(resp).encode()
     conn.sendall(struct.pack(">I", len(payload)) + payload)
 
@@ -55,8 +62,8 @@ class Worker:
         self.predictor = predictor
         self._img_w = 0
         self._img_h = 0
-        # (cmd, conn)
-        self._queue: queue.Queue[tuple[dict, socket.socket] | None] = queue.Queue(
+        self.current_path: str | None = None
+        self._queue: queue.Queue[tuple[dict, socket.socket, str] | None] = queue.Queue(
             maxsize=1
         )
         self._thread = threading.Thread(target=self._run, daemon=True)
@@ -70,9 +77,9 @@ class Worker:
     def img_h(self) -> int:
         return self._img_h
 
-    def enqueue_set_image(self, cmd: dict, conn: socket.socket) -> bool:
+    def enqueue_set_image(self, cmd: dict, conn: socket.socket, mode: str) -> bool:
         try:
-            self._queue.put_nowait((cmd, conn))
+            self._queue.put_nowait((cmd, conn, mode))
             return True
         except queue.Full:
             return False
@@ -82,24 +89,50 @@ class Worker:
             item = self._queue.get()
             if item is None:
                 break
-            cmd, conn = item
-            self._handle_set_image(cmd, conn)
+            cmd, conn, mode = item
+            self._handle_set_image(cmd, conn, mode)
 
-    def _handle_set_image(self, cmd: dict, conn: socket.socket) -> None:
+    def _handle_set_image(self, cmd: dict, conn: socket.socket, mode: str) -> None:
         log.debug("set_image: starting embedding")
         try:
             w, h = cmd["width"], cmd["height"]
-            shm = open_shm(cmd["shm_name"])
-            try:
-                img = np.ndarray((h, w, 4), dtype=np.uint8, buffer=shm.buf)
-                t = time()
-                self.predictor.set_image(img[:, :, :3])
-                log.info(f"Embedding ready in {time() - t:.3f}s ({w}x{h})")
-                self._img_w = w
-                self._img_h = h
-            finally:
-                shm.close()
-            send_resp(conn, "ok")
+            path = cmd["path"]
+
+            t_decode_start = time()
+            if mode == "shm":
+                shm = open_shm(cmd["shm_name"])
+                try:
+                    img = np.ndarray((h, w, 4), dtype=np.uint8, buffer=shm.buf)
+                    img_rgb = img[:, :, :3].copy()
+                finally:
+                    shm.close()
+            else:
+                pixels = bytes(cmd["pixels"])
+                img = np.frombuffer(pixels, dtype=np.uint8).reshape((h, w, 4))
+                img_rgb = img[:, :, :3].copy()
+            t_decode = time() - t_decode_start
+
+            t_embed_start = time()
+            self.predictor.set_image(img_rgb)
+            t_embed = time() - t_embed_start
+
+            self._img_w = w
+            self._img_h = h
+            self.current_path = path
+
+            log.info(
+                f"set_image [{mode}] decode={t_decode * 1000:.1f}ms "
+                f"embed={t_embed * 1000:.1f}ms total={(t_decode + t_embed) * 1000:.1f}ms "
+                f"({w}x{h})"
+            )
+            send_resp(
+                conn,
+                "ok",
+                timing={
+                    "decode_ms": round(t_decode * 1000, 2),
+                    "embed_ms": round(t_embed * 1000, 2),
+                },
+            )
         except Exception as e:
             log.error(f"set_image failed: {e}")
             send_resp(conn, "error", str(e))
@@ -114,25 +147,41 @@ class Worker:
         )
 
 
-def handle_click(cmd: dict, predictor: SamPredictor, img_w: int, img_h: int) -> None:
+def _check_path(cmd: dict, worker: "Worker") -> None:
+    incoming = cmd.get("path")
+    if incoming != worker.current_path:
+        raise RuntimeError(
+            f"Image context mismatch: expected '{worker.current_path}', got '{incoming}'"
+        )
+
+
+def handle_click(cmd: dict, worker: Worker) -> dict:
+    _check_path(cmd, worker)
     x, y = cmd["x"], cmd["y"]
-    masks, _, _ = predictor.predict(
+    t = time()
+    masks, _, _ = worker.predictor.predict(
         point_coords=np.array([[x, y]]),
         point_labels=np.array([1]),
         multimask_output=False,
     )
-    _write_mask(cmd["shm_name"], masks[0], img_w, img_h)
+    t_infer = time() - t
+    _write_mask(cmd["shm_name"], masks[0], worker.img_w, worker.img_h)
+    log.info(f"click infer={t_infer * 1000:.1f}ms")
+    return {"infer_ms": round(t_infer * 1000, 2)}
 
 
-def handle_rect_select(
-    cmd: dict, predictor: SamPredictor, img_w: int, img_h: int
-) -> None:
+def handle_rect_select(cmd: dict, worker: Worker) -> dict:
+    _check_path(cmd, worker)
     x1, y1, x2, y2 = cmd["x1"], cmd["y1"], cmd["x2"], cmd["y2"]
-    masks, _, _ = predictor.predict(
+    t = time()
+    masks, _, _ = worker.predictor.predict(
         box=np.array([[x1, y1, x2, y2]]),
         multimask_output=False,
     )
-    _write_mask(cmd["shm_name"], masks[0], img_w, img_h)
+    t_infer = time() - t
+    _write_mask(cmd["shm_name"], masks[0], worker.img_w, worker.img_h)
+    log.info(f"rect_select infer={t_infer * 1000:.1f}ms")
+    return {"infer_ms": round(t_infer * 1000, 2)}
 
 
 def _write_mask(shm_name: str, mask: np.ndarray, img_w: int, img_h: int) -> None:
@@ -154,7 +203,6 @@ def handle_connection(conn: socket.socket, addr: tuple, worker: Worker) -> None:
             if cmd is None:
                 log.info("Host disconnected.")
                 break
-            log.debug(f"{cmd=}")
 
             try:
                 action = cmd.get("action")
@@ -163,9 +211,14 @@ def handle_connection(conn: socket.socket, addr: tuple, worker: Worker) -> None:
                     log.debug("ping -> ok")
                     send_resp(conn, "ok")
 
-                elif action == "set_image":
-                    if not worker.enqueue_set_image(cmd, conn):
-                        log.debug("set_image -> busy")
+                elif action == "set_image_shm":
+                    if not worker.enqueue_set_image(cmd, conn, mode="shm"):
+                        log.debug("set_image_shm -> busy")
+                        send_resp(conn, "busy")
+
+                elif action == "set_image_tcp":
+                    if not worker.enqueue_set_image(cmd, conn, mode="tcp"):
+                        log.debug("set_image_tcp -> busy")
                         send_resp(conn, "busy")
 
                 elif action == "click":
@@ -173,7 +226,7 @@ def handle_connection(conn: socket.socket, addr: tuple, worker: Worker) -> None:
                         send_resp(conn, "busy")
                         log.debug("click -> no embedding yet")
                     else:
-                        handle_click(cmd, worker.predictor, worker.img_w, worker.img_h)
+                        handle_click(cmd, worker)
                         log.debug("click -> ok")
                         send_resp(conn, "ok")
 
@@ -182,9 +235,7 @@ def handle_connection(conn: socket.socket, addr: tuple, worker: Worker) -> None:
                         send_resp(conn, "busy")
                         log.debug("rect_select -> no embedding yet")
                     else:
-                        handle_rect_select(
-                            cmd, worker.predictor, worker.img_w, worker.img_h
-                        )
+                        handle_rect_select(cmd, worker)
                         log.debug("rect_select -> ok")
                         send_resp(conn, "ok")
 

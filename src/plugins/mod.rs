@@ -27,7 +27,7 @@ pub trait Backend: Send + Sync {
     fn encode(&self, _path: &Path, _buf: &DynamicImage) -> bool {
         false
     }
-    fn set_image(&self, _buf: &SharedPixelBuffer<Rgba8Pixel>) -> bool {
+    fn set_image(&self, _buf: &SharedPixelBuffer<Rgba8Pixel>, _path: &PathBuf) -> bool {
         false
     }
     fn click(&self, _x: u32, _y: u32) -> Option<SharedPixelBuffer<Rgba8Pixel>> {
@@ -134,8 +134,12 @@ impl Plugin {
     }
 
     // -- interactive (daemon) --
-    pub fn set_interactive_image(&self, buf: &SharedPixelBuffer<Rgba8Pixel>) -> bool {
-        self.backend.set_image(buf)
+    pub fn set_interactive_image(
+        &self,
+        buf: &SharedPixelBuffer<Rgba8Pixel>,
+        path: &PathBuf,
+    ) -> bool {
+        self.backend.set_image(buf, path)
     }
 
     pub fn interactive_click(&self, x: u32, y: u32) -> Option<SharedPixelBuffer<Rgba8Pixel>> {
@@ -189,8 +193,8 @@ impl Backend for Arc<DaemonBackend> {
     fn is_running(&self) -> bool {
         DaemonBackend::is_running(self)
     }
-    fn set_image(&self, buf: &SharedPixelBuffer<Rgba8Pixel>) -> bool {
-        DaemonBackend::set_image(self, buf)
+    fn set_image(&self, buf: &SharedPixelBuffer<Rgba8Pixel>, path: &PathBuf) -> bool {
+        DaemonBackend::set_image(self, buf, path)
     }
     fn click(&self, x: u32, y: u32) -> Option<SharedPixelBuffer<Rgba8Pixel>> {
         DaemonBackend::click(self, x, y)

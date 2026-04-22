@@ -66,12 +66,13 @@ class Sam3Predictor:
 
         self._image: np.ndarray | None = None
         self._pil: Image.Image | None = None
+        self.current_path: str | None = None
 
-    def set_image(self, img_rgb: np.ndarray) -> None:
+    def set_image(self, img_rgb: np.ndarray, path: str) -> None:
         self._image = img_rgb
         self._pil = Image.fromarray(img_rgb)
+        self.current_path = path
 
-    # WARN: Does not work, documentation is different from implementation.
     def predict_point(self, x: int, y: int) -> np.ndarray:
         inputs = self.processor(
             images=self._pil,
@@ -122,18 +123,13 @@ class Sam3Predictor:
         orig_size = inputs["original_sizes"][0]
         return np.zeros((1, orig_size[0], orig_size[1]), dtype=bool)
 
-        # FIX:
-        # @property
-        # def ready(self) -> bool:
-        #     return self.state is not None
-
 
 class Worker:
     def __init__(self, predictor: Sam3Predictor) -> None:
         self.predictor = predictor
         self._img_w = 0
         self._img_h = 0
-        self._queue: queue.Queue[tuple[dict, socket.socket] | None] = queue.Queue(
+        self._queue: queue.Queue[tuple[dict, socket.socket, str] | None] = queue.Queue(
             maxsize=1
         )
         self._thread = threading.Thread(target=self._run, daemon=True)
@@ -147,9 +143,9 @@ class Worker:
     def img_h(self) -> int:
         return self._img_h
 
-    def enqueue_set_image(self, cmd: dict, conn: socket.socket) -> bool:
+    def enqueue_set_image(self, cmd: dict, conn: socket.socket, mode: str) -> bool:
         try:
-            self._queue.put_nowait((cmd, conn))
+            self._queue.put_nowait((cmd, conn, mode))
             return True
         except queue.Full:
             return False
@@ -159,23 +155,33 @@ class Worker:
             item = self._queue.get()
             if item is None:
                 break
-            cmd, conn = item
-            self._handle_set_image(cmd, conn)
+            cmd, conn, mode = item
+            self._handle_set_image(cmd, conn, mode)
 
-    def _handle_set_image(self, cmd: dict, conn: socket.socket) -> None:
+    def _handle_set_image(self, cmd: dict, conn: socket.socket, mode: str) -> None:
         log.debug("set_image: starting embedding")
         try:
             w, h = cmd["width"], cmd["height"]
-            shm = open_shm(cmd["shm_name"])
-            try:
-                img = np.ndarray((h, w, 4), dtype=np.uint8, buffer=shm.buf)
+            path = cmd["path"]
+
+            if mode == "shm":
+                shm = open_shm(cmd["shm_name"])
+                try:
+                    img = np.ndarray((h, w, 4), dtype=np.uint8, buffer=shm.buf)
+                    t = time()
+                    self.predictor.set_image(img[:, :, :3].copy(), path)
+                    log.info(f"Embedding ready in {time() - t:.3f}s ({w}x{h})")
+                finally:
+                    shm.close()
+            else:
+                pixels = bytes(cmd["pixels"])
+                img = np.frombuffer(pixels, dtype=np.uint8).reshape((h, w, 4))
                 t = time()
-                self.predictor.set_image(img[:, :, :3])
-                log.info(f"Embedding ready in {time() - t:.3f}s ({w}x{h})")
-                self._img_w = w
-                self._img_h = h
-            finally:
-                shm.close()
+                self.predictor.set_image(img[:, :, :3].copy(), path)
+                log.info(f"Embedding ready in {time() - t:.3f}s ({w}x{h}) [tcp]")
+
+            self._img_w = w
+            self._img_h = h
             send_resp(conn, "ok")
         except Exception as e:
             log.error(f"set_image failed: {e}")
@@ -190,7 +196,6 @@ def _write_mask(shm_name: str, masks: np.ndarray, img_w: int, img_h: int) -> Non
     shm = open_shm(shm_name)
     try:
         out = np.ndarray((img_h, img_w), dtype=np.uint8, buffer=shm.buf)
-
         if masks.ndim == 3 and masks.shape[0] > 1:
             combined_mask = np.any(masks, axis=0)
             np.copyto(out, (combined_mask * 255).astype(np.uint8))
@@ -201,7 +206,16 @@ def _write_mask(shm_name: str, masks: np.ndarray, img_w: int, img_h: int) -> Non
         shm.close()
 
 
+def _check_path(cmd: dict, predictor: Sam3Predictor) -> None:
+    incoming = cmd.get("path")
+    if incoming != predictor.current_path:
+        raise RuntimeError(
+            f"Image context mismatch: expected '{predictor.current_path}', got '{incoming}'"
+        )
+
+
 def handle_click(cmd: dict, predictor: Sam3Predictor, img_w: int, img_h: int) -> None:
+    _check_path(cmd, predictor)
     mask = predictor.predict_point(cmd["x"], cmd["y"])
     _write_mask(cmd["shm_name"], mask, img_w, img_h)
 
@@ -209,6 +223,7 @@ def handle_click(cmd: dict, predictor: Sam3Predictor, img_w: int, img_h: int) ->
 def handle_rect_select(
     cmd: dict, predictor: Sam3Predictor, img_w: int, img_h: int
 ) -> None:
+    _check_path(cmd, predictor)
     mask = predictor.predict_box(cmd["x1"], cmd["y1"], cmd["x2"], cmd["y2"])
     _write_mask(cmd["shm_name"], mask, img_w, img_h)
 
@@ -216,6 +231,7 @@ def handle_rect_select(
 def handle_text_prompt(
     cmd: dict, predictor: Sam3Predictor, img_w: int, img_h: int
 ) -> None:
+    _check_path(cmd, predictor)
     mask = predictor.set_text_prompt(cmd["text"])
     _write_mask(cmd["shm_name"], mask, img_w, img_h)
 
@@ -238,18 +254,17 @@ def handle_connection(conn: socket.socket, addr: tuple, worker: Worker) -> None:
                     log.debug("ping -> ok")
                     send_resp(conn, "ok")
 
-                elif action == "set_image":
-                    if not worker.enqueue_set_image(cmd, conn):
-                        log.debug("set_image -> busy")
+                elif action == "set_image_shm":
+                    if not worker.enqueue_set_image(cmd, conn, mode="shm"):
+                        log.debug("set_image_shm -> busy")
                         send_resp(conn, "busy")
 
-                # elif action in ("click", "rect_select", "text_to_mask"):
+                elif action == "set_image_tcp":
+                    if not worker.enqueue_set_image(cmd, conn, mode="tcp"):
+                        log.debug("set_image_tcp -> busy")
+                        send_resp(conn, "busy")
+
                 elif action in ("rect_select", "text_to_mask"):
-                    # if not worker.predictor.ready:
-                    #     send_resp(conn, "busy")
-                    #     log.debug(f"{action} -> no embedding yet")
-                    # else:
-                    # <tab>
                     if action == "rect_select":
                         handle_rect_select(
                             cmd, worker.predictor, worker.img_w, worker.img_h
@@ -258,9 +273,6 @@ def handle_connection(conn: socket.socket, addr: tuple, worker: Worker) -> None:
                         handle_text_prompt(
                             cmd, worker.predictor, worker.img_w, worker.img_h
                         )
-                    # Does not work, mentioned in the handle click def...
-                    # elif action == "click":
-                    #     handle_click(cmd, worker.predictor, worker.img_w, worker.img_h)
                     log.debug(f"{action} -> ok")
                     send_resp(conn, "ok")
 
