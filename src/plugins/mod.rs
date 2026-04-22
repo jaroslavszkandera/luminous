@@ -11,6 +11,7 @@ use ipc_daemon::DaemonBackend;
 use log::{debug, error, info};
 use shared_lib::SharedLibBackend;
 use slint::{Rgba8Pixel, SharedPixelBuffer};
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
@@ -238,55 +239,61 @@ impl PluginManager {
     }
 
     /// Scan a directory for plugin subdirectories containing a `plugin.json`.
-    pub fn discover(&mut self, plugins_dir: &Path) {
+    pub fn discover(&mut self) {
+        let plugins_dir = directories::ProjectDirs::from("", "", "luminous").and_then(|proj| {
+            let plugins_dir = proj.data_dir().join("plugins");
+            fs::create_dir_all(&plugins_dir)
+                .map(|_| plugins_dir)
+                .map_err(|e| error!("Failed to create plugins dir: {e}"))
+                .ok()
+        });
         info!("Discovering plugins in: {:?}", plugins_dir);
-        if !plugins_dir.exists() {
-            return;
-        }
 
-        let entries = match std::fs::read_dir(plugins_dir) {
-            Ok(e) => e,
-            Err(e) => {
-                error!("Failed to read plugins dir: {}", e);
-                return;
-            }
-        };
-
-        let mut settings = crate::ui::settings_presenter::read_settings()
-            .unwrap_or_else(|| crate::ui::settings_presenter::Settings { plugins: vec![] });
-
-        let mut discovered_ids = Vec::new();
-
-        for entry in entries.filter_map(|e| e.ok()) {
-            let path = entry.path();
-            if !path.is_dir() {
-                continue;
-            }
-            let id = match path.file_name().and_then(|n| n.to_str()) {
-                Some(s) => s.to_string(),
-                None => continue,
+        if let Some(plugins_dir) = plugins_dir {
+            let entries = match std::fs::read_dir(plugins_dir) {
+                Ok(e) => e,
+                Err(e) => {
+                    error!("Failed to read plugins dir: {}", e);
+                    return;
+                }
             };
 
-            discovered_ids.push(id.clone());
+            let mut settings = crate::ui::settings_presenter::read_settings()
+                .unwrap_or_else(|| crate::ui::settings_presenter::Settings { plugins: vec![] });
 
-            let manifest_path = path.join("plugin.json");
-            if !manifest_path.exists() {
-                error!("Plugin manifest missing: {:?}", manifest_path);
-                continue;
+            let mut discovered_ids = Vec::new();
+
+            for entry in entries.filter_map(|e| e.ok()) {
+                let path = entry.path();
+                if !path.is_dir() {
+                    continue;
+                }
+                let id = match path.file_name().and_then(|n| n.to_str()) {
+                    Some(s) => s.to_string(),
+                    None => continue,
+                };
+
+                discovered_ids.push(id.clone());
+
+                let manifest_path = path.join("plugin.json");
+                if !manifest_path.exists() {
+                    error!("Plugin manifest missing: {:?}", manifest_path);
+                    continue;
+                }
+                let auto_start = settings
+                    .plugins
+                    .iter()
+                    .find(|p| p.id == id)
+                    .map(|p| p.auto_start)
+                    .unwrap_or(false);
+                if let Some(manifest) = load_manifest(&manifest_path) {
+                    self.register(id, path, manifest, auto_start);
+                }
             }
-            let auto_start = settings
-                .plugins
-                .iter()
-                .find(|p| p.id == id)
-                .map(|p| p.auto_start)
-                .unwrap_or(false);
-            if let Some(manifest) = load_manifest(&manifest_path) {
-                self.register(id, path, manifest, auto_start);
+            settings.sync_plugins(discovered_ids);
+            if let Err(e) = crate::ui::settings_presenter::write_settings(&settings) {
+                error!("Failed to save plugins settings: {}", e);
             }
-        }
-        settings.sync_plugins(discovered_ids);
-        if let Err(e) = crate::ui::settings_presenter::write_settings(&settings) {
-            error!("Failed to save plugins settings: {}", e);
         }
     }
 

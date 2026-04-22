@@ -1,7 +1,7 @@
 use dashmap::DashMap;
 use directories::ProjectDirs;
 use image::imageops::FilterType;
-use log::{debug, error, trace, warn};
+use log::{debug, error, trace};
 use rayon::ThreadPool;
 use sha2::{Digest, Sha256};
 use slint::{Image, Rgba8Pixel, SharedPixelBuffer};
@@ -63,7 +63,7 @@ impl ImageLoader {
             let dir = proj.cache_dir().join("thumbnails");
             fs::create_dir_all(&dir)
                 .map(|_| dir)
-                .map_err(|e| warn!("Failed to create thumbnail cache dir: {e}"))
+                .map_err(|e| error!("Failed to create thumbnail cache dir: {e}"))
                 .ok()
         });
 

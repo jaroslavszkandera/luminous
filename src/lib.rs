@@ -21,7 +21,6 @@ use std::cell::RefCell;
 use std::cmp;
 use std::collections::HashSet;
 use std::error::Error;
-use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -763,7 +762,7 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
     if config.safe_mode {
         info!("Starting in safe mode");
     } else {
-        plugin_manager.discover(Path::new("plugins"));
+        plugin_manager.discover();
     }
 
     let extra_exts = plugin_manager.get_supported_extensions();
