@@ -1,19 +1,21 @@
-use crate::plugins::Backend;
-use crate::plugins::manifest::PluginManifest;
+use crate::plugins::{manifest::PluginManifest, Backend};
 use log::{debug, error, info, trace, warn};
 use serde::{Deserialize, Serialize};
 use shared_memory::{Shmem, ShmemConf};
 use slint::{Rgba8Pixel, SharedPixelBuffer};
 use std::io::{Read, Write};
-use std::net::TcpStream;
-use std::path::Path;
-use std::path::PathBuf;
+use std::net::{SocketAddr, TcpStream};
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver, SyncSender};
-use std::sync::{Arc, Mutex, RwLock};
+use std::str::FromStr;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    mpsc::{self, Receiver, SyncSender},
+    {Arc, Mutex, RwLock},
+};
 
-const USE_SHM_TRANSFER: bool = true;
+// TODO: use SHM only on local linux combination
+const USE_SHM_TRANSFER: bool = false;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum PluginControl {
@@ -78,7 +80,7 @@ pub(crate) enum IpcCmd {
 #[derive(Deserialize, Debug)]
 #[serde(tag = "status", rename_all = "lowercase")]
 pub(crate) enum IpcResponse {
-    Ok,
+    Ok { mask_data: Option<String> },
     Busy,
     Error { message: String },
 }
@@ -105,7 +107,7 @@ unsafe impl Sync for ShmemWrapper {}
 pub(crate) struct ActiveShmem {
     #[allow(dead_code)]
     pub img: Option<ShmemWrapper>,
-    pub mask: ShmemWrapper,
+    pub mask: Option<ShmemWrapper>,
     pub width: u32,
     pub height: u32,
     #[allow(dead_code)]
@@ -250,29 +252,36 @@ impl Backend for DaemonBackend {
             rx
         };
 
+        let local = self.manifest.daemon_ip.is_none();
+
         self.set_state(PluginControl::Starting);
         let process = self.manifest.interpreter.as_ref().and_then(|interp| {
-            let parts: Vec<&str> = interp.split_whitespace().collect();
-            let (&exe, args) = parts.split_first()?;
-            info!(
-                "Starting daemon: {} {:?} {:?}",
-                exe, args, self.manifest.entry
-            );
-            Command::new(exe)
-                .args(args)
-                .arg(
-                    self.manifest
-                        .entry
-                        .as_ref()
-                        .expect("Missing daemon entry should be handled by manifest parsing."),
-                )
-                .current_dir(self.dir.clone())
-                .stdout(Stdio::inherit())
-                .stderr(Stdio::inherit())
-                .spawn()
-                .ok()
+            if local {
+                let parts: Vec<&str> = interp.split_whitespace().collect();
+                let (&exe, args) = parts.split_first()?;
+                info!(
+                    "Starting daemon: {} {:?} {:?}",
+                    exe, args, self.manifest.entry
+                );
+                Command::new(exe)
+                    .args(args)
+                    .arg(
+                        self.manifest
+                            .entry
+                            .as_ref()
+                            .expect("Missing daemon entry should be handled by manifest parsing."),
+                    )
+                    .current_dir(self.dir.clone())
+                    .stdout(Stdio::inherit())
+                    .stderr(Stdio::inherit())
+                    .spawn()
+                    .ok()
+            } else {
+                info!("Remote plugin, only trying to connect");
+                None
+            }
         });
-        if process.is_none() {
+        if process.is_none() && local {
             self.set_state(PluginControl::Enable);
             error!("Failed to start daemon: {}", self.manifest.name)
         }
@@ -283,6 +292,7 @@ impl Backend for DaemonBackend {
             .manifest
             .daemon_port
             .expect("Missing daemon port should be handled by manifest parsing.");
+        let ip = self.manifest.daemon_ip.clone();
 
         let state_w = self.state.clone();
         let on_state_w = self.on_state_change.clone();
@@ -310,7 +320,7 @@ impl Backend for DaemonBackend {
                     }
                 };
 
-                let mut stream = match connect_with_retry(port, 30, 500) {
+                let mut stream = match connect_with_retry(ip, port, 30, 500) {
                     Some(s) => s,
                     None => {
                         error!("Failed to connect to daemon on port {port} after retries");
@@ -624,16 +634,37 @@ impl Drop for DaemonBackend {
     }
 }
 
-fn connect_with_retry(port: u16, attempts: u32, delay_ms: u64) -> Option<TcpStream> {
+fn connect_with_retry(
+    ip: Option<String>,
+    port: u16,
+    attempts: u32,
+    delay_ms: u64,
+) -> Option<TcpStream> {
+    let ip_str = ip.unwrap_or_else(|| "127.0.0.1".to_string());
+    let addr = match std::net::IpAddr::from_str(&ip_str) {
+        Ok(ip_addr) => SocketAddr::new(ip_addr, port),
+        Err(e) => {
+            error!("Invalid IP address '{}': {}", ip_str, e);
+            return None;
+        }
+    };
+    debug!("Trying to connect to {addr}");
+
     for attempt in 0..attempts {
-        match TcpStream::connect(("127.0.0.1", port)) {
+        match TcpStream::connect(addr) {
             Ok(s) => {
                 info!("Connected to daemon on port {port} (attempt {attempt})");
                 return Some(s);
             }
-            Err(_) => std::thread::sleep(std::time::Duration::from_millis(delay_ms)),
+            Err(e) => {
+                trace!("Connection attempt {} failed: {}", attempt, e);
+                if attempt < attempts {
+                    std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+                }
+            }
         }
     }
+    error!("Failed to connect to daemon after {} attempts", attempts);
     None
 }
 
@@ -685,9 +716,9 @@ fn ipc_send_image(
         )?;
 
         match serde_json::from_slice::<IpcResponse>(&recv_msg(stream)?)? {
-            IpcResponse::Ok => Ok(Some(ActiveShmem {
+            IpcResponse::Ok { .. } => Ok(Some(ActiveShmem {
                 img: Some(ShmemWrapper(img_mem)),
-                mask: ShmemWrapper(mask_mem),
+                mask: Some(ShmemWrapper(mask_mem)),
                 width: w,
                 height: h,
                 path,
@@ -696,7 +727,6 @@ fn ipc_send_image(
             IpcResponse::Error { message } => Err(message.into()),
         }
     } else {
-        let mask_mem = ShmemConf::new().size((w * h) as usize).create()?;
         let raw_pixels = unsafe {
             std::slice::from_raw_parts(buf.as_slice().as_ptr() as *const u8, (w * h * 4) as usize)
                 .to_vec()
@@ -713,9 +743,9 @@ fn ipc_send_image(
         )?;
 
         match serde_json::from_slice::<IpcResponse>(&recv_msg(stream)?)? {
-            IpcResponse::Ok => Ok(Some(ActiveShmem {
+            IpcResponse::Ok { .. } => Ok(Some(ActiveShmem {
                 img: None,
-                mask: ShmemWrapper(mask_mem),
+                mask: None,
                 width: w,
                 height: h,
                 path,
@@ -736,7 +766,11 @@ fn ipc_click(
         stream,
         &IpcCmd::Click {
             path: shm.path.clone(),
-            shm_name: shm.mask.0.get_os_id().into(),
+            shm_name: shm
+                .mask
+                .as_ref()
+                .map(|m| m.0.get_os_id().into())
+                .unwrap_or_default(),
             x,
             y,
         },
@@ -756,7 +790,11 @@ fn ipc_rect_select(
         stream,
         &IpcCmd::RectSelect {
             path: shm.path.clone(),
-            shm_name: shm.mask.0.get_os_id().into(),
+            shm_name: shm
+                .mask
+                .as_ref()
+                .map(|m| m.0.get_os_id().into())
+                .unwrap_or_default(),
             x1,
             y1,
             x2,
@@ -775,7 +813,11 @@ fn ipc_text_to_mask(
         stream,
         &IpcCmd::TextToMask {
             path: shm.path.clone(),
-            shm_name: shm.mask.0.get_os_id().into(),
+            shm_name: shm
+                .mask
+                .as_ref()
+                .map(|m| m.0.get_os_id().into())
+                .unwrap_or_default(),
             text,
         },
     )?;
@@ -799,10 +841,18 @@ fn read_mask_response(
     shm: &ActiveShmem,
 ) -> Result<Option<SharedPixelBuffer<Rgba8Pixel>>, Box<dyn std::error::Error>> {
     match serde_json::from_slice::<IpcResponse>(&recv_msg(stream)?)? {
-        IpcResponse::Ok => {
+        IpcResponse::Ok { mask_data } => {
             let (w, h) = (shm.width, shm.height);
-            let mask = unsafe { std::slice::from_raw_parts(shm.mask.0.as_ptr(), (w * h) as usize) };
-            let rgba = mask_to_rgba_overlay(mask);
+            let rgba = if let Some(b64) = mask_data.filter(|s| !s.is_empty()) {
+                let bytes =
+                    base64::Engine::decode(&base64::engine::general_purpose::STANDARD, b64)?;
+                mask_to_rgba_overlay(&bytes)
+            } else {
+                let mask_shm = shm.mask.as_ref().ok_or("no mask shm in shm mode")?;
+                let mask =
+                    unsafe { std::slice::from_raw_parts(mask_shm.0.as_ptr(), (w * h) as usize) };
+                mask_to_rgba_overlay(mask)
+            };
             Ok(Some(SharedPixelBuffer::clone_from_slice(&rgba, w, h)))
         }
         IpcResponse::Busy => {

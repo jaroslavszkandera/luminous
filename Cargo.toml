@@ -23,6 +23,7 @@ tiff = ["image/tiff"]
 webp = ["image/webp"]
 
 [dependencies]
+base64 = "0.22.1"
 bytemuck = "1.25.0"
 chrono = "0.4.44"
 clap = { version = "4.5.57", default-features = false, features = [

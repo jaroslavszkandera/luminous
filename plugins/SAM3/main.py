@@ -1,3 +1,4 @@
+import base64
 import json
 import logging as log
 import queue
@@ -17,7 +18,7 @@ log.getLogger("httpx").setLevel(log.WARNING)
 log.getLogger("httpcore").setLevel(log.WARNING)
 log.getLogger("transformers").setLevel(log.WARNING)
 
-HOST = "127.0.0.1"
+HOST = "0.0.0.0"
 PORT = 50023
 MODEL_ID = "facebook/sam3"
 
@@ -47,10 +48,17 @@ def recv_msg(conn: socket.socket) -> dict | None:
         return None
 
 
-def send_resp(conn: socket.socket, status: str, message: str | None = None) -> None:
+def send_resp(
+    conn: socket.socket,
+    status: str,
+    message: str | None = None,
+    mask_data: str | None = None,
+) -> None:
     resp: dict = {"status": status}
     if message:
         resp["message"] = message
+    if mask_data is not None:
+        resp["mask_data"] = mask_data
     payload = json.dumps(resp).encode()
     conn.sendall(struct.pack(">I", len(payload)) + payload)
 
@@ -129,6 +137,7 @@ class Worker:
         self.predictor = predictor
         self._img_w = 0
         self._img_h = 0
+        self.is_tcp_mode: bool = False
         self._queue: queue.Queue[tuple[dict, socket.socket, str] | None] = queue.Queue(
             maxsize=1
         )
@@ -182,6 +191,7 @@ class Worker:
 
             self._img_w = w
             self._img_h = h
+            self.is_tcp_mode = mode == "tcp"
             send_resp(conn, "ok")
         except Exception as e:
             log.error(f"set_image failed: {e}")
@@ -214,26 +224,31 @@ def _check_path(cmd: dict, predictor: Sam3Predictor) -> None:
         )
 
 
-def handle_click(cmd: dict, predictor: Sam3Predictor, img_w: int, img_h: int) -> None:
-    _check_path(cmd, predictor)
-    mask = predictor.predict_point(cmd["x"], cmd["y"])
-    _write_mask(cmd["shm_name"], mask, img_w, img_h)
+def _get_mask_bytes(masks: np.ndarray) -> bytes:
+    if masks.ndim == 3 and masks.shape[0] > 1:
+        combined_mask = np.any(masks, axis=0)
+        return (combined_mask * 255).astype(np.uint8).tobytes()
+    else:
+        m = masks[0] if masks.ndim == 3 else masks
+        return (m * 255).astype(np.uint8).tobytes()
 
 
-def handle_rect_select(
-    cmd: dict, predictor: Sam3Predictor, img_w: int, img_h: int
-) -> None:
-    _check_path(cmd, predictor)
-    mask = predictor.predict_box(cmd["x1"], cmd["y1"], cmd["x2"], cmd["y2"])
-    _write_mask(cmd["shm_name"], mask, img_w, img_h)
+def handle_rect_select(cmd: dict, worker: Worker) -> dict:
+    _check_path(cmd, worker.predictor)
+    mask = worker.predictor.predict_box(cmd["x1"], cmd["y1"], cmd["x2"], cmd["y2"])
+    if worker.is_tcp_mode:
+        return {"mask_data": base64.b64encode(_get_mask_bytes(mask)).decode()}
+    _write_mask(cmd["shm_name"], mask, worker.img_w, worker.img_h)
+    return {}
 
 
-def handle_text_prompt(
-    cmd: dict, predictor: Sam3Predictor, img_w: int, img_h: int
-) -> None:
-    _check_path(cmd, predictor)
-    mask = predictor.set_text_prompt(cmd["text"])
-    _write_mask(cmd["shm_name"], mask, img_w, img_h)
+def handle_text_prompt(cmd: dict, worker: Worker) -> dict:
+    _check_path(cmd, worker.predictor)
+    mask = worker.predictor.set_text_prompt(cmd["text"])
+    if worker.is_tcp_mode:
+        return {"mask_data": base64.b64encode(_get_mask_bytes(mask)).decode()}
+    _write_mask(cmd["shm_name"], mask, worker.img_w, worker.img_h)
+    return {}
 
 
 def handle_connection(conn: socket.socket, addr: tuple, worker: Worker) -> None:
@@ -266,15 +281,12 @@ def handle_connection(conn: socket.socket, addr: tuple, worker: Worker) -> None:
 
                 elif action in ("rect_select", "text_to_mask"):
                     if action == "rect_select":
-                        handle_rect_select(
-                            cmd, worker.predictor, worker.img_w, worker.img_h
-                        )
+                        result = handle_rect_select(cmd, worker)
                     elif action == "text_to_mask":
-                        handle_text_prompt(
-                            cmd, worker.predictor, worker.img_w, worker.img_h
-                        )
+                        result = handle_text_prompt(cmd, worker)
+
                     log.debug(f"{action} -> ok")
-                    send_resp(conn, "ok")
+                    send_resp(conn, "ok", mask_data=result.get("mask_data"))
 
                 elif action == "shutdown":
                     log.debug("shutdown -> ok")

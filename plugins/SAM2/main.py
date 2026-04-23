@@ -1,3 +1,4 @@
+import base64
 import json
 import logging as log
 import os
@@ -13,7 +14,7 @@ import numpy as np
 import torch
 from segment_anything import SamPredictor, sam_model_registry
 
-HOST = "127.0.0.1"
+HOST = "0.0.0.0"
 PORT = 50021
 
 
@@ -47,12 +48,15 @@ def send_resp(
     status: str,
     message: str | None = None,
     timing: dict | None = None,
+    mask_data: str | None = None,
 ) -> None:
     resp: dict = {"status": status}
     if message:
         resp["message"] = message
     if timing:
         resp["timing"] = timing
+    if mask_data is not None:
+        resp["mask_data"] = mask_data
     payload = json.dumps(resp).encode()
     conn.sendall(struct.pack(">I", len(payload)) + payload)
 
@@ -63,6 +67,7 @@ class Worker:
         self._img_w = 0
         self._img_h = 0
         self.current_path: str | None = None
+        self.is_tcp_mode: bool = False
         self._queue: queue.Queue[tuple[dict, socket.socket, str] | None] = queue.Queue(
             maxsize=1
         )
@@ -119,6 +124,7 @@ class Worker:
             self._img_w = w
             self._img_h = h
             self.current_path = path
+            self.is_tcp_mode = mode == "tcp"
 
             log.info(
                 f"set_image [{mode}] decode={t_decode * 1000:.1f}ms "
@@ -165,6 +171,12 @@ def handle_click(cmd: dict, worker: Worker) -> dict:
         multimask_output=False,
     )
     t_infer = time() - t
+    if worker.is_tcp_mode:
+        mask_bytes = (masks[0] * 255).astype(np.uint8).tobytes()
+        return {
+            "infer_ms": round(t_infer * 1000, 2),
+            "mask_data": base64.b64encode(mask_bytes).decode(),
+        }
     _write_mask(cmd["shm_name"], masks[0], worker.img_w, worker.img_h)
     log.info(f"click infer={t_infer * 1000:.1f}ms")
     return {"infer_ms": round(t_infer * 1000, 2)}
@@ -179,6 +191,12 @@ def handle_rect_select(cmd: dict, worker: Worker) -> dict:
         multimask_output=False,
     )
     t_infer = time() - t
+    if worker.is_tcp_mode:
+        mask_bytes = (masks[0] * 255).astype(np.uint8).tobytes()
+        return {
+            "infer_ms": round(t_infer * 1000, 2),
+            "mask_data": base64.b64encode(mask_bytes).decode(),
+        }
     _write_mask(cmd["shm_name"], masks[0], worker.img_w, worker.img_h)
     log.info(f"rect_select infer={t_infer * 1000:.1f}ms")
     return {"infer_ms": round(t_infer * 1000, 2)}
@@ -226,18 +244,28 @@ def handle_connection(conn: socket.socket, addr: tuple, worker: Worker) -> None:
                         send_resp(conn, "busy")
                         log.debug("click -> no embedding yet")
                     else:
-                        handle_click(cmd, worker)
+                        result = handle_click(cmd, worker)
                         log.debug("click -> ok")
-                        send_resp(conn, "ok")
+                        send_resp(
+                            conn,
+                            "ok",
+                            timing={"infer_ms": result["infer_ms"]},
+                            mask_data=result.get("mask_data"),
+                        )
 
                 elif action == "rect_select":
                     if not worker.embedding_ready():
                         send_resp(conn, "busy")
                         log.debug("rect_select -> no embedding yet")
                     else:
-                        handle_rect_select(cmd, worker)
+                        result = handle_rect_select(cmd, worker)
                         log.debug("rect_select -> ok")
-                        send_resp(conn, "ok")
+                        send_resp(
+                            conn,
+                            "ok",
+                            timing={"infer_ms": result["infer_ms"]},
+                            mask_data=result.get("mask_data"),
+                        )
 
                 elif action == "shutdown":
                     log.debug("shutdown -> ok")
