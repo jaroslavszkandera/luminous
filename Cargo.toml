@@ -3,6 +3,18 @@ name = "luminous"
 version = "0.1.0"
 edition = "2024"
 
+[workspace]
+members = ["crates/plugins"]
+
+[workspace.dependencies]
+directories = "6.0.0"
+log = "0.4.29"
+image = { version = "0.25.9", default-features = false }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+slint = { version = "1.16.0", default-features = false }
+tempfile = "3.26.0"
+
 [features]
 default = ["gif", "jpeg", "png", "tiff", "webp"]
 # avif = ["image/avif"]
@@ -23,7 +35,7 @@ tiff = ["image/tiff"]
 webp = ["image/webp"]
 
 [dependencies]
-base64 = "0.22.1"
+luminous-plugins = { path = "crates/plugins" }
 bytemuck = "1.25.0"
 chrono = "0.4.44"
 clap = { version = "4.5.57", default-features = false, features = [
@@ -37,23 +49,20 @@ cocotools = "0.0.7"
 color-print = "0.3.7"
 csscolorparser = "0.8.2"
 dashmap = { version = "6.1.0", features = ["rayon"] }
-directories = "6.0.0"
-dlopen2 = "0.8.2"
+directories = { workspace = true }
 env_logger = "0.11.8"
 hex = "0.4.3"
-image = { version = "0.25.9", default-features = false }
+image = { workspace = true }
 kamadak-exif = "0.6.1"
-log = "0.4.29"
+log = { workspace = true }
 num_cpus = "1.17.0"
 palette = { version = "0.7.6" }
 pollster = "0.4.0"
 rayon = "1.11.0"
 rfd = "0.17.2"
-serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.149"
+serde = { workspace = true }
+serde_json = { workspace = true }
 sha2 = "0.10.9"
-shared_memory = "0.12.4"
-sysinfo = "0.38.4"
 toml = "0.9.11"
 trash = "5.2.5"
 walkdir = "2.5.0"
@@ -61,11 +70,10 @@ wgpu = "29.0.1"
 
 [dev-dependencies]
 criterion = { version = "0.8.2", features = ["html_reports"] }
-tempfile = "3.26.0"
+tempfile = { workspace = true }
 
 [dependencies.slint]
-version = "1.16.0"
-default-features = false
+workspace = true
 features = ["std", "compat-1-2", "log", "renderer-skia-opengl"]
 
 [target.'cfg(target_os = "linux")'.dependencies]

@@ -3188,7 +3188,6 @@ name = "luminous"
 version = "0.1.0"
 dependencies = [
  "arboard",
- "base64",
  "bytemuck",
  "chrono",
  "clap",
@@ -3198,12 +3197,12 @@ dependencies = [
  "csscolorparser",
  "dashmap",
  "directories",
- "dlopen2",
  "env_logger",
  "hex",
  "image 0.25.10",
  "kamadak-exif",
  "log",
+ "luminous-plugins",
  "num_cpus",
  "palette",
  "pollster",
@@ -3212,15 +3211,30 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
- "shared_memory",
  "slint",
  "slint-build",
- "sysinfo",
  "tempfile",
  "toml 0.9.12+spec-1.1.0",
  "trash",
  "walkdir",
  "wgpu",
+]
+
+[[package]]
+name = "luminous-plugins"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "directories",
+ "dlopen2",
+ "image 0.25.10",
+ "log",
+ "serde",
+ "serde_json",
+ "shared_memory",
+ "slint",
+ "sysinfo",
+ "tempfile",
 ]
 
 [[package]]

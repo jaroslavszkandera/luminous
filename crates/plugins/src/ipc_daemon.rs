@@ -1,4 +1,4 @@
-use crate::plugins::{manifest::PluginManifest, Backend};
+use crate::{Backend, manifest::PluginManifest};
 use log::{debug, error, info, trace, warn};
 use serde::{Deserialize, Serialize};
 use shared_memory::{Shmem, ShmemConf};

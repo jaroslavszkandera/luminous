@@ -5,14 +5,13 @@ pub mod fs_scan;
 pub mod image_loader;
 pub mod image_processing;
 pub mod pipeline;
-pub mod plugins;
 mod ui;
 
 use config::Config;
 use fs_scan::ScanResult;
 use image_loader::ImageLoader;
+use luminous_plugins::PluginManager;
 use pipeline::StepFactory;
-use plugins::PluginManager;
 
 #[allow(unused_imports)]
 use log::{debug, error, info, warn};
@@ -765,12 +764,25 @@ impl AppController {
 pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
     info!("Starting Luminous");
     let init_start = std::time::Instant::now();
-    let mut plugin_manager = plugins::PluginManager::new();
+    let mut plugin_manager = luminous_plugins::PluginManager::new();
+
+    let mut settings = ui::settings_presenter::read_settings()
+        .unwrap_or_else(|| ui::settings_presenter::Settings { plugins: vec![] });
 
     if config.safe_mode {
         info!("Starting in safe mode");
     } else {
-        plugin_manager.discover();
+        let auto_start_ids: Vec<String> = settings
+            .plugins
+            .iter()
+            .filter(|p| p.auto_start)
+            .map(|p| p.id.clone())
+            .collect();
+        let discovered_ids = plugin_manager.discover(&auto_start_ids);
+        settings.sync_plugins(discovered_ids);
+        if let Err(e) = ui::settings_presenter::write_settings(&settings) {
+            error!("Failed to save plugins settings: {}", e);
+        }
     }
 
     let extra_exts = plugin_manager.get_supported_extensions();

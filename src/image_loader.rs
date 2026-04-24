@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Instant;
 
-use crate::plugins::PluginManager;
+use luminous_plugins::PluginManager;
 
 const THUMB_FILTER: FilterType = FilterType::Triangle;
 

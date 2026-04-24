@@ -1,0 +1,21 @@
+[package]
+name = "luminous-plugins"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+directories = { workspace = true }
+log = { workspace = true }
+image = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+# TODO: Would it be nice to decouple this maybe
+slint = { workspace = true, features = ["std"] }
+
+base64 = "0.22.1"
+dlopen2 = "0.8.2"
+shared_memory = "0.12.4"
+sysinfo = "0.38.4"
+
+[dev-dependencies]
+tempfile = { workspace = true }

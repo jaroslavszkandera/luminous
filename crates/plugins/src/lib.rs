@@ -6,7 +6,6 @@ use image::DynamicImage;
 pub use ipc_daemon::{IpcStatus, PluginControl};
 pub use manifest::{BackendKind, PluginCapability, PluginManifest, load_manifest};
 
-use crate::fs_scan::ImageFormat;
 use ipc_daemon::DaemonBackend;
 use log::{debug, error, info};
 use shared_lib::SharedLibBackend;
@@ -14,6 +13,15 @@ use slint::{Rgba8Pixel, SharedPixelBuffer};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
+
+// WARN: Duplicate from crate::fs_scan::ImageFormat;
+// use crate::fs_scan::ImageFormat;
+#[derive(PartialEq, Eq, Hash, Debug, Clone)]
+pub struct ImageFormat {
+    pub exts: Vec<String>,
+    pub decoding_support: bool,
+    pub encoding_support: bool,
+}
 
 pub trait Backend: Send + Sync {
     fn start(&self) {}
@@ -243,7 +251,7 @@ impl PluginManager {
     }
 
     /// Scan a directory for plugin subdirectories containing a `plugin.json`.
-    pub fn discover(&mut self) {
+    pub fn discover(&mut self, auto_start_ids: &[String]) -> Vec<String> {
         let plugins_dir = directories::ProjectDirs::from("", "", "luminous").and_then(|proj| {
             let plugins_dir = proj.data_dir().join("plugins");
             fs::create_dir_all(&plugins_dir)
@@ -258,12 +266,9 @@ impl PluginManager {
                 Ok(e) => e,
                 Err(e) => {
                     error!("Failed to read plugins dir: {}", e);
-                    return;
+                    return vec![];
                 }
             };
-
-            let mut settings = crate::ui::settings_presenter::read_settings()
-                .unwrap_or_else(|| crate::ui::settings_presenter::Settings { plugins: vec![] });
 
             let mut discovered_ids = Vec::new();
 
@@ -284,20 +289,14 @@ impl PluginManager {
                     error!("Plugin manifest missing: {:?}", manifest_path);
                     continue;
                 }
-                let auto_start = settings
-                    .plugins
-                    .iter()
-                    .find(|p| p.id == id)
-                    .map(|p| p.auto_start)
-                    .unwrap_or(false);
+                let auto_start = auto_start_ids.contains(&id);
                 if let Some(manifest) = load_manifest(&manifest_path) {
                     self.register(id, path, manifest, auto_start);
                 }
             }
-            settings.sync_plugins(discovered_ids);
-            if let Err(e) = crate::ui::settings_presenter::write_settings(&settings) {
-                error!("Failed to save plugins settings: {}", e);
-            }
+            discovered_ids
+        } else {
+            vec![]
         }
     }
 

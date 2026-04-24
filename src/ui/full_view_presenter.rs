@@ -2,11 +2,11 @@ use crate::AppController;
 use crate::FullViewState;
 use crate::MainWindow;
 use crate::image_processing::save_image;
-use crate::plugins::{PluginCapability, manifest::InteractiveCapability};
 use cocotools::coco::object_detection::{
     Annotation, Bbox, Dataset, Image as CocoImage, Rle, Segmentation,
 };
 use log::{debug, error};
+use luminous_plugins::{PluginCapability, manifest::InteractiveCapability};
 use slint::{ComponentHandle, SharedString, StandardListViewItem, VecModel};
 use slint::{Image, Rgba8Pixel, SharedPixelBuffer};
 use std::cell::RefCell;

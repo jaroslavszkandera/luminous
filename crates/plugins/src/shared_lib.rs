@@ -1,5 +1,5 @@
-use crate::plugins::Backend;
-use crate::plugins::manifest::{PluginCapability, PluginManifest};
+use crate::Backend;
+use crate::manifest::{PluginCapability, PluginManifest};
 use dlopen2::wrapper::{Container, WrapperApi};
 use image::DynamicImage;
 use log::{debug, error, info};

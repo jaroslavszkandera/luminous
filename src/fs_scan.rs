@@ -1,4 +1,5 @@
 use log::{debug, error, info};
+use luminous_plugins::ImageFormat;
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -13,13 +14,6 @@ pub struct ScanResult {
 
 pub struct ImageFormats {
     pub image_formats: HashSet<ImageFormat>,
-}
-
-#[derive(PartialEq, Eq, Hash, Debug, Clone)]
-pub struct ImageFormat {
-    pub exts: Vec<String>,
-    pub decoding_support: bool,
-    pub encoding_support: bool,
 }
 
 impl ImageFormats {
