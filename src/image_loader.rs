@@ -448,11 +448,33 @@ impl ImageLoader {
             }
         }
 
-        let dynamic = plugin_manager.decode_dynamic(path).or_else(|| {
-            image::open(path)
-                .map_err(|e| error!("Load failed {path:?}: {e}"))
-                .ok()
-        });
+        let t = Instant::now();
+        let mut buf = [0; 256];
+        let known_format = std::fs::File::open(path)
+            .and_then(|mut f| std::io::Read::read(&mut f, &mut buf))
+            .ok()
+            .and_then(|_| image::guess_format(&buf).ok());
+
+        trace!(
+            "Detected format for {:?} in {:.3}ms: {:?}",
+            path,
+            t.elapsed().as_secs_f64() * 1000.0,
+            known_format,
+        );
+
+        let dynamic = if let Some(fmt) = known_format {
+            match std::fs::File::open(path) {
+                Ok(f) => image::load(std::io::BufReader::new(f), fmt)
+                    .map_err(|e| error!("Load failed {path:?}: {e}"))
+                    .ok(),
+                Err(e) => {
+                    error!("Load failed {path:?}: {e}");
+                    None
+                }
+            }
+        } else {
+            plugin_manager.decode_dynamic(path)
+        };
 
         let Some(img) = dynamic else {
             return placeholder();
@@ -486,15 +508,39 @@ impl ImageLoader {
 
     // TODO: encode_full for all formats in context menu
     fn decode_full(path: &Path, plugin_manager: &PluginManager) -> SharedPixelBuffer<Rgba8Pixel> {
-        if let Some(buf) = plugin_manager.decode(path) {
-            return buf;
-        }
-        match image::open(path) {
-            Ok(img) => to_pixel_buffer(img),
-            Err(e) => {
-                error!("Image load failed {path:?}: {e}");
-                placeholder()
+        let t = Instant::now();
+        let mut buf = [0; 256];
+        let known_format = std::fs::File::open(path)
+            .and_then(|mut f| std::io::Read::read(&mut f, &mut buf))
+            .ok()
+            .and_then(|_| image::guess_format(&buf).ok());
+
+        trace!(
+            "Detected format for {:?} in {:.3}ms: {:?}",
+            path,
+            t.elapsed().as_secs_f64() * 1000.0,
+            known_format
+        );
+
+        if let Some(fmt) = known_format {
+            match std::fs::File::open(path) {
+                Ok(f) => match image::load(std::io::BufReader::new(f), fmt) {
+                    Ok(img) => to_pixel_buffer(img),
+                    Err(e) => {
+                        error!("Image load failed {path:?}: {e}");
+                        placeholder()
+                    }
+                },
+                Err(e) => {
+                    error!("Image load failed {path:?}: {e}");
+                    placeholder()
+                }
             }
+        } else if let Some(buf) = plugin_manager.decode(path) {
+            buf
+        } else {
+            error!("Image load failed {path:?}: Unknown format");
+            placeholder()
         }
     }
 }
