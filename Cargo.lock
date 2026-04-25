@@ -1256,7 +1256,6 @@ dependencies = [
  "lock_api",
  "once_cell",
  "parking_lot_core",
- "rayon",
 ]
 
 [[package]]
@@ -3231,6 +3230,7 @@ dependencies = [
  "rayon",
  "sha2",
  "slint",
+ "tempfile",
 ]
 
 [[package]]

@@ -544,3 +544,109 @@ impl ImageLoader {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use image::{DynamicImage, ImageFormat, Rgb, RgbImage};
+    use tempfile::TempDir;
+
+    fn make_test_image(width: u32, height: u32, format: ImageFormat) -> (TempDir, PathBuf) {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join(format!(
+            "test.{}",
+            match format {
+                ImageFormat::Jpeg => "jpg",
+                ImageFormat::Png => "png",
+                ImageFormat::WebP => "webp",
+                _ => "png",
+            }
+        ));
+        let img = RgbImage::from_fn(width, height, |x, y| {
+            Rgb([(x * 255 / width) as u8, (y * 255 / height) as u8, 128])
+        });
+        DynamicImage::ImageRgb8(img)
+            .save_with_format(&path, format)
+            .unwrap();
+        (dir, path)
+    }
+
+    #[test]
+    fn test_pixel_buffer_roundtrip() {
+        let (_dir, path) = make_test_image(100, 100, ImageFormat::Jpeg);
+        let img = image::open(&path).unwrap();
+        let buf = to_pixel_buffer(img);
+
+        assert_eq!(buf.width(), 100);
+        assert_eq!(buf.height(), 100);
+    }
+
+    #[test]
+    fn test_decode_thumb_various_resolutions() {
+        let (_dir, path) = make_test_image(1920, 1080, ImageFormat::Jpeg);
+        let plugin_manager = Arc::new(PluginManager::new());
+
+        let buf_256 = ImageLoader::decode_thumb(&path, &plugin_manager, &None, 256);
+        assert!(buf_256.width() <= 256);
+        assert!(buf_256.height() <= 256);
+
+        let buf_512 = ImageLoader::decode_thumb(&path, &plugin_manager, &None, 512);
+        assert!(buf_512.width() <= 512);
+        assert!(buf_512.height() <= 512);
+    }
+
+    #[test]
+    fn test_decode_jpeg() {
+        let (_dir, path) = make_test_image(800, 600, ImageFormat::Jpeg);
+        let plugin_manager = Arc::new(PluginManager::new());
+
+        let buf = ImageLoader::decode_full(&path, &plugin_manager);
+        assert_eq!(buf.width(), 800);
+        assert_eq!(buf.height(), 600);
+    }
+
+    #[test]
+    fn test_decode_png() {
+        let (_dir, path) = make_test_image(800, 600, ImageFormat::Png);
+        let plugin_manager = Arc::new(PluginManager::new());
+
+        let buf = ImageLoader::decode_full(&path, &plugin_manager);
+        assert_eq!(buf.width(), 800);
+        assert_eq!(buf.height(), 600);
+    }
+
+    #[test]
+    fn test_disk_cache_path_deterministic() {
+        let (dir, path) = make_test_image(100, 100, ImageFormat::Jpeg);
+
+        let cache_path1 = ImageLoader::disk_cache_path(Some(&dir.path().to_path_buf()), &path, 256);
+        let cache_path2 = ImageLoader::disk_cache_path(Some(&dir.path().to_path_buf()), &path, 256);
+
+        assert_eq!(
+            cache_path1, cache_path2,
+            "Cache path should be deterministic"
+        );
+    }
+
+    #[test]
+    fn test_loader_cache_clearing() {
+        let (_dir1, path1) = make_test_image(100, 100, ImageFormat::Jpeg);
+        let paths = vec![path1];
+
+        let loader = ImageLoader::new(paths, 1, 8, Arc::new(PluginManager::new()));
+
+        loader.clear_thumbs();
+        assert_eq!(
+            loader.thumb_cache.len(),
+            0,
+            "Thumb cache should be empty after clear"
+        );
+
+        loader.evict_all();
+        assert_eq!(
+            loader.full_cache.len(),
+            0,
+            "Full cache should be empty after evict"
+        );
+    }
+}

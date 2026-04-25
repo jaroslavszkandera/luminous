@@ -7,14 +7,17 @@ edition = "2024"
 members = ["crates/plugins", "crates/image_loader"]
 
 [workspace.dependencies]
+dashmap = "6.1.0"
 directories = "6.0.0"
+hex = "0.4.3"
 log = "0.4.29"
 image = { version = "0.25.9", default-features = false }
+rayon = "1.11.0"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
+sha2 = "0.10.9"
 slint = { version = "1.16.0", default-features = false }
 tempfile = "3.26.0"
-rayon = "1.11.0"
 
 [features]
 default = ["gif", "jpeg", "png", "tiff", "webp"]
