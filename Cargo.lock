@@ -3195,13 +3195,12 @@ dependencies = [
  "color-print",
  "criterion",
  "csscolorparser",
- "dashmap",
  "directories",
  "env_logger",
- "hex",
  "image 0.25.10",
  "kamadak-exif",
  "log",
+ "luminous-image-loader",
  "luminous-plugins",
  "num_cpus",
  "palette",
@@ -3210,7 +3209,6 @@ dependencies = [
  "rfd",
  "serde",
  "serde_json",
- "sha2",
  "slint",
  "slint-build",
  "tempfile",
@@ -3218,6 +3216,21 @@ dependencies = [
  "trash",
  "walkdir",
  "wgpu",
+]
+
+[[package]]
+name = "luminous-image-loader"
+version = "0.1.0"
+dependencies = [
+ "dashmap",
+ "directories",
+ "hex",
+ "image 0.25.10",
+ "log",
+ "luminous-plugins",
+ "rayon",
+ "sha2",
+ "slint",
 ]
 
 [[package]]

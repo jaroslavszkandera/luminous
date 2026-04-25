@@ -1,0 +1,16 @@
+[package]
+name = "luminous-image-loader"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+luminous-plugins = { path = "../plugins" }
+directories = { workspace = true }
+log = { workspace = true }
+image = { workspace = true }
+rayon = { workspace = true }
+slint = { workspace = true }
+
+dashmap = { version = "6.1.0", features = ["rayon"] }
+hex = "0.4.3"
+sha2 = "0.10.9"

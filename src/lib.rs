@@ -2,14 +2,13 @@ slint::include_modules!();
 
 pub mod config;
 pub mod fs_scan;
-pub mod image_loader;
 pub mod image_processing;
 pub mod pipeline;
 mod ui;
 
 use config::Config;
 use fs_scan::ScanResult;
-use image_loader::ImageLoader;
+use luminous_image_loader::ImageLoader;
 use luminous_plugins::PluginManager;
 use pipeline::StepFactory;
 
