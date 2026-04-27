@@ -23,6 +23,7 @@ export global GridViewState {
     callback request-range-select(int, int);
     callback print-selected-paths();
     callback toggle-selection(int);
+    callback request-sort(bool);
 }
 
 export component GridView inherits Rectangle {
@@ -116,6 +117,16 @@ export component GridView inherits Rectangle {
                     clicked => {
                         GridViewState.toggle-select-all(GridViewState.selected-count == 0);
                         GridViewState.selected-count = GridViewState.selected-count > 0 ? 0 : GridViewState.model.length;
+                    }
+                }
+
+                Button {
+                    property <bool> asc: true;
+                    icon: @image-url("icons/import-export-arrows.svg");
+                    colorize-icon: true;
+                    clicked => {
+                        self.asc = !self.asc;
+                        GridViewState.request-sort(self.asc);
                     }
                 }
 

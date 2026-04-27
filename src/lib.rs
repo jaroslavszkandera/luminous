@@ -758,6 +758,47 @@ impl AppController {
             self.handle_grid_request(0, 50);
         }
     }
+
+    fn handle_sort(&mut self, ascending: bool) {
+        // TODO: collective function for refresh image models
+        self.filtered_indices.sort_by(|&a, &b| {
+            let path_a = &self.scan.paths[a];
+            let path_b = &self.scan.paths[b];
+            if ascending {
+                path_a.cmp(path_b)
+            } else {
+                path_b.cmp(path_a)
+            }
+        });
+
+        self.active_grid_indices.clear();
+        self.loader.clear_thumbs();
+
+        let Some(ui) = self.window_weak.upgrade() else {
+            return;
+        };
+
+        let filtered_items: Vec<GridItem> = self
+            .filtered_indices
+            .iter()
+            .enumerate()
+            .map(|(row, &abs_idx)| GridItem {
+                image: Image::default(),
+                index: row as i32,
+                abs_index: abs_idx as i32,
+                selected: false,
+            })
+            .collect();
+
+        let gv = ui.global::<GridViewState>();
+        gv.set_selected_count(0);
+        gv.set_model(Rc::new(VecModel::from(filtered_items)).into());
+
+        if let Some(&first_abs) = self.filtered_indices.first() {
+            self.handle_full_view_load(first_abs);
+        }
+        self.handle_grid_request(0, 50);
+    }
 }
 
 pub fn run(config: Config) -> Result<(), Box<dyn Error>> {

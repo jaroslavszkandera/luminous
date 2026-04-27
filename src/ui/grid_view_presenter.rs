@@ -139,4 +139,9 @@ pub fn register(window: &MainWindow, app_controller: Rc<RefCell<AppController>>)
         })
         .unwrap();
     });
+
+    let acc = app_controller.clone();
+    gv.on_request_sort(move |ascending| {
+        acc.borrow_mut().handle_sort(ascending);
+    });
 }

@@ -5,3 +5,4 @@ placeholder image: https://placehold.net/
 
 - Menu button Icon by Google on <a href="https://icon-icons.com/authors/368-google">Icon-Icons.com</a>
 - Folder symbol Icon by Google on <a href="https://icon-icons.com/authors/368-google">Icon-Icons.com</a>
+- Import export arrows Icon by Google on <a href="https://icon-icons.com/authors/368-google">Icon-Icons.com</a>
