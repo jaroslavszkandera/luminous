@@ -80,7 +80,7 @@ export component EditsPanel inherits Rectangle {
                 minimum: -100;
                 maximum: 100;
                 edited(v) => {
-                    root.apply-edit({ kind: EditOpKind.Contrast, int-val: v, float-val: v / 100.0 });
+                    root.apply-edit({ kind: EditOpKind.Contrast, int-val: v, float-val: v });
                 }
             }
         }
