@@ -323,7 +323,7 @@ impl AppController {
                     image::DynamicImage::ImageRgba8(image::imageops::flip_vertical(&img.to_rgba8()))
                 }
                 EditOpKind::Brighten => img.brighten(op.int_val),
-                EditOpKind::Contrast => img.adjust_contrast(op.float_val),
+                EditOpKind::Contrast => img.adjust_contrast(op.float_val * 100.0),
                 EditOpKind::Crop => {
                     save_to_cache = true;
                     img.crop_imm(
