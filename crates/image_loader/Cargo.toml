@@ -15,5 +15,10 @@ sha2 = { workspace = true }
 slint = { workspace = true, features = ["compat-1-2"] }
 
 [dev-dependencies]
+criterion = { workspace = true }
 tempfile = { workspace = true }
 image = { workspace = true }
+
+[[bench]]
+name = "image_loader"
+harness = false

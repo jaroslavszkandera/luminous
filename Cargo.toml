@@ -7,6 +7,7 @@ edition = "2024"
 members = ["crates/plugins", "crates/image_loader"]
 
 [workspace.dependencies]
+criterion = { version = "0.8.2", features = ["html_reports"] }
 dashmap = "6.1.0"
 directories = "6.0.0"
 hex = "0.4.3"
@@ -71,7 +72,7 @@ walkdir = "2.5.0"
 wgpu = "29.0.1"
 
 [dev-dependencies]
-criterion = { version = "0.8.2", features = ["html_reports"] }
+criterion = { workspace = true }
 tempfile = { workspace = true }
 
 [dependencies.slint]
@@ -111,10 +112,6 @@ opt-level = 1
 lto = false
 codegen-units = 256
 strip = false
-
-[[bench]]
-name = "image_loader_bench"
-harness = false
 
 [[bench]]
 name = "pipeline_bench"

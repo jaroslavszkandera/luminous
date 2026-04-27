@@ -3221,6 +3221,7 @@ dependencies = [
 name = "luminous-image-loader"
 version = "0.1.0"
 dependencies = [
+ "criterion",
  "dashmap",
  "directories",
  "hex",

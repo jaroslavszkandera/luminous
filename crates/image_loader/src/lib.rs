@@ -23,9 +23,13 @@ fn placeholder() -> SharedPixelBuffer<Rgba8Pixel> {
     SharedPixelBuffer::<Rgba8Pixel>::new(1, 1)
 }
 
-fn to_pixel_buffer(img: image::DynamicImage) -> SharedPixelBuffer<Rgba8Pixel> {
+pub fn to_pixel_buffer(img: image::DynamicImage) -> SharedPixelBuffer<Rgba8Pixel> {
     let rgba = img.into_rgba8();
     SharedPixelBuffer::clone_from_slice(rgba.as_raw(), rgba.width(), rgba.height())
+}
+
+pub fn to_slint_image(buf: SharedPixelBuffer<Rgba8Pixel>) -> Image {
+    Image::from_rgba8(buf)
 }
 
 // TODO: Save thumb_cache to db
