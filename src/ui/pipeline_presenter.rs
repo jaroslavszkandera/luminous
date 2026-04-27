@@ -68,12 +68,13 @@ pub fn register(window: &MainWindow, c: Rc<RefCell<AppController>>, factory: Arc
     });
 
     let c6 = c.clone();
-    window.on_pipeline_run(move || {
-        let (paths, weak_ui) = {
+    window.on_pipeline_run(move |encode_extension| {
+        let (paths, weak_ui, plugin_manager) = {
             let c_ref = c6.borrow();
             let paths = c_ref.collect_selected_paths();
             let weak = c_ref.window_weak.clone();
-            (paths, weak)
+            let plugin_manager = c_ref.loader.plugin_manager.clone();
+            (paths, weak, plugin_manager)
         };
         if paths.is_empty() {
             return;
@@ -87,7 +88,13 @@ pub fn register(window: &MainWindow, c: Rc<RefCell<AppController>>, factory: Arc
                 .collect()
         };
 
-        run_pipeline_on_selection(paths, steps, factory.clone());
+        run_pipeline_on_selection(
+            paths,
+            steps,
+            factory.clone(),
+            encode_extension.to_string(),
+            plugin_manager,
+        );
         slint::invoke_from_event_loop(move || {
             if let Some(ui) = weak_ui.upgrade() {
                 ui.invoke_return_focus();

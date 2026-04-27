@@ -31,6 +31,7 @@ export component MainWindow inherits Window {
     in property <color> app-background: Palette.background;
     in-out property <ViewMode> view-mode: ViewMode.grid;
     in-out property <bool> is-fullscreen: false;
+    in property <[string]> encoder_extensions;
 
     // Bindings
     in property <string> bind-quit;
@@ -144,12 +145,13 @@ export component MainWindow inherits Window {
     callback pipeline-add-step(PipelineStepKind);
     callback pipeline-remove-step(int);
     callback pipeline-update-step(int, PipelineStep);
-    callback pipeline-run();
+    callback pipeline-run(string);
 
     grid-ui := GridView {
         visible: root.view-mode == ViewMode.grid;
         forward-focus: key-handler;
         pipeline-steps <=> root.pipeline-steps;
+        encoder_extensions: encoder_extensions;
 
         batch-save-with-format(fmt) => {
             root.batch-save-with-format(fmt);
@@ -163,8 +165,8 @@ export component MainWindow inherits Window {
         pipeline-remove-step(i) => {
             root.pipeline-remove-step(i);
         }
-        pipeline-run() => {
-            root.pipeline-run();
+        pipeline-run(extension) => {
+            root.pipeline-run(extension);
         }
         open-images => {
             open-images();
@@ -176,6 +178,7 @@ export component MainWindow inherits Window {
         visible: root.view-mode == ViewMode.full;
         timer-running: root.view-mode == ViewMode.full;
         total-images: GridViewState.model.length;
+        encoder_extensions: encoder_extensions;
 
         exit-full-view => {
             root.view-mode = ViewMode.grid;

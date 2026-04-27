@@ -20,20 +20,6 @@ pub fn register(window: &MainWindow, app_controller: Rc<RefCell<AppController>>)
     debug!("Registering full view presenter");
     let fv = window.global::<FullViewState>();
 
-    let encoder_extensions = app_controller
-        .borrow()
-        .scan
-        .clone()
-        .image_formats
-        .get_all_encoding_exts();
-    let mut sorted_exts: Vec<slint::SharedString> = encoder_extensions
-        .into_iter()
-        .map(slint::SharedString::from)
-        .collect();
-    sorted_exts.sort();
-    let model = std::rc::Rc::new(slint::VecModel::from(sorted_exts));
-    fv.set_encoder_extensions(model.into());
-
     let acc = app_controller.clone();
     fv.on_request_next_image(move || {
         acc.borrow().handle_navigate(1);

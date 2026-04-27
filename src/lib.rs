@@ -842,6 +842,15 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
         ui::full_view_presenter::set_exif(app_controller);
     }
 
+    let encoder_extensions = scan.image_formats.get_all_encoding_exts();
+    let mut sorted_exts: Vec<slint::SharedString> = encoder_extensions
+        .into_iter()
+        .map(slint::SharedString::from)
+        .collect();
+    sorted_exts.sort();
+    let exts_model = std::rc::Rc::new(slint::VecModel::from(sorted_exts));
+    main_window.set_encoder_extensions(exts_model.into());
+
     debug!(
         "Init in {:.1} ms",
         init_start.elapsed().as_secs_f64() * 1000.0

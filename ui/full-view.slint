@@ -66,6 +66,7 @@ export component DeleteConfirmPopup inherits PopupWindow {
 }
 
 export component FullView inherits TouchArea {
+    in property <[string]> encoder_extensions;
     in property <int> total-images;
     in property <bool> timer-running: false;
     in-out property <bool> panel-visible: false;
@@ -443,7 +444,7 @@ export component FullView inherits TouchArea {
                     // MenuItem {@tr("Save (overwrite)");}
                     Menu {
                         title: @tr("Save with format");
-                        for ext in FullViewState.encoder_extensions: MenuItem {
+                        for ext in encoder_extensions: MenuItem {
                             title: ext;
                             activated => {
                                 FullViewState.save-with-format(ext);

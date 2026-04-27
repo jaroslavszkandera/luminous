@@ -29,6 +29,7 @@ export component GridView inherits Rectangle {
     in-out property <bool> panel-visible: false;
     in-out property <length> side-panel-width: 300px;
     in-out property <[PipelineStep]> pipeline-steps;
+    in property <[string]> encoder_extensions;
 
     property <int> last-clicked-index: -1;
 
@@ -38,7 +39,7 @@ export component GridView inherits Rectangle {
     callback pipeline-add-step(PipelineStepKind);
     callback pipeline-remove-step(int);
     callback pipeline-update-step(int, PipelineStep);
-    callback pipeline-run();
+    callback pipeline-run(string);
 
     if GridViewState.model.length == 0: NoImage {
         open-clicked => {
@@ -315,6 +316,7 @@ export component GridView inherits Rectangle {
                     width: parent.width;
                     height: parent.height;
                     steps <=> root.pipeline-steps;
+                    encoder_extensions: encoder_extensions;
                     request-add-step(kind) => {
                         root.pipeline-add-step(kind);
                     }
@@ -324,8 +326,8 @@ export component GridView inherits Rectangle {
                     request-update-step(i, s) => {
                         root.pipeline-update-step(i, s);
                     }
-                    run-pipeline() => {
-                        root.pipeline-run();
+                    run-pipeline(extension) => {
+                        root.pipeline-run(extension);
                     }
                 }
             }

@@ -297,10 +297,11 @@ component AddStepMenu inherits Rectangle {
 
 export component PipelinePanel inherits Rectangle {
     in-out property <[PipelineStep]> steps;
+    in property <[string]> encoder_extensions;
     callback request-add-step(PipelineStepKind);
     callback request-remove-step(int);
     callback request-update-step(int, PipelineStep);
-    callback run-pipeline();
+    callback run-pipeline(string);
 
     HorizontalLayout {
         padding: 6px;
@@ -392,12 +393,18 @@ export component PipelinePanel inherits Rectangle {
                 }
             }
 
-            Button {
-                text: "Save";
-                height: 34px;
-                primary: true;
-                clicked => {
-                    root.run-pipeline();
+            HorizontalLayout {
+                Button {
+                    text: "Save";
+                    height: 34px;
+                    primary: true;
+                    clicked => {
+                        root.run-pipeline(extensions-combo-box.current-value);
+                    }
+                }
+
+                extensions-combo-box := ComboBox {
+                    model: encoder_extensions;
                 }
             }
         }

@@ -1,7 +1,8 @@
 pub mod gpu_proc;
 
 use image::DynamicImage;
-use log::{debug, error};
+use log::{debug, error, trace};
+use luminous_plugins::PluginManager;
 use rayon::prelude::*;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -246,14 +247,16 @@ pub fn run_pipeline_on_selection(
     paths: Vec<PathBuf>,
     steps: Vec<PipelineStep>,
     factory: Arc<StepFactory>,
+    encode_extension: String,
+    plugin_manager: Arc<PluginManager>,
 ) {
     if paths.is_empty() {
         debug!("Pipeline: no images selected");
         return;
     }
     if steps.is_empty() {
-        debug!("Pipeline: no steps defined");
-        return;
+        debug!("Pipeline: no steps defined (only conversion)");
+        // return;
     }
 
     let mut dialog = rfd::FileDialog::new();
@@ -282,8 +285,10 @@ pub fn run_pipeline_on_selection(
             let file_name = path.file_name().unwrap_or_default();
             let dst_file = dst_dir.join(file_name);
 
-            if let Err(e) = save_result(result, &dst_file) {
-                error!("Pipeline: failed to save {:?}: {}", dst_file, e);
+            if let Err(_) =
+                save_result(result, &dst_file, &encode_extension, plugin_manager.clone())
+            {
+                // Should we continue or not on error?
                 return;
             }
 
@@ -297,6 +302,47 @@ pub fn run_pipeline_on_selection(
     });
 }
 
-fn save_result(img: DynamicImage, dst: &PathBuf) -> Result<(), image::ImageError> {
-    img.save(dst)
+fn save_result(
+    img: DynamicImage,
+    dst: &PathBuf,
+    format: &str,
+    plugin_manager: Arc<PluginManager>,
+) -> Result<(), image::ImageError> {
+    let mut dst = dst.with_extension(format);
+    let res = if let Some(native_format) = image::ImageFormat::from_extension(format) {
+        let fmt_lower = format.to_lowercase();
+        if fmt_lower == "jpg" || fmt_lower == "jpeg" {
+            let out = std::fs::File::create(&dst).map_err(image::ImageError::IoError)?;
+            let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(out, 90);
+            img.write_with_encoder(encoder)
+        } else {
+            img.save_with_format(&dst, native_format)
+        }
+    } else {
+        // TODO: Save to collections like HDF5 and WebDataset with a flag collections
+        // FIX: Incorrect WebDataset formatting for .json
+        dst = dst
+            .parent()
+            .expect("The path should be valid")
+            .join(PathBuf::from("dataset").with_extension(format));
+        if plugin_manager.encode(&dst, &img) {
+            Ok(())
+        } else {
+            Err(image::ImageError::Unsupported(
+                image::error::UnsupportedError::from_format_and_kind(
+                    image::error::ImageFormatHint::Name(format.to_string()),
+                    image::error::UnsupportedErrorKind::Format(
+                        image::error::ImageFormatHint::Name(format.to_string()),
+                    ),
+                ),
+            ))
+        }
+    };
+
+    match &res {
+        Ok(_) => trace!("Successfully saved image to {:?}", &dst),
+        Err(e) => error!("Failed to save image to {:?}: {}", dst, e),
+    }
+
+    res
 }
