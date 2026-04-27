@@ -104,6 +104,14 @@ export component GridView inherits Rectangle {
                 spacing: 5px;
 
                 Button {
+                    icon: @image-url("icons/folder.svg");
+                    colorize-icon: true;
+                    clicked => {
+                        open-images();
+                    }
+                }
+
+                Button {
                     text: GridViewState.selected-count > 0 ? GridViewState.selected-count + "/" + GridViewState.model.length : GridViewState.model.length;
                     clicked => {
                         GridViewState.toggle-select-all(GridViewState.selected-count == 0);
