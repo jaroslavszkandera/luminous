@@ -441,7 +441,13 @@ export component FullView inherits TouchArea {
                     }
 
                     // TODO
-                    // MenuItem {@tr("Save (overwrite)");}
+                    MenuItem {
+                        title: @tr("Save Changes (overwrite)");
+                        activated => {
+                            FullViewState.apply-edit({ kind: EditOpKind.Save });
+                        }
+                    }
+
                     Menu {
                         title: @tr("Save with format");
                         for ext in encoder_extensions: MenuItem {

@@ -440,6 +440,17 @@ impl AppController {
                 EditOpKind::Delete => {
                     unreachable!("Delete should have been handled already");
                 }
+                // TODO: Some edit are not saved, implement a proper save
+                EditOpKind::Save => {
+                    if let Some(path) = loader.get_path(before_idx) {
+                        let e = img.save(&path);
+                        match e {
+                            Ok(_) => debug!("Saved changes to {path:?}"),
+                            Err(e) => error!("Error saving image: {e}"),
+                        }
+                    }
+                    return;
+                }
             };
 
             let new_buf = SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
