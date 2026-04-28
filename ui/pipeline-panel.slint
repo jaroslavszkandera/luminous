@@ -310,6 +310,8 @@ export component PipelinePanel inherits Rectangle {
         if abs(progress - 1.0) < 0.01 {
             debug("pipeline-finished");
             save-btn.enabled = true;
+        } else if (progress > 0) {
+            save-btn.enabled = false;
         }
     }
 
@@ -410,7 +412,6 @@ export component PipelinePanel inherits Rectangle {
                     primary: true;
                     clicked => {
                         root.run-pipeline(extensions-combo-box.current-value);
-                        self.enabled = false;
                     }
                 }
 
