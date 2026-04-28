@@ -99,6 +99,18 @@ pub enum IpcStatus {
     Error,
 }
 
+impl IpcStatus {
+    pub fn to_str(&self) -> &'static str {
+        match self {
+            Self::NotRunning => "Not Running",
+            Self::Init => "Init",
+            Self::Busy => "Busy",
+            Self::Ready => "Ready",
+            Self::Error => "Error",
+        }
+    }
+}
+
 pub(crate) struct ShmemWrapper(pub Shmem);
 
 unsafe impl Send for ShmemWrapper {}
@@ -167,7 +179,7 @@ impl DaemonBackend {
     pub fn new(id: String, manifest: &PluginManifest, dir: &Path) -> Arc<Self> {
         let (tx, rx) = mpsc::sync_channel::<WorkerRequest>(1);
 
-        let status = Arc::new(RwLock::new(IpcStatus::Init));
+        let status = Arc::new(RwLock::new(IpcStatus::NotRunning));
         let on_status_change = Arc::new(Mutex::new(None));
         let state = Arc::new(RwLock::new(PluginControl::Enable));
         let on_state_change = Arc::new(Mutex::new(None));
@@ -287,6 +299,10 @@ impl Backend for DaemonBackend {
         }
         *self.process.lock().unwrap() = process;
         self.running.store(true, Ordering::SeqCst);
+        *self.status.write().unwrap() = IpcStatus::Init;
+        if let Some(cb) = self.on_status_change.lock().unwrap().as_ref() {
+            cb(IpcStatus::Init);
+        }
 
         let port = self
             .manifest
@@ -494,8 +510,11 @@ impl Backend for DaemonBackend {
         }
 
         self.set_state(PluginControl::Enable);
-        *self.status.write().unwrap() = IpcStatus::NotRunning;
         self.running.store(false, Ordering::SeqCst);
+        *self.status.write().unwrap() = IpcStatus::NotRunning;
+        if let Some(cb) = self.on_status_change.lock().unwrap().as_ref() {
+            cb(IpcStatus::NotRunning);
+        }
     }
 
     fn set_image(&self, buf: &SharedPixelBuffer<Rgba8Pixel>, path: &PathBuf) -> bool {

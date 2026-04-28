@@ -4,8 +4,9 @@ export struct Plugin {
     id: string,
     enabled: bool,
     auto-start: bool,
-    is_busy: bool,
-    state: string,
+    is-busy: bool,
+    state: string, // Starting, Stopping, Enable, Disable
+    run-state: string, // NotRunning, Init, Busy, Ready, Error, ...
     click-active: bool,
     select-active: bool,
     click-capability-support: bool,
@@ -31,9 +32,17 @@ export component InteractivePlugin inherits Rectangle {
     VerticalLayout {
         padding: 2px;
         spacing: 2px;
-        Text {
-            text: " " + plugin.id; // TODO: state
-            font-size: 14px;
+        HorizontalLayout {
+            Text {
+                text: " " + plugin.id;
+                font-size: 14px;
+            }
+
+            Text {
+                text: plugin.run-state;
+                font-size: 14px;
+                horizontal-alignment: right;
+            }
         }
 
         Rectangle {

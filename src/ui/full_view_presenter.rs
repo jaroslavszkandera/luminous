@@ -7,8 +7,10 @@ use cocotools::coco::object_detection::{
 };
 use log::{debug, error};
 use luminous_plugins::{PluginCapability, manifest::InteractiveCapability};
-use slint::{ComponentHandle, SharedString, StandardListViewItem, VecModel};
-use slint::{Image, Rgba8Pixel, SharedPixelBuffer};
+use slint::{
+    ComponentHandle, Image, Model, Rgba8Pixel, SharedPixelBuffer, SharedString,
+    StandardListViewItem, VecModel,
+};
 use std::cell::RefCell;
 use std::fs::File;
 use std::io::BufReader;
@@ -114,6 +116,50 @@ pub fn register(window: &MainWindow, app_controller: Rc<RefCell<AppController>>)
             }
         });
     });
+
+    let acc = app_controller.clone();
+    let pm = acc.borrow().loader.plugin_manager.clone();
+    for interactive_plugin in pm.get_interactive_plugins() {
+        let weak_ui = acc.borrow().window_weak.clone();
+        let id = interactive_plugin.id.clone();
+        interactive_plugin.on_status_change(move |status| {
+            let weak_ui_clone = weak_ui.clone();
+            let id_clone = id.clone();
+            let _ = slint::invoke_from_event_loop(move || {
+                if let Some(ui) = weak_ui_clone.upgrade() {
+                    let fv = ui.global::<FullViewState>();
+                    let interactive_plugins_model = fv.get_interactive_plugins();
+                    for i in 0..interactive_plugins_model.row_count() {
+                        if let Some(mut p) = interactive_plugins_model.row_data(i) {
+                            if p.id == id_clone {
+                                p.run_state = status.to_str().to_string().clone().into();
+                                interactive_plugins_model.set_row_data(i, p);
+                                break;
+                            }
+                        }
+                    }
+                }
+            });
+        });
+        // TODO: Refactor
+        let id_clone = interactive_plugin.id.clone();
+        let weak_ui_clone = acc.borrow().window_weak.clone();
+        let _ = slint::invoke_from_event_loop(move || {
+            if let Some(ui) = weak_ui_clone.upgrade() {
+                let fv = ui.global::<FullViewState>();
+                let interactive_plugins_model = fv.get_interactive_plugins();
+                for i in 0..interactive_plugins_model.row_count() {
+                    if let Some(mut p) = interactive_plugins_model.row_data(i) {
+                        if p.id == id_clone {
+                            p.run_state = String::from("Not Running").into();
+                            interactive_plugins_model.set_row_data(i, p);
+                            break;
+                        }
+                    }
+                }
+            }
+        });
+    }
 
     refresh_interactive_plugins(&app_controller.clone());
 }

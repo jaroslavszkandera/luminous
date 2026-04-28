@@ -516,8 +516,6 @@ export component FullView inherits TouchArea {
                                 debug("click-active-changed", interactive-plugins-idx, i);
                                 FullViewState.interactive-plugins[i].click-active = active;
                                 if interactive-plugins-idx > -1 && interactive-plugins-idx != i {
-                                    // plugin.click-active = false;
-                                    // plugin.select-active = false;
                                     FullViewState.interactive-plugins[i].click-active = false;
                                     FullViewState.interactive-plugins[i].select-active = false;
                                 }
@@ -527,8 +525,6 @@ export component FullView inherits TouchArea {
                                 debug("select-active-changed", interactive-plugins-idx, i);
                                 FullViewState.interactive-plugins[i].select-active = active;
                                 if interactive-plugins-idx > -1 && interactive-plugins-idx != i {
-                                    // plugin.click-active = false;
-                                    // plugin.select-active = false;
                                     FullViewState.interactive-plugins[i].click-active = false;
                                     FullViewState.interactive-plugins[i].select-active = false;
                                 }
