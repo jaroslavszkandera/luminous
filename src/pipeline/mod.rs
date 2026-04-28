@@ -249,6 +249,7 @@ pub fn run_pipeline_on_selection(
     factory: Arc<StepFactory>,
     encode_extension: String,
     plugin_manager: Arc<PluginManager>,
+    weak_ui: slint::Weak<crate::MainWindow>,
 ) {
     if paths.is_empty() {
         debug!("Pipeline: no images selected");
@@ -268,7 +269,10 @@ pub fn run_pipeline_on_selection(
         return;
     };
 
+    let weak_ui_clone = weak_ui.clone();
     std::thread::spawn(move || {
+        let total = paths.len();
+        let done = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         paths.par_iter().for_each(|path| {
             let start = Instant::now();
 
@@ -298,6 +302,16 @@ pub fn run_pipeline_on_selection(
                 dst_file,
                 start.elapsed().as_secs_f64() * 1000.0
             );
+            let completed = done.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+            let progress = completed as f32 / total as f32;
+            let ui = weak_ui_clone.clone();
+            slint::invoke_from_event_loop(move || {
+                if let Some(ui) = ui.upgrade() {
+                    debug!("pipeline progress: {progress:.1}%");
+                    ui.set_pipeline_progress(progress);
+                }
+            })
+            .ok();
         });
     });
 }

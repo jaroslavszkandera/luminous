@@ -142,6 +142,7 @@ export component MainWindow inherits Window {
 
     // Pipeline
     in-out property <[PipelineStep]> pipeline-steps;
+    in property <float> pipeline-progress;
     callback pipeline-add-step(PipelineStepKind);
     callback pipeline-remove-step(int);
     callback pipeline-update-step(int, PipelineStep);
@@ -151,6 +152,7 @@ export component MainWindow inherits Window {
         visible: root.view-mode == ViewMode.grid;
         forward-focus: key-handler;
         pipeline-steps <=> root.pipeline-steps;
+        pipeline-progress <=> root.pipeline-progress;
         encoder_extensions: encoder_extensions;
 
         batch-save-with-format(fmt) => {

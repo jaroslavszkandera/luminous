@@ -30,6 +30,7 @@ export component GridView inherits Rectangle {
     in-out property <bool> panel-visible: false;
     in-out property <length> side-panel-width: 300px;
     in-out property <[PipelineStep]> pipeline-steps;
+    in property <float> pipeline-progress;
     in property <[string]> encoder_extensions;
 
     property <int> last-clicked-index: -1;
@@ -335,6 +336,7 @@ export component GridView inherits Rectangle {
                     width: parent.width;
                     height: parent.height;
                     steps <=> root.pipeline-steps;
+                    progress <=> root.pipeline-progress;
                     encoder_extensions: encoder_extensions;
                     request-add-step(kind) => {
                         root.pipeline-add-step(kind);

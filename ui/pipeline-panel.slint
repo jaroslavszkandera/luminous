@@ -4,6 +4,7 @@ import {
     LineEdit,
     ComboBox,
     Palette,
+    ProgressIndicator,
 } from "std-widgets.slint";
 import { Channel } from "common.slint";
 
@@ -297,11 +298,20 @@ component AddStepMenu inherits Rectangle {
 
 export component PipelinePanel inherits Rectangle {
     in-out property <[PipelineStep]> steps;
+    in property <float> progress;
     in property <[string]> encoder_extensions;
     callback request-add-step(PipelineStepKind);
     callback request-remove-step(int);
     callback request-update-step(int, PipelineStep);
     callback run-pipeline(string);
+
+    changed progress => {
+        debug(progress);
+        if abs(progress - 1.0) < 0.01 {
+            debug("pipeline-finished");
+            save-btn.enabled = true;
+        }
+    }
 
     HorizontalLayout {
         padding: 6px;
@@ -394,17 +404,33 @@ export component PipelinePanel inherits Rectangle {
             }
 
             HorizontalLayout {
-                Button {
+                save-btn := Button {
                     text: "Save";
                     height: 34px;
                     primary: true;
                     clicked => {
                         root.run-pipeline(extensions-combo-box.current-value);
+                        self.enabled = false;
                     }
                 }
 
                 extensions-combo-box := ComboBox {
                     model: encoder_extensions;
+                }
+            }
+
+            HorizontalLayout {
+                height: 30px;
+                spacing: 3px;
+                Text {
+                    horizontal-alignment: left;
+                    vertical-alignment: center;
+                    text: "Progress:";
+                }
+
+                progress-indicator := ProgressIndicator {
+                    indeterminate: false;
+                    progress <=> root.progress;
                 }
             }
         }

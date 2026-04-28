@@ -94,6 +94,7 @@ pub fn register(window: &MainWindow, c: Rc<RefCell<AppController>>, factory: Arc
             factory.clone(),
             encode_extension.to_string(),
             plugin_manager,
+            weak_ui.clone(),
         );
         slint::invoke_from_event_loop(move || {
             if let Some(ui) = weak_ui.upgrade() {
