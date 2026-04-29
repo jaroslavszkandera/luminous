@@ -73,7 +73,6 @@ wgpu = "29.0.1"
 
 [dev-dependencies]
 criterion = { workspace = true }
-tempfile = { workspace = true }
 
 [dependencies.slint]
 workspace = true
@@ -116,3 +115,6 @@ strip = false
 [[bench]]
 name = "pipeline_bench"
 harness = false
+
+[lib]
+doctest = false

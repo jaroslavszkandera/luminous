@@ -9,8 +9,8 @@ log = { workspace = true }
 image = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-# TODO: Would it be nice to decouple this maybe
-slint = { workspace = true, features = ["std"] }
+# TODO: It would be nice to decouple
+slint = { workspace = true, features = ["std", "compat-1-2"] }
 
 base64 = "0.22.1"
 dlopen2 = "0.8.2"
@@ -19,3 +19,6 @@ sysinfo = "0.38.4"
 
 [dev-dependencies]
 tempfile = { workspace = true }
+
+[lib]
+doctest = false

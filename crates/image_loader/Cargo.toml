@@ -22,3 +22,6 @@ image = { workspace = true }
 [[bench]]
 name = "image_loader"
 harness = false
+
+[lib]
+doctest = false
