@@ -11,6 +11,8 @@ export global FullViewState {
     in property <string> curr-image-name;
     in property <int> curr-image-index;
     in property <[[StandardListViewItem]]> exif-rows;
+    in property <bool> side-panel-visible;
+    in property <bool> footer-visible;
 
     callback request-next-image();
     callback request-prev-image();
@@ -69,7 +71,6 @@ export component FullView inherits TouchArea {
     in property <[string]> encoder_extensions;
     in property <int> total-images;
     in property <bool> timer-running: false;
-    in-out property <bool> panel-visible: false;
 
     callback exit-full-view();
     callback open-images();
@@ -310,7 +311,7 @@ export component FullView inherits TouchArea {
             }
 
             footer := Rectangle {
-                visible: true;
+                visible: FullViewState.footer-visible;
                 height: 18px;
                 y: parent.height - self.height;
                 width: parent.width;
@@ -436,7 +437,7 @@ export component FullView inherits TouchArea {
                     MenuItem {
                         title: @tr("Toggle footer");
                         activated => {
-                            footer.visible = !footer.visible;
+                            FullViewState.footer-visible = !FullViewState.footer-visible;
                         }
                     }
 
@@ -462,7 +463,7 @@ export component FullView inherits TouchArea {
         }
 
         SidePanel {
-            is-visible: root.panel-visible;
+            is-visible: FullViewState.side-panel-visible;
             side-width <=> root.side-panel-width;
 
             TabWidget {

@@ -1,5 +1,6 @@
 slint::include_modules!();
 
+mod app_state_cache;
 pub mod config;
 pub mod fs_scan;
 pub mod image_processing;
@@ -841,6 +842,26 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
 
     let main_window = MainWindow::new()?;
 
+    let cached_state = app_state_cache::load_app_state();
+    {
+        let win = main_window.window();
+        if cached_state.width > 0 && cached_state.height > 0 {
+            win.set_size(slint::PhysicalSize::new(
+                cached_state.width,
+                cached_state.height,
+            ));
+            win.set_position(slint::PhysicalPosition::new(cached_state.x, cached_state.y));
+        }
+        win.set_fullscreen(cached_state.fullscreen);
+
+        let fv = main_window.global::<FullViewState>();
+        fv.set_footer_visible(cached_state.full_view_footer_visible);
+        fv.set_side_panel_visible(cached_state.full_view_side_panel_visible);
+
+        let gv = main_window.global::<GridViewState>();
+        gv.set_side_panel_visible(cached_state.grid_view_side_panel_visible);
+    }
+
     let grid_data: Vec<GridItem> = scan
         .paths
         .iter()
@@ -876,7 +897,12 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
     main_window.on_open_images(move || {
         AppController::handle_open_images(acc.clone());
     });
+
+    let win_weak = main_window.as_weak();
     main_window.on_quit_app(move || {
+        if let Some(mw) = win_weak.upgrade() {
+            app_state_cache::save_app_state(&mw);
+        }
         let _ = slint::quit_event_loop();
     });
 

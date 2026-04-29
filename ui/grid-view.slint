@@ -14,6 +14,7 @@ export global GridViewState {
     in property <[GridItem]> visible-model;
     in-out property <int> grid-cols: 5;
     in-out property <int> selected-count: 0;
+    in property <bool> side-panel-visible;
 
     callback request-grid-data(int, int);
     callback image-selected(int);
@@ -27,7 +28,6 @@ export global GridViewState {
 }
 
 export component GridView inherits Rectangle {
-    in-out property <bool> panel-visible: false;
     in-out property <length> side-panel-width: 300px;
     in-out property <[PipelineStep]> pipeline-steps;
     in property <float> pipeline-progress;
@@ -150,9 +150,9 @@ export component GridView inherits Rectangle {
                 Button {
                     icon: @image-url("icons/menu-button.svg");
                     colorize-icon: true;
-                    checked: panel-visible;
+                    checked: GridViewState.side-panel-visible;
                     clicked => {
-                        panel-visible = !panel-visible;
+                        GridViewState.side-panel-visible = !GridViewState.side-panel-visible;
                     }
                 }
 
@@ -291,7 +291,7 @@ export component GridView inherits Rectangle {
                             MenuItem {
                                 title: @tr("Toggle Filter Panel");
                                 activated => {
-                                    panel-visible = !panel-visible;
+                                    GridViewState.side-panel-visible = !GridViewState.side-panel-visible;
                                 }
                             }
 
@@ -329,7 +329,7 @@ export component GridView inherits Rectangle {
             side-panel := SidePanel {
                 min-side-panel-width: 300px;
                 x: parent.width - self.width;
-                is-visible: root.panel-visible;
+                is-visible: GridViewState.side-panel-visible;
                 side-width <=> root.side-panel-width;
 
                 PipelinePanel {

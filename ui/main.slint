@@ -21,7 +21,7 @@ export component MainWindow inherits Window {
     background: app-background;
     preferred-width: 1280px;
     preferred-height: 720px;
-    full-screen: self.is-fullscreen;
+    full-screen: false;
 
     // App Callbacks
     callback quit-app();
@@ -30,7 +30,6 @@ export component MainWindow inherits Window {
     // App State
     in property <color> app-background: Palette.background;
     in-out property <ViewMode> view-mode: ViewMode.grid;
-    in-out property <bool> is-fullscreen: false;
     in property <[string]> encoder_extensions;
 
     // Bindings
@@ -74,7 +73,7 @@ export component MainWindow inherits Window {
                 return accept;
             }
             if (event.text == root.bind-fullscreen) {
-                root.is-fullscreen = !root.is-fullscreen;
+                root.full-screen = !root.full-screen;
                 return accept;
             }
             if (event.text == root.bind-switch-view-mode) {
@@ -98,7 +97,7 @@ export component MainWindow inherits Window {
                     return accept;
                 }
                 if (event.text == root.bind-toggle-side-panel) {
-                    full-ui.panel-visible = !full-ui.panel-visible;
+                    FullViewState.side-panel-visible = !FullViewState.side-panel-visible;
                     return accept;
                 }
                 if (event.text == root.bind-copy-to-clipboard) {
@@ -129,7 +128,7 @@ export component MainWindow inherits Window {
                     return accept;
                 }
                 if (event.text == root.bind-toggle-side-panel) {
-                    grid-ui.panel-visible = !grid-ui.panel-visible;
+                    GridViewState.side-panel-visible = !GridViewState.side-panel-visible;
                     return accept;
                 }
             }
