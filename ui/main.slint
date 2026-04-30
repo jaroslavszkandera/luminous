@@ -107,6 +107,14 @@ export component MainWindow inherits Window {
                 if (event.text == root.bind-delete) {
                     full-ui.show-delete-popup();
                 }
+                if (event.text == "=" || event.text == "+") {
+                    full-ui.zoom(1.1, root.width / 2, root.height / 2);
+                    return accept;
+                }
+                if (event.text == "-" || event.text == "_") {
+                    full-ui.zoom(0.9, root.width / 2, root.height / 2);
+                    return accept;
+                }
             } else if (root.view-mode == ViewMode.grid) {
                 if (event.text == root.bind-show-settings) {
                     grid-ui.show-settings();

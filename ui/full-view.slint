@@ -153,9 +153,9 @@ export component FullView inherits TouchArea {
         pan-pos-y = 0.5;
     }
 
-    function zoom(scale-delta: float, center-x: length, center-y: length) {
+    public function zoom(scale-delta: float, center-x: length, center-y: length) {
         let old-scale = zoom-scale;
-        let new-scale = clamp(zoom-scale * scale-delta, 1, 10.0);
+        let new-scale = clamp(zoom-scale * scale-delta, 1, 100.0);
         if (old-scale == new-scale) {
             return;
         }
