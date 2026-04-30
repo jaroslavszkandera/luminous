@@ -29,38 +29,62 @@ export global FullViewState {
     callback apply-edit(EditOp);
 }
 
-export component DeleteConfirmPopup inherits PopupWindow {
+export component DeleteConfirmPopup inherits Rectangle {
     width: 225px;
     height: 100px;
     callback confirmed();
     callback canceled();
+    callback closed();
 
-    Rectangle {
-        background: Palette.background;
-        border-color: Palette.border;
-        border-radius: 5px;
-        border-width: 1px;
+    focus-scope := FocusScope {
+        KeyBinding {
+            keys: @keys(Return);
+            activated => {
+                confirmed();
+                root.closed();
+            }
+        }
 
-        VerticalLayout {
-            Text {
-                text: "Move image to trash?";
-                horizontal-alignment: center;
-                vertical-alignment: center;
+        KeyBinding {
+            keys: @keys(Escape);
+            activated => {
+                canceled();
+                root.closed();
+            }
+        }
+    }
+
+    public function open() {
+        focus-scope.focus();
+    }
+
+    background: Palette.background;
+    border-color: Palette.border;
+    border-radius: 5px;
+    border-width: 1px;
+
+    VerticalLayout {
+        Text {
+            height: 50px;
+            text: "Move image to trash?";
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+
+        HorizontalLayout {
+            StandardButton {
+                kind: cancel;
+                clicked => {
+                    canceled();
+                    root.closed();
+                }
             }
 
-            HorizontalLayout {
-                StandardButton {
-                    kind: cancel;
-                    clicked => {
-                        canceled();
-                    }
-                }
-
-                StandardButton {
-                    kind: ok;
-                    clicked => {
-                        confirmed();
-                    }
+            StandardButton {
+                kind: ok;
+                clicked => {
+                    confirmed();
+                    root.closed();
                 }
             }
         }
@@ -546,15 +570,42 @@ export component FullView inherits TouchArea {
         }
     }
 
-    delete-popup := DeleteConfirmPopup {
-        x: (root.width - self.width) / 2;
-        y: (root.height - self.height) / 2;
-        confirmed => {
-            FullViewState.apply-edit({ kind: EditOpKind.Delete });
+    delete-popup-overlay := Rectangle {
+        visible: false;
+        width: root.width;
+        height: root.height;
+        background: transparent;
+
+        TouchArea {
+            clicked => {
+                delete-popup-overlay.visible = false;
+                root.return-focus();
+            }
+        }
+
+        delete-popup := DeleteConfirmPopup {
+            x: (root.width - self.width) / 2;
+            y: (root.height - self.height) / 2;
+            confirmed => {
+                FullViewState.apply-edit({ kind: EditOpKind.Delete });
+                delete-popup-overlay.visible = false;
+                root.return-focus();
+            }
+            canceled => {
+                delete-popup-overlay.visible = false;
+                root.return-focus();
+            }
+            closed => {
+                delete-popup-overlay.visible = false;
+                root.return-focus();
+            }
         }
     }
 
+    callback return-focus();
+
     public function show-delete-popup() {
-        delete-popup.show();
+        delete-popup-overlay.visible = true;
+        delete-popup.open();
     }
 }
