@@ -83,15 +83,36 @@ export component MainWindow inherits Window {
                 return accept;
             }
             if (root.view-mode == ViewMode.full) {
+                let pan-amount = 100px;
                 if (event.text == "h" || event.text == Key.LeftArrow) {
-                    full-ui.reset-zoom();
-                    FullViewState.request-prev-image();
+                    if (full-ui.is-zoomed) {
+                        full-ui.pan(-pan-amount, 0px);
+                    } else {
+                        full-ui.reset-zoom();
+                        FullViewState.request-prev-image();
+                    }
                     return accept;
                 }
                 if (event.text == "l" || event.text == Key.RightArrow) {
-                    full-ui.reset-zoom();
-                    FullViewState.request-next-image();
+                    if (full-ui.is-zoomed) {
+                        full-ui.pan(pan-amount, 0px);
+                    } else {
+                        full-ui.reset-zoom();
+                        FullViewState.request-next-image();
+                    }
                     return accept;
+                }
+                if (event.text == "k" || event.text == Key.UpArrow) {
+                    if (full-ui.is-zoomed) {
+                        full-ui.pan(0px, -pan-amount);
+                        return accept;
+                    }
+                }
+                if (event.text == "j" || event.text == Key.DownArrow) {
+                    if (full-ui.is-zoomed) {
+                        full-ui.pan(0px, pan-amount);
+                        return accept;
+                    }
                 }
                 if (event.text == root.bind-reset-zoom) {
                     full-ui.reset-zoom();

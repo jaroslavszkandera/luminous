@@ -147,6 +147,19 @@ export component FullView inherits TouchArea {
         }
     }
 
+    public function pan(dx: length, dy: length) {
+        let overflow-x = img-rect.width * (zoom-scale - 1);
+        let overflow-y = img-rect.height * (zoom-scale - 1);
+        if (overflow-x > 0px) {
+            pan-pos-x = clamp(pan-pos-x + dx / overflow-x, 0, 1);
+        }
+        if (overflow-y > 0px) {
+            pan-pos-y = clamp(pan-pos-y + dy / overflow-y, 0, 1);
+        }
+    }
+
+    out property <bool> is-zoomed: zoom-scale > 1.0;
+
     public function reset-zoom() {
         zoom-scale = 1;
         pan-pos-x = 0.5;
