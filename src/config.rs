@@ -169,9 +169,11 @@ impl Config {
         map.insert("toggle_side_panel".into(), "s".into());
         map.insert("copy_to_clipboard".into(), "y".into());
         map.insert("delete".into(), "Delete".into());
+        map.insert("show_settings".into(), "F1".into());
         map
     }
 
+    // TODO: validate key_string
     pub fn get_slint_key_string(key_name: &str) -> slint::SharedString {
         use slint::platform::Key;
         match key_name {
@@ -188,6 +190,7 @@ impl Config {
             "Home" => Key::Home.into(),
             "End" => Key::End.into(),
             "Delete" => Key::Delete.into(),
+            "F1" => Key::F1.into(),
             // For single characters, return as is
             other => slint::SharedString::from(other),
         }

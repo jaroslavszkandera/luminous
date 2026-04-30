@@ -5,8 +5,15 @@ import {
     VerticalBox,
     ListView,
     StandardListView,
+    LineEdit,
 } from "std-widgets.slint";
 import { Plugin } from "plugins.slint";
+
+export struct SettingItem {
+    id: string,
+    label: string,
+    value: string,
+}
 
 export global SettingsState {
     in property <int> image-cache-count;
@@ -18,6 +25,9 @@ export global SettingsState {
     in property <[StandardListViewItem]> plugin-names;
     callback toggle-plugin-enable(string);
     callback toggle-plugin-auto-start(string, int);
+
+    in property <[SettingItem]> binding-settings;
+    callback update-setting(string, string, string);
 }
 
 export component ClearImageCacheDialog inherits Dialog {
@@ -62,7 +72,7 @@ export component SettingsSection inherits VerticalLayout {
 }
 
 export component Settings inherits PopupWindow {
-    close-policy: no-auto-close;
+    close-policy: close-on-click-outside;
 
     Rectangle {
         background: Palette.background;
@@ -163,6 +173,29 @@ export component Settings inherits PopupWindow {
                                     clicked => {
                                         debug("Showing info for: " + SettingsState.plugins[idx].id);
                                     }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                SettingsSection {
+                    title: "Keybindings";
+                    VerticalLayout {
+                        spacing: 8px;
+                        for setting[idx] in SettingsState.binding-settings: HorizontalLayout {
+                            spacing: 10px;
+                            Text {
+                                text: setting.label;
+                                vertical-alignment: center;
+                                width: 120px;
+                            }
+
+                            LineEdit {
+                                text: setting.value;
+                                enabled: false; // TODO: make the update settings work and validate
+                                accepted(val) => {
+                                    SettingsState.update-setting(setting.id, val, "binding");
                                 }
                             }
                         }

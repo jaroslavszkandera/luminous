@@ -49,6 +49,12 @@ export component GridView inherits Rectangle {
         }
     }
 
+    public function show-settings() {
+        settings.show();
+        SettingsState.get-image-cache-count();
+        SettingsState.settings-opened();
+    }
+
     public function focus-search() {
         search-input.focus();
     }
@@ -167,11 +173,7 @@ export component GridView inherits Rectangle {
                 Button {
                     icon: @image-url("icons/settings-cogwheel-button.svg");
                     colorize-icon: true;
-                    clicked => {
-                        settings.show();
-                        SettingsState.get-image-cache-count();
-                        SettingsState.settings-opened();
-                    }
+                    clicked => show-settings();
                 }
             }
         }

@@ -1,18 +1,15 @@
-use crate::AppController;
-use crate::MainWindow;
-use crate::SettingsState;
+use crate::{AppController, Config, MainWindow, SettingsState};
 use directories::ProjectDirs;
-use log::error;
+use log::{debug, error, info};
 use serde::{Deserialize, Serialize};
-use slint::ComponentHandle;
-use slint::Model;
+use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 use std::cell::RefCell;
 use std::fs::{self, File};
 use std::path::PathBuf;
 use std::rc::Rc;
 
 pub fn register(window: &MainWindow, app_controller: Rc<RefCell<AppController>>) {
-    log::debug!("Registering settings presenter");
+    debug!("Registering settings presenter");
     let sg = window.global::<SettingsState>();
 
     let acc = app_controller.clone();
@@ -92,6 +89,17 @@ pub fn register(window: &MainWindow, app_controller: Rc<RefCell<AppController>>)
 
         let _ = write_settings(&settings);
 
+        let config = Config::load();
+        let mut bindings_vec = Vec::new();
+        for (k, v) in config.bindings.iter() {
+            bindings_vec.push(crate::SettingItem {
+                id: SharedString::from(k),
+                label: SharedString::from(k),
+                value: SharedString::from(v),
+            });
+        }
+        bindings_vec.sort_by(|a, b| a.id.cmp(&b.id));
+
         let weak_ui = acc.borrow().window_weak.clone();
         slint::invoke_from_event_loop(move || {
             if let Some(ui) = weak_ui.upgrade() {
@@ -121,6 +129,9 @@ pub fn register(window: &MainWindow, app_controller: Rc<RefCell<AppController>>)
 
                 state.set_plugins(std::rc::Rc::new(slint::VecModel::from(plugins_vec)).into());
                 state.set_plugin_names(std::rc::Rc::new(slint::VecModel::from(names_vec)).into());
+                state.set_binding_settings(ModelRc::from(std::rc::Rc::new(VecModel::from(
+                    bindings_vec,
+                ))));
             }
         })
         .unwrap();
@@ -166,6 +177,13 @@ pub fn register(window: &MainWindow, app_controller: Rc<RefCell<AppController>>)
             .unwrap();
         }
     });
+
+    // sg.on_update_setting(move |id, val, category| {
+    //     let id_str = id.as_str();
+    //     let val_str = val.as_str();
+    //
+    //     // Load, mutate, and save your TOML file here based on category/id
+    // });
 }
 
 #[derive(Deserialize, Serialize)]
@@ -209,7 +227,7 @@ fn get_settings_path() -> Option<PathBuf> {
             error!("Failed to create settings file: {e}");
             return None;
         }
-        log::info!("Created new settings file at {:?}", settings_path);
+        info!("Created new settings file at {:?}", settings_path);
     }
 
     Some(settings_path)

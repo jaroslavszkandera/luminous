@@ -35,6 +35,7 @@ export component MainWindow inherits Window {
     // Bindings
     in property <string> bind-quit;
     in property <string> bind-fullscreen;
+    in property <string> bind-show-settings;
     in property <string> bind-switch-view-mode;
     in property <string> bind-reset-zoom;
     in property <string> bind-grid-pg-dn;
@@ -107,6 +108,9 @@ export component MainWindow inherits Window {
                     full-ui.show-delete-popup();
                 }
             } else if (root.view-mode == ViewMode.grid) {
+                if (event.text == root.bind-show-settings) {
+                    grid-ui.show-settings();
+                }
                 if (event.text == root.bind-grid-pg-dn) {
                     grid-ui.page-down();
                     return accept;
