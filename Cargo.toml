@@ -5,6 +5,7 @@ edition = "2024"
 
 [workspace]
 members = ["crates/plugins", "crates/image_loader"]
+exclude = ["plugins"]
 
 [workspace.dependencies]
 criterion = { version = "0.8.2", features = ["html_reports"] }
