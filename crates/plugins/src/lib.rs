@@ -7,7 +7,7 @@ pub use ipc_daemon::{IpcStatus, PluginControl};
 pub use manifest::{BackendKind, PluginCapability, PluginManifest, load_manifest};
 
 use ipc_daemon::DaemonBackend;
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use shared_lib::SharedLibBackend;
 use slint::{Rgba8Pixel, SharedPixelBuffer};
 use std::fs;
@@ -252,16 +252,31 @@ impl PluginManager {
 
     /// Scan a directory for plugin subdirectories containing a `plugin.json`.
     pub fn discover(&mut self, auto_start_ids: &[String]) -> Vec<String> {
-        let plugins_dir = directories::ProjectDirs::from("", "", "luminous").and_then(|proj| {
-            let plugins_dir = proj.data_dir().join("plugins");
-            fs::create_dir_all(&plugins_dir)
-                .map(|_| plugins_dir)
-                .map_err(|e| error!("Failed to create plugins dir: {e}"))
-                .ok()
-        });
-        info!("Discovering plugins in: {:?}", plugins_dir);
+        let data_plugins_dir =
+            directories::ProjectDirs::from("", "", "luminous").and_then(|proj| {
+                let plugins_dir = proj.data_dir().join("plugins");
+                fs::create_dir_all(&plugins_dir)
+                    .map(|_| plugins_dir)
+                    .map_err(|e| error!("Failed to create plugins dir: {e}"))
+                    .ok()
+            });
 
-        if let Some(plugins_dir) = plugins_dir {
+        let dev_plugins_dir = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.ancestors().nth(3).map(|root| root.join("plugins")));
+
+        let search_dirs: Vec<PathBuf> = [data_plugins_dir, dev_plugins_dir]
+            .into_iter()
+            .flatten()
+            .collect();
+
+        info!("Discovering plugins in: {:?}", search_dirs);
+
+        let mut seen_ids: std::collections::HashMap<String, PathBuf> =
+            std::collections::HashMap::new();
+        let mut discovered_ids = Vec::new();
+
+        for plugins_dir in &search_dirs {
             let entries = match std::fs::read_dir(plugins_dir) {
                 Ok(e) => e,
                 Err(e) => {
@@ -269,8 +284,6 @@ impl PluginManager {
                     return vec![];
                 }
             };
-
-            let mut discovered_ids = Vec::new();
 
             for entry in entries.filter_map(|e| e.ok()) {
                 let path = entry.path();
@@ -281,7 +294,15 @@ impl PluginManager {
                     Some(s) => s.to_string(),
                     None => continue,
                 };
+                if let Some(existing) = seen_ids.get(&id) {
+                    warn!(
+                        "Duplicate plugin id '{}' found in {:?} (already loaded from {:?}), skipping",
+                        id, plugins_dir, existing
+                    );
+                    continue;
+                }
 
+                seen_ids.insert(id.clone(), plugins_dir.clone());
                 discovered_ids.push(id.clone());
 
                 let manifest_path = path.join("plugin.json");
@@ -294,10 +315,8 @@ impl PluginManager {
                     self.register(id, path, manifest, auto_start);
                 }
             }
-            discovered_ids
-        } else {
-            vec![]
         }
+        discovered_ids
     }
 
     pub fn get_all_plugins(&self) -> Vec<Arc<Plugin>> {

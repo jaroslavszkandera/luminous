@@ -205,7 +205,7 @@ impl Settings {
             if !self.plugins.iter().any(|p| p.id == id) {
                 self.plugins.push(PluginSettings {
                     id,
-                    auto_start: true,
+                    auto_start: false,
                 });
             }
         }
