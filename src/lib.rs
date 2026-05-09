@@ -860,6 +860,7 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
 
         let gv = main_window.global::<GridViewState>();
         gv.set_side_panel_visible(cached_state.grid_view_side_panel_visible);
+        gv.set_grid_cols(cached_state.grid_view_cols as i32);
     }
 
     let grid_data: Vec<GridItem> = scan

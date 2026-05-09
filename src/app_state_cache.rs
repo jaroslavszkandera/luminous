@@ -4,7 +4,7 @@ use log::{debug, error};
 use serde::{Deserialize, Serialize};
 use slint::ComponentHandle;
 
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct AppState {
     pub fullscreen: bool,
     pub x: i32,
@@ -13,7 +13,24 @@ pub struct AppState {
     pub height: u32,
     pub full_view_footer_visible: bool,
     pub full_view_side_panel_visible: bool,
+    pub grid_view_cols: u32,
     pub grid_view_side_panel_visible: bool,
+}
+
+impl Default for AppState {
+    fn default() -> Self {
+        Self {
+            fullscreen: false,
+            x: 0,
+            y: 0,
+            width: 1280,
+            height: 720,
+            full_view_footer_visible: true,
+            full_view_side_panel_visible: true,
+            grid_view_cols: 5,
+            grid_view_side_panel_visible: false,
+        }
+    }
 }
 
 pub fn load_app_state() -> AppState {
@@ -51,6 +68,7 @@ pub fn save_app_state(window: &MainWindow) {
             height: win.size().height,
             full_view_footer_visible: fv.get_footer_visible(),
             full_view_side_panel_visible: fv.get_side_panel_visible(),
+            grid_view_cols: gv.get_grid_cols() as u32,
             grid_view_side_panel_visible: gv.get_side_panel_visible(),
         };
 

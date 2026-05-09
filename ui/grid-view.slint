@@ -12,7 +12,7 @@ import { Settings, SettingsState } from "settings.slint";
 export global GridViewState {
     in property <[GridItem]> model;
     in property <[GridItem]> visible-model;
-    in-out property <int> grid-cols: 5;
+    in-out property <int> grid-cols;
     in-out property <int> selected-count: 0;
     in property <bool> side-panel-visible;
 
