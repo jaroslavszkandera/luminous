@@ -21,7 +21,7 @@ slint = { version = "1.16.0", default-features = false }
 tempfile = "3.26.0"
 
 [features]
-default = ["gif", "jpeg", "png", "tiff", "webp"]
+default = ["gif", "jpeg", "png", "tiff", "webp", "pnm"]
 # avif = ["image/avif"]
 avif-native = ["image/avif-native"]
 bmp = ["image/bmp"]
