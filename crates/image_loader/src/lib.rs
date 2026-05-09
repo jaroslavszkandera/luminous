@@ -1,6 +1,5 @@
 use dashmap::DashMap;
 use directories::ProjectDirs;
-use image::imageops::FilterType;
 use log::{debug, error, trace};
 use rayon::ThreadPool;
 use sha2::{Digest, Sha256};
@@ -13,8 +12,6 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::time::Instant;
 
 use luminous_plugins::PluginManager;
-
-const THUMB_FILTER: FilterType = FilterType::Triangle;
 
 pub type ImageReadyFn = Arc<dyn Fn(usize, SharedPixelBuffer<Rgba8Pixel>) + Send + Sync>;
 pub type ImageReadyHook = Option<ImageReadyFn>;
@@ -484,22 +481,17 @@ impl ImageLoader {
             return placeholder();
         };
 
-        let (w, h) = (img.width(), img.height());
-
-        if res >= w || res >= h {
+        if res >= img.width() || res >= img.height() {
             trace!(
-                "Not saving thumb {:?}, smaller than bucket res (res={res}, w={w}, h={h})",
-                path.file_name()
+                "Not saving thumb {:?}, smaller than bucket res (res={res}, w={}, h={})",
+                path.file_name(),
+                img.width(),
+                img.height()
             );
             return to_pixel_buffer(img);
         }
 
-        let scale = (res as f64 / w.max(h) as f64).min(1.0);
-        let resized = img.resize(
-            (w as f64 * scale).round() as u32,
-            (h as f64 * scale).round() as u32,
-            THUMB_FILTER,
-        );
+        let resized = img.thumbnail(res, res);
 
         if let Some(cp) = cache_path {
             if let Err(e) = resized.save(cp) {
