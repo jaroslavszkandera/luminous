@@ -195,6 +195,12 @@ impl AppController {
             if let Some(name) = loader.get_file_name(index) {
                 fv.set_curr_image_name(name.into());
             }
+            let row = self
+                .filtered_indices
+                .iter()
+                .position(|&i| i == index)
+                .unwrap_or(0);
+            ui.global::<GridViewState>().set_curr_grid_row(row as i32);
             if loader.full_cache_contains(index) {
                 for plugin in pm.get_interactive_plugins() {
                     // TODO: auto send image in GUI

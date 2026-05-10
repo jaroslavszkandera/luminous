@@ -78,7 +78,12 @@ export component MainWindow inherits Window {
                 return accept;
             }
             if (event.text == root.bind-switch-view-mode) {
-                root.view-mode = root.view-mode == ViewMode.full ? ViewMode.grid : ViewMode.full;
+                if (root.view-mode == ViewMode.full) {
+                    grid-ui.scroll-to-image(GridViewState.curr-grid-row);
+                    root.view-mode = ViewMode.grid;
+                } else {
+                    root.view-mode = ViewMode.full;
+                }
                 full-ui.reset-zoom();
                 return accept;
             }
@@ -219,6 +224,7 @@ export component MainWindow inherits Window {
         encoder_extensions: encoder_extensions;
 
         exit-full-view => {
+            grid-ui.scroll-to-image(GridViewState.curr-grid-row);
             root.view-mode = ViewMode.grid;
         }
         open-images => {

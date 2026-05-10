@@ -15,6 +15,7 @@ export global GridViewState {
     in-out property <int> grid-cols;
     in-out property <int> selected-count: 0;
     in property <bool> side-panel-visible;
+    in property <int> curr-grid-row: -1;
 
     callback request-grid-data(int, int);
     callback image-selected(int);
@@ -97,8 +98,40 @@ export component GridView inherits Rectangle {
     }
 
     public function update-grid-cols(cols: int) {
-        GridViewState.grid-cols = clamp(cols, 2, 20);
+        let old-item-h = grid-container.item-size + grid-container.gap;
+        let old-cols = grid-container.cols;
+        let first-row = old-item-h > 0px ? floor(-scroll-area.viewport-y / old-item-h) : 0;
+        let first-visible-index = first-row * old-cols;
+
+        let new-cols = clamp(cols, 2, 20);
+        GridViewState.grid-cols = new-cols;
+
+        let new-first-row = floor(first-visible-index / new-cols);
+        let new-item-h = scroll-area.width / new-cols + grid-container.gap;
+
+        scroll-area.viewport-y = -new-first-row * new-item-h;
         scroll-area.sync-bucket-resolution();
+        update-visible-rows();
+    }
+
+    public function scroll-to-image(row: int) {
+        if (row < 0) {
+            return;
+        }
+        let item-h = grid-container.item-size + grid-container.gap;
+        let cols = grid-container.cols;
+        if (item-h <= 0px || cols <= 0) {
+            return;
+        }
+        let grid-row = floor(row / cols);
+        let item-top = grid-row * item-h;
+        let item-bottom = item-top + item-h;
+        let view-top = -scroll-area.viewport-y;
+        let view-bottom = view-top + scroll-area.height;
+        if (item-top >= view-top && item-bottom <= view-bottom) {
+            return;
+        }
+        scroll-area.viewport-y = Math.max(-item-top, scroll-area.height - scroll-area.viewport-height);
         update-visible-rows();
     }
 
