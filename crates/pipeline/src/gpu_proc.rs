@@ -1,4 +1,4 @@
-use crate::{Channel, FlipDirection, RotateAngle};
+use crate::types::{Channel, FlipDirection, RotateAngle};
 use image::{DynamicImage, GenericImageView};
 use log::info;
 use std::borrow::Cow;

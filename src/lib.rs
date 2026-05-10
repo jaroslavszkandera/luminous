@@ -11,7 +11,7 @@ use config::Config;
 use fs_scan::ScanResult;
 use luminous_image_loader::ImageLoader;
 use luminous_plugins::PluginManager;
-use pipeline::StepFactory;
+use pipeline::GpuStepFactory;
 
 #[allow(unused_imports)]
 use log::{debug, error, info, warn};
@@ -892,7 +892,7 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
         &main_window,
     )));
 
-    let factory = Arc::new(StepFactory::new(false));
+    let factory = Arc::new(GpuStepFactory::new(false));
 
     ui::grid_view_presenter::register(&main_window, app_controller.clone());
     ui::full_view_presenter::register(&main_window, app_controller.clone());

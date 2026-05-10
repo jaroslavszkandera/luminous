@@ -1,0 +1,20 @@
+[package]
+name = "luminous-pipeline"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bytemuck = { workspace = true, features = ["derive"] }
+image = { workspace = true }
+log = { workspace = true }
+palette = { workspace = true }
+rand = "0.8"
+wgpu = "29.0.1"
+
+[dev-dependencies]
+criterion = { workspace = true }
+pollster = { workspace = true }
+
+[[bench]]
+name = "pipeline"
+harness = false

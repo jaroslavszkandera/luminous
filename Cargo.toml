@@ -4,10 +4,11 @@ version = "0.1.0"
 edition = "2024"
 
 [workspace]
-members = ["crates/plugins", "crates/image_loader"]
+members = ["crates/plugins", "crates/image_loader", "crates/pipeline"]
 exclude = ["plugins"]
 
 [workspace.dependencies]
+bytemuck = "1.25.0"
 criterion = { version = "0.8.2", features = ["html_reports"] }
 dashmap = "6.1.0"
 directories = "6.0.0"
@@ -20,6 +21,8 @@ serde_json = "1.0.149"
 sha2 = "0.10.9"
 slint = { version = "1.16.0", default-features = false }
 tempfile = "3.26.0"
+palette = "0.7.6"
+pollster = "0.4.0"
 
 [features]
 default = ["gif", "jpeg", "png", "tiff", "webp", "pnm"]
@@ -43,7 +46,8 @@ webp = ["image/webp"]
 [dependencies]
 luminous-plugins = { path = "crates/plugins" }
 luminous-image-loader = { path = "crates/image_loader" }
-bytemuck = "1.25.0"
+luminous-pipeline = { path = "crates/pipeline" }
+bytemuck = { workspace = true }
 chrono = "0.4.44"
 clap = { version = "4.5.57", default-features = false, features = [
   "std",
@@ -61,8 +65,8 @@ image = { workspace = true }
 kamadak-exif = "0.6.1"
 log = { workspace = true }
 num_cpus = "1.17.0"
-palette = { version = "0.7.6" }
-pollster = "0.4.0"
+palette = { workspace = true }
+pollster = { workspace = true }
 rayon = { workspace = true }
 rfd = "0.17.2"
 serde = { workspace = true }
@@ -70,7 +74,6 @@ serde_json = { workspace = true }
 toml = "0.9.11"
 trash = "5.2.5"
 walkdir = "2.5.0"
-wgpu = "29.0.1"
 
 [dev-dependencies]
 criterion = { workspace = true }
@@ -112,10 +115,6 @@ opt-level = 1
 lto = false
 codegen-units = 256
 strip = false
-
-[[bench]]
-name = "pipeline_bench"
-harness = false
 
 [lib]
 doctest = false

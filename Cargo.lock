@@ -3196,6 +3196,7 @@ dependencies = [
  "kamadak-exif",
  "log",
  "luminous-image-loader",
+ "luminous-pipeline",
  "luminous-plugins",
  "num_cpus",
  "palette",
@@ -3209,7 +3210,6 @@ dependencies = [
  "toml 0.9.12+spec-1.1.0",
  "trash",
  "walkdir",
- "wgpu",
 ]
 
 [[package]]
@@ -3227,6 +3227,20 @@ dependencies = [
  "sha2",
  "slint",
  "tempfile",
+]
+
+[[package]]
+name = "luminous-pipeline"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "criterion",
+ "image 0.25.10",
+ "log",
+ "palette",
+ "pollster",
+ "rand 0.8.6",
+ "wgpu",
 ]
 
 [[package]]

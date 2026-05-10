@@ -1,13 +1,13 @@
 use crate::AppController;
 use crate::MainWindow;
-use crate::pipeline::{StepFactory, run_pipeline_on_selection};
+use crate::pipeline::{self, GpuStepFactory, run_pipeline_on_selection};
 use crate::{Channel, FlipDirection, PipelineStep, PipelineStepKind, RotateAngle};
 use slint::{Model, VecModel};
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
-pub fn register(window: &MainWindow, c: Rc<RefCell<AppController>>, factory: Arc<StepFactory>) {
+pub fn register(window: &MainWindow, c: Rc<RefCell<AppController>>, factory: Arc<GpuStepFactory>) {
     window.set_pipeline_steps(Rc::new(VecModel::<PipelineStep>::default()).into());
 
     let acc = c.clone();
@@ -21,22 +21,8 @@ pub fn register(window: &MainWindow, c: Rc<RefCell<AppController>>, factory: Arc
             .downcast_ref::<VecModel<PipelineStep>>()
             .unwrap();
 
-        let mut new_step = PipelineStep {
-            kind,
-            rotate_angle: RotateAngle::R90,
-            blur_sigma: 1.0,
-            brighten_value: 0,
-            resize_width: 224,
-            resize_height: 224,
-            flip_direction: FlipDirection::Horizontal,
-            extract_channel: Channel::Gray,
-        };
-
-        match kind {
-            PipelineStepKind::Brighten => new_step.brighten_value = 10,
-            _ => {}
-        }
-        vec_model.push(new_step);
+        let step = default_step(kind);
+        vec_model.push(step);
     });
 
     let acc = c.clone();
@@ -99,17 +85,18 @@ pub fn register(window: &MainWindow, c: Rc<RefCell<AppController>>, factory: Arc
             return;
         }
 
-        let steps: Vec<PipelineStep> = {
+        let filters = {
             let Some(ui) = weak_ui.upgrade() else { return };
             let model = ui.get_pipeline_steps();
             (0..model.row_count())
                 .filter_map(|i| model.row_data(i))
+                .map(|s| pipeline::mapping::to_filter_kind(&s))
                 .collect()
         };
 
         run_pipeline_on_selection(
             paths,
-            steps,
+            filters,
             factory.clone(),
             encode_extension.to_string(),
             plugin_manager,
@@ -122,4 +109,28 @@ pub fn register(window: &MainWindow, c: Rc<RefCell<AppController>>, factory: Arc
         })
         .unwrap();
     });
+}
+
+fn default_step(kind: PipelineStepKind) -> PipelineStep {
+    PipelineStep {
+        kind,
+        rotate_angle: RotateAngle::R90,
+        blur_sigma: 1.0,
+        brighten_value: match kind {
+            PipelineStepKind::Brighten => 10,
+            _ => 0,
+        },
+        resize_width: 224,
+        resize_height: 224,
+        flip_direction: FlipDirection::Horizontal,
+        extract_channel: Channel::Gray,
+        contrast_value: 1.0,
+        saturation_value: 1.0,
+        crop_x: 0,
+        crop_y: 0,
+        crop_width: 224,
+        crop_height: 224,
+        noise_intensity: 0.1,
+        sharpness_amount: 1.0,
+    }
 }
