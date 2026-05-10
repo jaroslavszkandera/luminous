@@ -40,6 +40,7 @@ export component GridView inherits Rectangle {
     callback batch-save-with-format(ImgFmt);
     callback pipeline-add-step(PipelineStepKind);
     callback pipeline-remove-step(int);
+    callback pipeline-move-step(int, int);
     callback pipeline-update-step(int, PipelineStep);
     callback pipeline-run(string);
 
@@ -345,6 +346,9 @@ export component GridView inherits Rectangle {
                     }
                     request-remove-step(i) => {
                         root.pipeline-remove-step(i);
+                    }
+                    request-move-step(from, to) => {
+                        root.pipeline-move-step(from, to);
                     }
                     request-update-step(i, s) => {
                         root.pipeline-update-step(i, s);

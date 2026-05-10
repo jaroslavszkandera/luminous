@@ -40,13 +40,10 @@ export struct PipelineStep {
     extract-channel: Channel,
 }
 
-component CloseButton inherits Button {
-    height: 20px;
-    text: "\u{1F5D9}";
-}
-
 component StepCard inherits Rectangle {
     in property <string> title;
+    callback move-up();
+    callback move-down();
     callback remove();
 
     height: 76px;
@@ -59,6 +56,7 @@ component StepCard inherits Rectangle {
         spacing: 6px;
 
         HorizontalLayout {
+            height: 25px;
             spacing: 6px;
             Text {
                 text: root.title;
@@ -68,10 +66,22 @@ component StepCard inherits Rectangle {
                 horizontal-stretch: 1;
             }
 
-            CloseButton {
-                clicked => {
-                    root.remove();
-                }
+            Button {
+                icon: @image-url("icons/keyboard-arrow-up.svg");
+                colorize-icon: true;
+                clicked => root.move-up();
+            }
+
+            Button {
+                icon: @image-url("icons/keyboard-arrow-down.svg");
+                colorize-icon: true;
+                clicked => root.move-down();
+            }
+
+            Button {
+                icon: @image-url("icons/clear.svg");
+                colorize-icon: true;
+                clicked => root.remove();
             }
         }
 
@@ -302,6 +312,7 @@ export component PipelinePanel inherits Rectangle {
     in property <[string]> encoder_extensions;
     callback request-add-step(PipelineStepKind);
     callback request-remove-step(int);
+    callback request-move-step(int, int);
     callback request-update-step(int, PipelineStep);
     callback run-pipeline(string);
 
@@ -338,12 +349,13 @@ export component PipelinePanel inherits Rectangle {
             ScrollView {
                 viewport-height: steps.length * 76px;
                 VerticalLayout {
+                    // TODO: Do better with repetition...
                     for step[i] in root.steps: Rectangle {
                         if step.kind == PipelineStepKind.Rotate: RotateStepCard {
                             angle: step.rotate-angle;
-                            remove => {
-                                root.request-remove-step(i);
-                            }
+                            move-up => root.request-move-step(i, i - 1);
+                            move-down => root.request-move-step(i, i + 1);
+                            remove => root.request-remove-step(i);
                             changed => {
                                 step.rotate-angle = self.angle;
                                 root.request-update-step(i, step);
@@ -351,9 +363,9 @@ export component PipelinePanel inherits Rectangle {
                         }
                         if step.kind == PipelineStepKind.GaussianBlur: GaussianBlurStepCard {
                             sigma: step.blur-sigma;
-                            remove => {
-                                root.request-remove-step(i);
-                            }
+                            move-up => root.request-move-step(i, i - 1);
+                            move-down => root.request-move-step(i, i + 1);
+                            remove => root.request-remove-step(i);
                             changed => {
                                 step.blur-sigma = self.sigma;
                                 root.request-update-step(i, step);
@@ -361,9 +373,9 @@ export component PipelinePanel inherits Rectangle {
                         }
                         if step.kind == PipelineStepKind.Brighten: BrightenStepCard {
                             value: step.brighten-value;
-                            remove => {
-                                root.request-remove-step(i);
-                            }
+                            move-up => root.request-move-step(i, i - 1);
+                            move-down => root.request-move-step(i, i + 1);
+                            remove => root.request-remove-step(i);
                             changed => {
                                 step.brighten-value = self.value;
                                 root.request-update-step(i, step);
@@ -372,9 +384,9 @@ export component PipelinePanel inherits Rectangle {
                         if step.kind == PipelineStepKind.Resize: ResizeStepCard {
                             w: step.resize-width;
                             h: step.resize-height;
-                            remove => {
-                                root.request-remove-step(i);
-                            }
+                            move-up => root.request-move-step(i, i - 1);
+                            move-down => root.request-move-step(i, i + 1);
+                            remove => root.request-remove-step(i);
                             changed => {
                                 step.resize-width = self.w;
                                 step.resize-height = self.h;
@@ -383,9 +395,9 @@ export component PipelinePanel inherits Rectangle {
                         }
                         if step.kind == PipelineStepKind.Flip: FlipStepCard {
                             direction: step.flip-direction;
-                            remove => {
-                                root.request-remove-step(i);
-                            }
+                            move-up => root.request-move-step(i, i - 1);
+                            move-down => root.request-move-step(i, i + 1);
+                            remove => root.request-remove-step(i);
                             changed => {
                                 step.flip-direction = self.direction;
                                 root.request-update-step(i, step);
@@ -393,9 +405,9 @@ export component PipelinePanel inherits Rectangle {
                         }
                         if step.kind == PipelineStepKind.ExtractChannel: ExtractChannelStepCard {
                             channel: step.extract-channel;
-                            remove => {
-                                root.request-remove-step(i);
-                            }
+                            move-up => root.request-move-step(i, i - 1);
+                            move-down => root.request-move-step(i, i + 1);
+                            remove => root.request-remove-step(i);
                             changed => {
                                 step.extract-channel = self.channel;
                                 root.request-update-step(i, step);

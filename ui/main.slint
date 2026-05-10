@@ -177,6 +177,7 @@ export component MainWindow inherits Window {
     in property <float> pipeline-progress;
     callback pipeline-add-step(PipelineStepKind);
     callback pipeline-remove-step(int);
+    callback pipeline-move-step(int, int);
     callback pipeline-update-step(int, PipelineStep);
     callback pipeline-run(string);
 
@@ -198,6 +199,9 @@ export component MainWindow inherits Window {
         }
         pipeline-remove-step(i) => {
             root.pipeline-remove-step(i);
+        }
+        pipeline-move-step(from, to) => {
+            root.pipeline-move-step(from, to);
         }
         pipeline-run(extension) => {
             root.pipeline-run(extension);
