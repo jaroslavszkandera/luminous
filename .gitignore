@@ -25,6 +25,15 @@ target
 
 /target
 
+# Python / uv
+__pycache__/
+*.py[cod]
+*.pth
+.venv/
+dist/
+*.egg-info/
+
+
 # Other
 build
 *.sh
