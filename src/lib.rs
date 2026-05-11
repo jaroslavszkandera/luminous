@@ -2,13 +2,12 @@ slint::include_modules!();
 
 mod app_state_cache;
 pub mod config;
-pub mod fs_scan;
 pub mod image_processing;
 pub mod pipeline;
 mod ui;
 
 use config::Config;
-use fs_scan::ScanResult;
+use luminous_fs_scan::ScanResult;
 use luminous_image_loader::ImageLoader;
 use luminous_plugins::PluginManager;
 use pipeline::GpuStepFactory;
@@ -731,7 +730,7 @@ impl AppController {
             .pick_folder()
             .and_then(|p| p.to_str().map(|s| s.to_string()))
         {
-            let scan = Arc::new(fs_scan::scan(&path, &extra_exts));
+            let scan = Arc::new(luminous_fs_scan::scan(&path, &extra_exts));
             if scan.paths.is_empty() {
                 return;
             }
@@ -844,7 +843,7 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
     }
 
     let extra_exts = plugin_manager.get_supported_extensions();
-    let scan = fs_scan::scan(&config.path, &extra_exts);
+    let scan = luminous_fs_scan::scan(&config.path, &extra_exts);
 
     let main_window = MainWindow::new()?;
 

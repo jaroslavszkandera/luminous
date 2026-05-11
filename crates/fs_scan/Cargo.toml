@@ -1,0 +1,30 @@
+[package]
+name = "luminous-fs-scan"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+default = ["gif", "jpeg", "png", "tiff", "webp", "pnm"]
+avif-native = []
+bmp = []
+dds = []
+exr = []
+ff = []
+gif = []
+hdr = []
+ico = []
+jpeg = []
+png = []
+pnm = []
+qoi = []
+tga = []
+tiff = []
+webp = []
+
+[dependencies]
+luminous-plugins = { path = "../plugins" }
+log = { workspace = true }
+walkdir = "2.5.0"
+
+[lib]
+doctest = false

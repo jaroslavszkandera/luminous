@@ -4,7 +4,12 @@ version = "0.1.0"
 edition = "2024"
 
 [workspace]
-members = ["crates/plugins", "crates/image_loader", "crates/pipeline"]
+members = [
+  "crates/plugins",
+  "crates/image_loader",
+  "crates/pipeline",
+  "crates/fs_scan",
+]
 exclude = ["plugins"]
 
 [workspace.dependencies]
@@ -27,26 +32,27 @@ pollster = "0.4.0"
 [features]
 default = ["gif", "jpeg", "png", "tiff", "webp", "pnm"]
 # avif = ["image/avif"]
-avif-native = ["image/avif-native"]
-bmp = ["image/bmp"]
-dds = ["image/dds"]
-exr = ["image/exr"]
-ff = ["image/ff"]
-gif = ["image/gif"]
-hdr = ["image/hdr"]
-ico = ["image/ico"]
-jpeg = ["image/jpeg"]
-png = ["image/png"]
-pnm = ["image/pnm"]
-qoi = ["image/qoi"]
-tga = ["image/tga"]
-tiff = ["image/tiff"]
-webp = ["image/webp"]
+avif-native = ["image/avif-native", "luminous-fs-scan/avif-native"]
+bmp = ["image/bmp", "luminous-fs-scan/bmp"]
+dds = ["image/dds", "luminous-fs-scan/dds"]
+exr = ["image/exr", "luminous-fs-scan/exr"]
+ff = ["image/ff", "luminous-fs-scan/ff"]
+gif = ["image/gif", "luminous-fs-scan/gif"]
+hdr = ["image/hdr", "luminous-fs-scan/hdr"]
+ico = ["image/ico", "luminous-fs-scan/ico"]
+jpeg = ["image/jpeg", "luminous-fs-scan/jpeg"]
+png = ["image/png", "luminous-fs-scan/png"]
+pnm = ["image/pnm", "luminous-fs-scan/pnm"]
+qoi = ["image/qoi", "luminous-fs-scan/qoi"]
+tga = ["image/tga", "luminous-fs-scan/tga"]
+tiff = ["image/tiff", "luminous-fs-scan/tiff"]
+webp = ["image/webp", "luminous-fs-scan/webp"]
 
 [dependencies]
 luminous-plugins = { path = "crates/plugins" }
 luminous-image-loader = { path = "crates/image_loader" }
 luminous-pipeline = { path = "crates/pipeline" }
+luminous-fs-scan = { path = "crates/fs_scan" }
 bytemuck = { workspace = true }
 chrono = "0.4.44"
 clap = { version = "4.5.57", default-features = false, features = [
@@ -73,7 +79,6 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 toml = "0.9.11"
 trash = "5.2.5"
-walkdir = "2.5.0"
 
 [dev-dependencies]
 criterion = { workspace = true }
