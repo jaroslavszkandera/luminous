@@ -18,7 +18,8 @@ const ITER_TIMEOUT: Duration = Duration::from_secs(120);
 const IMAGE_COUNT: usize = 100;
 const DEFAULT_RESOLUTION: u32 = 256;
 
-const THREAD_COUNTS: &[usize] = &[1, 2, 3, 4, 5, 6, 7, 8];
+// const THREAD_COUNTS: &[usize] = &[1, 2, 3, 4, 5, 6, 7, 8];
+const THREAD_COUNTS: &[usize] = &[1, 2, 4, 6, 8, 10, 12];
 const COLD_BATCH: usize = 100;
 
 const POLL_INTERVAL: Duration = Duration::from_millis(2);
@@ -54,6 +55,18 @@ const PRESETS: &[Preset] = &[
     Preset {
         width: 1920,
         height: 1080,
+    },
+    Preset {
+        width: 1024,
+        height: 1024,
+    },
+    Preset {
+        width: 512,
+        height: 512,
+    },
+    Preset {
+        width: 256,
+        height: 256,
     },
 ];
 
@@ -499,44 +512,113 @@ fn bench_sequential_browse(c: &mut Criterion) {
     group.finish();
 }
 
-fn bench_dynamic_to_shared(c: &mut Criterion) {
+/// Bench for synthetic image only, same resolution images will panic the bench
+fn bench_image_conversion(c: &mut Criterion) {
     print_source_banner();
     let paths = images();
     if paths.is_empty() {
         return;
     }
-    let img = image::open(&paths[0]).unwrap();
 
-    c.bench_function("dynamic_to_shared", |b| {
-        b.iter_batched(
-            || img.clone(),
-            |i| to_pixel_buffer(i),
-            BatchSize::SmallInput,
-        )
-    });
+    let imgs: Vec<_> = paths
+        .iter()
+        .take(5)
+        .map(|p| image::open(p).unwrap())
+        .collect();
+
+    let mut group = c.benchmark_group("dynamic_to_shared");
+    for img in imgs.iter() {
+        group.bench_with_input(
+            BenchmarkId::from_parameter(format!("{}x{}", img.width(), img.height())),
+            img,
+            |b, img| {
+                b.iter_batched(
+                    || img.clone(),
+                    |i| to_pixel_buffer(i),
+                    BatchSize::SmallInput,
+                )
+            },
+        );
+    }
+    group.finish();
+
+    let mut group = c.benchmark_group("shared_to_image");
+    for img in imgs.iter() {
+        let buf = to_pixel_buffer(img.clone());
+        group.bench_with_input(
+            BenchmarkId::from_parameter(format!("{}x{}", img.width(), img.height())),
+            &buf,
+            |b, buf| b.iter(|| to_slint_image(buf.clone())),
+        );
+    }
+    group.finish();
 }
 
-fn bench_shared_to_image(c: &mut Criterion) {
+fn bench_cold_mixed_throughput(c: &mut Criterion) {
     print_source_banner();
     let paths = images();
     if paths.is_empty() {
         return;
     }
-    let img = image::open(&paths[0]).unwrap();
-    let buf = to_pixel_buffer(img);
 
-    c.bench_function("shared_to_image", |b| {
-        b.iter(|| to_slint_image(buf.clone()))
-    });
+    let batch = (COLD_BATCH / 2).min(paths.len());
+    let mut group = c.benchmark_group("cold_mixed_throughput");
+    group.throughput(Throughput::Elements(batch as u64));
+    group.sample_size(10);
+    group.measurement_time(Duration::from_secs(100));
+
+    for &workers in THREAD_COUNTS {
+        group.bench_with_input(
+            BenchmarkId::from_parameter(workers),
+            &workers,
+            |b, &workers| {
+                b.iter_custom(|iters| {
+                    let mut total = Duration::ZERO;
+                    for i in 0..iters {
+                        let mut loader = make_loader(workers, true);
+                        loader.set_bucket_resolution(DEFAULT_RESOLUTION);
+
+                        let offset = (i as usize * batch) % paths.len();
+                        let indices: Vec<usize> =
+                            (0..batch).map(|s| (offset + s) % paths.len()).collect();
+                        let center = indices[0];
+
+                        let thumb_latch = SignalLatch::new("cold_mixed_thumb", batch);
+                        loader.on_thumb_ready(thumb_latch.hook());
+
+                        let probe_indices = indices.clone();
+                        let full_latch = PollLatch::new("cold_mixed_full", || {
+                            (full_cache_done(&loader, &probe_indices), batch)
+                        });
+
+                        let start = Instant::now();
+                        loader.update_sliding_window(center, indices.clone());
+                        for &idx in &indices {
+                            loader.load_grid_thumb(idx);
+                        }
+                        if !thumb_latch.wait(ITER_TIMEOUT) {
+                            panic!("Timeout in cold_mixed (thumb) workers={workers} batch={batch}");
+                        }
+                        if !full_latch.wait(ITER_TIMEOUT) {
+                            panic!("Timeout in cold_mixed (full) workers={workers} batch={batch}");
+                        }
+                        total += start.elapsed();
+                    }
+                    total
+                });
+            },
+        );
+    }
+    group.finish();
 }
 
 criterion_group!(
     benches,
     bench_cold_full_throughput,
     bench_cold_thumb_throughput,
+    bench_cold_mixed_throughput,
     bench_warm_cache_decode,
     bench_sequential_browse,
-    bench_dynamic_to_shared,
-    bench_shared_to_image,
+    bench_image_conversion,
 );
 criterion_main!(benches);
