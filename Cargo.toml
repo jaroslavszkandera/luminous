@@ -30,7 +30,7 @@ palette = "0.7.6"
 pollster = "0.4.0"
 
 [features]
-default = ["gif", "jpeg", "png", "tiff", "webp", "pnm"]
+default = ["gif", "jpeg", "png", "tiff", "webp", "pnm", "avif-native"]
 # avif = ["image/avif"]
 avif-native = ["image/avif-native", "luminous-fs-scan/avif-native"]
 bmp = ["image/bmp", "luminous-fs-scan/bmp"]
