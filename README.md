@@ -1,39 +1,92 @@
 # Luminous
 
-Image viewer and editor built with Rust and Slint.
+A performant image viewer and editor built with Rust and Slint, with an extensible plugin system.
 
 ## Quick Start
+
+Run from source:
 
 ```bash
 cargo run --release -- ./path/to/your/images
 ```
 
-## Controls
+For quicker iteration during development:
 
-| Key                    | Action                         |
-| ---------------------- | ------------------------------ |
-| Esc                    | Switch between Grid/Full View  |
-| q                      | Quit Application               |
-| f                      | Toggle Fullscreen              |
-| Left Arrow/h           | Previous Image                 |
-| Right Arrow/l          | Next Image                     |
-| Ctrl + Scroll/\_/-/=/+ | Increase/Decrease Grid Columns |
-| Scroll                 | Navigate Images                |
-| PgUp/PgDn              | Scroll Grid Up/Down            |
-| Right Click            | Context Menu                   |
-| z                      | Reset Zoom                     |
-| /                      | Search                         |
-| s                      | Toggle Side Panel              |
-| y                      | Copy to Clipboard              |
-| Delete                 | Delete                         |
+```bash
+cargo run --profile quick-release -- ./path/to/your/images
+```
+
+Additional image formats can be enabled with `--features` flag:
+
+```bash
+cargo build --release --features <format>
+```
+
+Formats decoded via the `image` crate: `bmp`, `dds`, and more.
+
+## Plugins
+
+Plugins are detected from two locations:
+- **Development** (`cargo run`): `<executable>/../../../example_plugins/`
+- **Installed** (platform data dir): `~/<data_dir>/luminous/plugins/`
+See [ProjectDirs::data_dir](https://docs.rs/directories/latest/directories/struct.ProjectDirs.html#method.data_dir) for platform-specific paths.
+
+### Example Plugins
+
+| Plugin      | Description                         |
+| ----------- | ----------------------------------- |
+| CLIP        | Semantic image search               |
+| HDF5        | Hierarchical Data Format v5 support |
+| HEIC        | HEIC format decoding                |
+| ARC         | Sony Alpha Raw decoding             |
+| SAM2        | Interactive segmentation            |
+| SAM3        | Multimodal interactive segmentation |
+| WDS         | WebDataset encoding support         |
+| test_plugin | Example plugin in C++               |
+See each plugin's `README.md` for details.
 
 ## Configuration
 
-Luminous supports configuration via command-line arguments or a TOML configuration file.
-The application automatically looks for a configuration file at the standard location for your OS:
+View all CLI options:
 
-* Linux/Unix: `~/.config/luminous/luminous.toml`
-* Windows: `C:\Users\Username\AppData\Roaming\luminous\luminous.toml`
-* macOS: `~/Library/Application Support/luminous/luminous.toml`
+```bash
+cargo run --release -- --help
+```
 
-Example configuration file with defaults: `examples/luminous.toml`.
+The app automatically looks for a TOML config file at:
+
+| Platform | Path                                                       |
+| -------- | ---------------------------------------------------------- |
+| Linux    | `~/.config/luminous/luminous.toml`                         |
+| Windows  | `C:\Users\Username\AppData\Roaming\luminous\luminous.toml` |
+| macOS    | `~/Library/Application Support/luminous/luminous.toml`     |
+An example config with defaults is at `examples/luminous.toml`.
+
+## Controls
+
+Also available in the settings panel (`F1`).
+
+| Key / Mouse                       | Action                  |
+| --------------------------------- | ----------------------- |
+| Esc / Left Double Click           | Toggle grid / full view |
+| Middle / Left Drag                | Pan image               |
+| `q`                               | Quit                    |
+| `f`                               | Toggle fullscreen       |
+| Left Arrow / `h`                  | Previous image          |
+| Right Arrow / `l`                 | Next image              |
+| Ctrl + Scroll / `-` / `+` (grid)  | Change column count     |
+| Ctrl + Scroll / `-` / `+` (image) | Zoom in / out           |
+| Scroll                            | Navigate images         |
+| PgUp / PgDn                       | Scroll grid up / down   |
+| Home / End                        | Grid top / bottom       |
+| Right Click                       | Context menu            |
+| `z`                               | Reset zoom              |
+| `/`                               | Search                  |
+| `s`                               | Toggle side panel       |
+| `y`                               | Copy to clipboard       |
+| Delete                            | Delete                  |
+| `F1`                              | Settings / help         |
+
+## License
+
+MIT — see `[LICENSE](LICENSE)` for details.
