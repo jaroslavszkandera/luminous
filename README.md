@@ -22,7 +22,7 @@ Additional image formats can be enabled with `--features` flag:
 cargo build --release --features <format>
 ```
 
-Formats decoded via the `image` crate: `bmp`, `dds`, and more.
+Formats decoded via the `image` crate. Enabled by default: `jpeg`, `png`, `webp`, `gif`, `tiff`, `pnm`, `avif`.
 
 ## Plugins
 
@@ -43,6 +43,7 @@ See [ProjectDirs::data_dir](https://docs.rs/directories/latest/directories/struc
 | SAM3        | Multimodal interactive segmentation |
 | WDS         | WebDataset encoding support         |
 | test_plugin | Example plugin in C++               |
+
 See each plugin's `README.md` for details.
 
 ## Configuration
@@ -55,11 +56,10 @@ cargo run --release -- --help
 
 The app automatically looks for a TOML config file at:
 
-| Platform | Path                                                       |
-| -------- | ---------------------------------------------------------- |
-| Linux    | `~/.config/luminous/luminous.toml`                         |
-| Windows  | `C:\Users\Username\AppData\Roaming\luminous\luminous.toml` |
-| macOS    | `~/Library/Application Support/luminous/luminous.toml`     |
+- Linux:  `~/.config/luminous/luminous.toml`
+- Windows: `C:\Users\Username\AppData\Roaming\luminous\luminous.toml`
+- macOS: `~/Library/Application Support/luminous/luminous.toml`
+
 An example config with defaults is at `examples/luminous.toml`.
 
 ## Controls
@@ -89,4 +89,4 @@ Also available in the settings panel (`F1`).
 
 ## License
 
-MIT — see `[LICENSE](LICENSE)` for details.
+MIT - see `LICENSE` for details.
