@@ -262,7 +262,7 @@ impl PluginManager {
         let dev_plugins_dir = std::env::current_exe().ok().and_then(|p| {
             p.ancestors()
                 .nth(3)
-                .map(|root| root.join("example_plugins"))
+                .map(|root| root.join("plugins"))
         });
 
         let search_dirs: Vec<PathBuf> = [data_plugins_dir, dev_plugins_dir]

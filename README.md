@@ -34,7 +34,7 @@ Formats decoded via the `image` crate. Enabled by default: `jpeg`, `png`, `webp`
 ## Plugins
 
 Plugins are detected from two locations:
-- **Development** (`cargo run`): `<executable>/../../../example_plugins/`
+- **Development** (`cargo run`): `<executable>/../../../plugins/`
 - **Installed** (platform data dir): `~/<data_dir>/luminous/plugins/`
 See [ProjectDirs::data_dir](https://docs.rs/directories/latest/directories/struct.ProjectDirs.html#method.data_dir) for platform-specific paths.
 
