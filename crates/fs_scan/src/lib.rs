@@ -205,3 +205,193 @@ pub fn scan(path_str: &str, extra_image_formats: &Vec<ImageFormat>) -> ScanResul
         image_formats,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs::File;
+    use tempfile::TempDir;
+
+    fn make_files(dir: &TempDir, names: &[&str]) {
+        for name in names {
+            File::create(dir.path().join(name)).unwrap();
+        }
+    }
+
+    fn no_extra() -> Vec<ImageFormat> {
+        vec![]
+    }
+
+    #[test]
+    fn default_decoding_exts_include_builtin_formats() {
+        let fmts = ImageFormats::new();
+        let exts = fmts.get_all_decoding_exts();
+        for ext in &[
+            "gif", "jpeg", "jpg", "png", "tiff", "tif", "webp", "avif", "pnm",
+        ] {
+            assert!(exts.contains(*ext), "missing decoding ext: {ext}");
+        }
+    }
+
+    #[test]
+    fn default_encoding_exts_include_builtin_formats() {
+        let fmts = ImageFormats::new();
+        let exts = fmts.get_all_encoding_exts();
+        for ext in &["jpeg", "png", "tiff", "webp"] {
+            assert!(exts.contains(*ext), "missing encoding ext: {ext}");
+        }
+    }
+
+    #[test]
+    fn encoding_exts_only_first_ext_of_each_format() {
+        let fmts = ImageFormats::new();
+        let exts = fmts.get_all_encoding_exts();
+        assert!(exts.contains("tiff"));
+        assert!(
+            !exts.contains("tif"),
+            "second ext 'tif' should not be in encoding exts"
+        );
+    }
+
+    #[test]
+    fn add_format_extends_decoding_and_encoding_exts() {
+        let mut fmts = ImageFormats::new();
+        fmts.add_format(ImageFormat {
+            exts: vec!["xyz".to_string(), "xyzx".to_string()],
+            decoding_support: true,
+            encoding_support: true,
+        });
+        let dec = fmts.get_all_decoding_exts();
+        let enc = fmts.get_all_encoding_exts();
+        assert!(dec.contains("xyz"));
+        assert!(dec.contains("xyzx"));
+        assert!(enc.contains("xyz"));
+        assert!(
+            !enc.contains("xyzx"),
+            "only first encoding ext should appear"
+        );
+    }
+
+    #[test]
+    fn add_format_decode_only_not_in_encoding_exts() {
+        let mut fmts = ImageFormats::new();
+        fmts.add_format(ImageFormat {
+            exts: vec!["abc".to_string()],
+            decoding_support: true,
+            encoding_support: false,
+        });
+        assert!(fmts.get_all_decoding_exts().contains("abc"));
+        assert!(!fmts.get_all_encoding_exts().contains("abc"));
+    }
+
+    #[test]
+    fn scan_nonexistent_path_returns_empty() {
+        let result = scan("/tmp/__luminous_nonexistent_path_xyz__", &no_extra());
+        assert!(result.paths.is_empty());
+        assert_eq!(result.start_index, 0);
+        assert!(!result.is_dir);
+    }
+
+    #[test]
+    fn scan_non_image_file_returns_empty() {
+        let dir = TempDir::new().unwrap();
+        make_files(&dir, &["document.txt"]);
+        let result = scan(
+            dir.path().join("document.txt").to_str().unwrap(),
+            &no_extra(),
+        );
+        assert!(result.paths.is_empty());
+    }
+
+    #[test]
+    fn scan_directory_sets_is_dir_and_zero_start_index() {
+        let dir = TempDir::new().unwrap();
+        make_files(&dir, &["a.jpg", "b.png"]);
+        let result = scan(dir.path().to_str().unwrap(), &no_extra());
+        assert!(result.is_dir);
+        assert_eq!(result.start_index, 0);
+        assert_eq!(result.paths.len(), 2);
+    }
+
+    #[test]
+    fn scan_directory_ignores_non_images() {
+        let dir = TempDir::new().unwrap();
+        make_files(&dir, &["a.jpg", "readme.txt", "b.png", "data.bin"]);
+        let result = scan(dir.path().to_str().unwrap(), &no_extra());
+        assert_eq!(result.paths.len(), 2);
+    }
+
+    #[test]
+    fn scan_directory_returns_paths_in_sorted_order() {
+        let dir = TempDir::new().unwrap();
+        make_files(&dir, &["c.jpg", "a.jpg", "b.png"]);
+        let result = scan(dir.path().to_str().unwrap(), &no_extra());
+        let names: Vec<_> = result
+            .paths
+            .iter()
+            .map(|p| p.file_name().unwrap().to_str().unwrap())
+            .collect();
+        assert_eq!(names, ["a.jpg", "b.png", "c.jpg"]);
+    }
+
+    #[test]
+    fn scan_file_sets_correct_start_index() {
+        let dir = TempDir::new().unwrap();
+        make_files(&dir, &["a.jpg", "b.jpg", "c.jpg"]);
+        let target = dir.path().join("b.jpg");
+        let result = scan(target.to_str().unwrap(), &no_extra());
+        assert!(!result.is_dir);
+        assert_eq!(result.start_index, 1);
+        assert_eq!(result.paths.len(), 3);
+    }
+
+    #[test]
+    fn scan_file_start_index_first_file() {
+        let dir = TempDir::new().unwrap();
+        make_files(&dir, &["a.jpg", "b.jpg"]);
+        let target = dir.path().join("a.jpg");
+        let result = scan(target.to_str().unwrap(), &no_extra());
+        assert_eq!(result.start_index, 0);
+    }
+
+    #[test]
+    fn scan_file_start_index_last_file() {
+        let dir = TempDir::new().unwrap();
+        make_files(&dir, &["a.jpg", "b.jpg", "c.jpg"]);
+        let target = dir.path().join("c.jpg");
+        let result = scan(target.to_str().unwrap(), &no_extra());
+        assert_eq!(result.start_index, 2);
+    }
+
+    #[test]
+    fn scan_case_insensitive_extension() {
+        let dir = TempDir::new().unwrap();
+        make_files(&dir, &["photo.JPG", "image.PNG"]);
+        let result = scan(dir.path().to_str().unwrap(), &no_extra());
+        assert_eq!(result.paths.len(), 2);
+    }
+
+    #[test]
+    fn scan_with_extra_format_recognizes_custom_extension() {
+        let dir = TempDir::new().unwrap();
+        make_files(&dir, &["data.myimg", "other.jpg"]);
+        let extra = vec![ImageFormat {
+            exts: vec!["myimg".to_string()],
+            decoding_support: true,
+            encoding_support: false,
+        }];
+        let result = scan(dir.path().to_str().unwrap(), &extra);
+        assert_eq!(result.paths.len(), 2);
+    }
+
+    #[test]
+    fn scan_does_not_recurse_into_subdirectories() {
+        let dir = TempDir::new().unwrap();
+        make_files(&dir, &["top.jpg"]);
+        let sub = dir.path().join("sub");
+        std::fs::create_dir(&sub).unwrap();
+        File::create(sub.join("nested.jpg")).unwrap();
+        let result = scan(dir.path().to_str().unwrap(), &no_extra());
+        assert_eq!(result.paths.len(), 1);
+    }
+}

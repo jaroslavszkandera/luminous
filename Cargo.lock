@@ -3218,6 +3218,7 @@ version = "0.1.0"
 dependencies = [
  "log",
  "luminous-plugins",
+ "tempfile",
  "walkdir",
 ]
 
