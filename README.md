@@ -1,6 +1,13 @@
 # Luminous
 
-A performant image viewer and editor built with Rust and Slint, with an extensible plugin system.
+A performant cross-platform image viewer and editor built with Rust and Slint, with an extensible plugin system.
+
+<table>
+    <tr>
+        <td><img width="960" src="examples/screenshot_grid.jpg" /></td>
+        <td><img width="960" src="examples/screenshot_full.jpg" /></td>
+    </tr>
+</table>
 
 ## Quick Start
 
