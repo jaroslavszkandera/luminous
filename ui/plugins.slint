@@ -82,7 +82,7 @@ export component InteractivePlugin inherits Rectangle {
             accepted(text) => {
                 debug("Accepted: ", text);
                 interactive-text-submitted(text);
-                self.clear-focus()
+                self.clear-focus();
             }
 
             key-pressed(event) => {
@@ -92,7 +92,7 @@ export component InteractivePlugin inherits Rectangle {
                     self.clear-focus();
                     return accept;
                 }
-                reject
+                reject;
             }
         }
     }

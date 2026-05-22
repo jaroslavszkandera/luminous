@@ -177,13 +177,6 @@ pub fn register(window: &MainWindow, app_controller: Rc<RefCell<AppController>>)
             .unwrap();
         }
     });
-
-    // sg.on_update_setting(move |id, val, category| {
-    //     let id_str = id.as_str();
-    //     let val_str = val.as_str();
-    //
-    //     // Load, mutate, and save your TOML file here based on category/id
-    // });
 }
 
 #[derive(Deserialize, Serialize)]

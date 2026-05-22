@@ -14,7 +14,7 @@ use std::sync::{
     {Arc, Mutex, RwLock},
 };
 
-// TODO: use SHM only on local linux combination
+// SHM memory use switch
 const USE_SHM_TRANSFER: bool = false;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -536,7 +536,6 @@ impl Backend for DaemonBackend {
                 true
             }
             Err(mpsc::TrySendError::Full(_)) => {
-                // TODO: implement auto-send toggle
                 // warn!("Worker queue full, image pending in mutex");
                 false
             }
@@ -924,5 +923,78 @@ fn kill_process_group(child: &std::process::Child) {
 
     if let Some(proc) = sys.process(sysinfo::Pid::from_u32(pid)) {
         proc.kill();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn plugin_control_to_str() {
+        assert_eq!(PluginControl::Enable.to_str(), "Enable");
+        assert_eq!(PluginControl::Starting.to_str(), "Starting");
+        assert_eq!(PluginControl::Disable.to_str(), "Disable");
+        assert_eq!(PluginControl::Stopping.to_str(), "Stopping");
+    }
+
+    #[test]
+    fn ipc_status_to_str() {
+        assert_eq!(IpcStatus::NotRunning.to_str(), "Not Running");
+        assert_eq!(IpcStatus::Init.to_str(), "Init");
+        assert_eq!(IpcStatus::Busy.to_str(), "Busy");
+        assert_eq!(IpcStatus::Ready.to_str(), "Ready");
+        assert_eq!(IpcStatus::Error.to_str(), "Error");
+    }
+
+    #[test]
+    fn ipc_cmd_serialize_shutdown() {
+        let v = serde_json::to_value(&IpcCmd::Shutdown).unwrap();
+        assert_eq!(v["action"], "shutdown");
+    }
+
+    #[test]
+    fn ipc_cmd_serialize_set_image_tcp() {
+        let v = serde_json::to_value(&IpcCmd::SetImageTcp {
+            path: PathBuf::from("/tmp/a.png"),
+            pixels: vec![1, 2, 3, 4],
+            width: 1,
+            height: 1,
+        })
+        .unwrap();
+        assert_eq!(v["action"], "set_image_tcp");
+        assert_eq!(v["width"], 1);
+        assert_eq!(v["height"], 1);
+    }
+
+    #[test]
+    fn ipc_cmd_serialize_search() {
+        let v = serde_json::to_value(&IpcCmd::Search {
+            paths: vec![PathBuf::from("/a")],
+            query: "cat".into(),
+        })
+        .unwrap();
+        assert_eq!(v["action"], "search");
+        assert_eq!(v["query"], "cat");
+    }
+
+    #[test]
+    fn ipc_response_deserialize_variants() {
+        let ok: IpcResponse = serde_json::from_str(r#"{"status":"ok"}"#).unwrap();
+        assert!(matches!(ok, IpcResponse::Ok { mask_data: None }));
+
+        let ok_mask: IpcResponse =
+            serde_json::from_str(r#"{"status":"ok","mask_data":"abc"}"#).unwrap();
+        assert!(matches!(
+            ok_mask,
+            IpcResponse::Ok { mask_data: Some(ref s) } if s == "abc"
+        ));
+
+        let busy: IpcResponse = serde_json::from_str(r#"{"status":"busy"}"#).unwrap();
+        assert!(matches!(busy, IpcResponse::Busy));
+
+        let err: IpcResponse =
+            serde_json::from_str(r#"{"status":"error","message":"boom"}"#).unwrap();
+        assert!(matches!(err, IpcResponse::Error { ref message } if message == "boom"));
     }
 }

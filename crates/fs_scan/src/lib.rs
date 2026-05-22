@@ -32,7 +32,6 @@ impl ImageFormats {
             };
         }
 
-        // TODO: test
         // add_fmt!("avif", ["avif"], false, true);
         add_fmt!("avif-native", ["avif"], true, true);
         add_fmt!("bmp", ["bmp"], true, true);

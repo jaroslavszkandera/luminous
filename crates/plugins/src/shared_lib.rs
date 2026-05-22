@@ -153,3 +153,62 @@ fn decode_ffi_buffer(ffi_buf: &ImageBuffer) -> Option<image::DynamicImage> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn buffer_with(data: &mut [u8], w: u32, h: u32, c: u32, len: usize) -> ImageBuffer {
+        ImageBuffer {
+            data: data.as_mut_ptr(),
+            len,
+            width: w,
+            height: h,
+            channels: c,
+        }
+    }
+
+    #[test]
+    fn decode_ffi_buffer_size_mismatch() {
+        let mut data = vec![0u8; 10];
+        let buf = buffer_with(&mut data, 4, 4, 4, 10);
+        assert!(decode_ffi_buffer(&buf).is_none());
+    }
+
+    #[test]
+    fn decode_ffi_buffer_rgba() {
+        let mut data = vec![1u8; 4 * 4 * 4];
+        let len = data.len();
+        let buf = buffer_with(&mut data, 4, 4, 4, len);
+        let img = decode_ffi_buffer(&buf).unwrap();
+        assert_eq!(img.width(), 4);
+        assert_eq!(img.height(), 4);
+        assert!(matches!(img, DynamicImage::ImageRgba8(_)));
+    }
+
+    #[test]
+    fn decode_ffi_buffer_rgb() {
+        let mut data = vec![2u8; 3 * 3 * 3];
+        let len = data.len();
+        let buf = buffer_with(&mut data, 3, 3, 3, len);
+        let img = decode_ffi_buffer(&buf).unwrap();
+        assert!(matches!(img, DynamicImage::ImageRgb8(_)));
+    }
+
+    #[test]
+    fn decode_ffi_buffer_luma() {
+        let mut data = vec![3u8; 5 * 5];
+        let len = data.len();
+        let buf = buffer_with(&mut data, 5, 5, 1, len);
+        let img = decode_ffi_buffer(&buf).unwrap();
+        assert!(matches!(img, DynamicImage::ImageLuma8(_)));
+    }
+
+    #[test]
+    fn decode_ffi_buffer_unsupported_channels() {
+        let mut data = vec![0u8; 2 * 2 * 2];
+        let len = data.len();
+        let buf = buffer_with(&mut data, 2, 2, 2, len);
+        assert!(decode_ffi_buffer(&buf).is_none());
+    }
+}

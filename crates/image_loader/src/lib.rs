@@ -29,7 +29,6 @@ pub fn to_slint_image(buf: SharedPixelBuffer<Rgba8Pixel>) -> Image {
     Image::from_rgba8(buf)
 }
 
-// TODO: Save thumb_cache to db
 pub struct ImageLoader {
     thumb_cache: Arc<DashMap<usize, SharedPixelBuffer<Rgba8Pixel>>>,
     full_cache: Arc<DashMap<usize, SharedPixelBuffer<Rgba8Pixel>>>,
@@ -40,7 +39,6 @@ pub struct ImageLoader {
     pub window_size: usize,
     pub plugin_manager: Arc<PluginManager>,
 
-    // TODO: load from the closest requested token for better results
     active_window: Arc<Mutex<HashSet<usize>>>,
     thumb_epoch: Arc<AtomicUsize>,
     next_full_token: Arc<AtomicUsize>,
@@ -502,7 +500,6 @@ impl ImageLoader {
         to_pixel_buffer(resized)
     }
 
-    // TODO: encode_full for all formats in context menu
     fn decode_full(path: &Path, plugin_manager: &PluginManager) -> SharedPixelBuffer<Rgba8Pixel> {
         let t = Instant::now();
         let mut buf = [0; 256];
@@ -644,5 +641,161 @@ mod tests {
             0,
             "Full cache should be empty after evict"
         );
+    }
+
+    fn loader_with(paths: Vec<PathBuf>) -> ImageLoader {
+        ImageLoader::new(paths, 1, 8, Arc::new(PluginManager::new()))
+    }
+
+    #[test]
+    fn placeholder_is_1x1() {
+        let p = placeholder();
+        assert_eq!(p.width(), 1);
+        assert_eq!(p.height(), 1);
+    }
+
+    #[test]
+    fn cache_buffer_populates_both_caches() {
+        let loader = loader_with(vec![]);
+        let buf = SharedPixelBuffer::<Rgba8Pixel>::new(4, 4);
+        loader.cache_buffer(7, buf);
+        assert!(loader.full_cache_contains(7));
+        assert_eq!(loader.full_len(), 1);
+        assert!(loader.thumb_cache.contains_key(&7));
+    }
+
+    #[test]
+    fn update_paths_resets_state() {
+        let (_d, p) = make_test_image(20, 20, ImageFormat::Png);
+        let loader = loader_with(vec![p.clone()]);
+        loader.cache_buffer(0, SharedPixelBuffer::<Rgba8Pixel>::new(2, 2));
+        loader.active_idx.store(5, Ordering::SeqCst);
+
+        loader.update_paths(vec![p.clone(), p]);
+        assert_eq!(loader.full_len(), 0);
+        assert_eq!(loader.thumb_cache.len(), 0);
+        assert_eq!(loader.active_idx.load(Ordering::SeqCst), 0);
+        assert_eq!(loader.paths.read().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn rm_img_shifts_higher_indices_down() {
+        let (_d, p) = make_test_image(10, 10, ImageFormat::Png);
+        let loader = loader_with(vec![p.clone(), p.clone(), p]);
+        let mk = |n: u32| SharedPixelBuffer::<Rgba8Pixel>::new(n, n);
+        loader.cache_buffer(0, mk(1));
+        loader.cache_buffer(1, mk(2));
+        loader.cache_buffer(2, mk(3));
+
+        loader.rm_img(0);
+
+        assert_eq!(loader.paths.read().unwrap().len(), 2);
+        assert!(loader.full_cache_contains(0));
+        assert!(loader.full_cache_contains(1));
+        assert!(!loader.full_cache_contains(2));
+        assert_eq!(loader.full_cache.get(&0).unwrap().width(), 2);
+        assert_eq!(loader.full_cache.get(&1).unwrap().width(), 3);
+    }
+
+    #[test]
+    fn prune_grid_thumbs_keeps_window_plus_margin() {
+        let loader = loader_with(vec![]);
+        for i in 0..200 {
+            loader
+                .thumb_cache
+                .insert(i, SharedPixelBuffer::<Rgba8Pixel>::new(1, 1));
+        }
+        loader.prune_grid_thumbs(100, 10);
+
+        assert!(loader.thumb_cache.contains_key(&100));
+        assert!(loader.thumb_cache.contains_key(&110));
+        assert!(loader.thumb_cache.contains_key(&70));
+        assert!(loader.thumb_cache.contains_key(&140));
+        assert!(!loader.thumb_cache.contains_key(&50));
+        assert!(!loader.thumb_cache.contains_key(&180));
+    }
+
+    #[test]
+    fn set_bucket_resolution_clears_thumbs() {
+        let loader = loader_with(vec![]);
+        loader
+            .thumb_cache
+            .insert(0, SharedPixelBuffer::<Rgba8Pixel>::new(1, 1));
+        loader.set_bucket_resolution(256);
+        assert_eq!(loader.thumb_cache.len(), 0);
+    }
+
+    #[test]
+    fn get_file_name_and_path() {
+        let (_d, p) = make_test_image(10, 10, ImageFormat::Png);
+        let loader = loader_with(vec![p.clone()]);
+        assert_eq!(loader.get_path(0), Some(p.clone()));
+        assert_eq!(loader.get_path(99), None);
+        assert_eq!(loader.get_file_name(0).as_deref(), Some("test.png"));
+        assert_eq!(loader.get_curr_img_path(), Some(p));
+    }
+
+    #[test]
+    fn get_curr_active_buffer_uses_active_idx() {
+        let loader = loader_with(vec![]);
+        assert!(loader.get_curr_active_buffer().is_none());
+        loader.active_idx.store(3, Ordering::Relaxed);
+        loader.cache_buffer(3, SharedPixelBuffer::<Rgba8Pixel>::new(5, 5));
+        assert_eq!(loader.get_curr_active_buffer().unwrap().width(), 5);
+    }
+
+    #[test]
+    fn decode_full_missing_file_returns_placeholder() {
+        let pm = Arc::new(PluginManager::new());
+        let buf = ImageLoader::decode_full(Path::new("/nonexistent/path.png"), &pm);
+        assert_eq!(buf.width(), 1);
+        assert_eq!(buf.height(), 1);
+    }
+
+    #[test]
+    fn decode_thumb_skips_resize_for_small_images() {
+        let (_d, path) = make_test_image(64, 64, ImageFormat::Png);
+        let pm = Arc::new(PluginManager::new());
+        let buf = ImageLoader::decode_thumb(&path, &pm, &None, 256);
+        assert_eq!(buf.width(), 64);
+        assert_eq!(buf.height(), 64);
+    }
+
+    #[test]
+    fn disk_cache_path_changes_with_resolution() {
+        let (dir, path) = make_test_image(100, 100, ImageFormat::Png);
+        let a = ImageLoader::disk_cache_path(Some(&dir.path().to_path_buf()), &path, 128);
+        let b = ImageLoader::disk_cache_path(Some(&dir.path().to_path_buf()), &path, 512);
+        assert!(a.is_some() && b.is_some());
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn disk_cache_path_none_without_cache_dir() {
+        let (_d, path) = make_test_image(10, 10, ImageFormat::Png);
+        assert!(ImageLoader::disk_cache_path(None, &path, 128).is_none());
+    }
+
+    #[test]
+    fn decode_thumb_reuses_disk_cache() {
+        let (dir, path) = make_test_image(800, 600, ImageFormat::Png);
+        let pm = Arc::new(PluginManager::new());
+        let cache_path = ImageLoader::disk_cache_path(Some(&dir.path().to_path_buf()), &path, 64);
+        assert!(cache_path.is_some());
+
+        let buf1 = ImageLoader::decode_thumb(&path, &pm, &cache_path, 64);
+        assert!(cache_path.as_ref().unwrap().exists());
+        let buf2 = ImageLoader::decode_thumb(&path, &pm, &cache_path, 64);
+        assert_eq!(buf1.width(), buf2.width());
+        assert_eq!(buf1.height(), buf2.height());
+    }
+
+    #[test]
+    fn load_grid_thumb_returns_placeholder_when_res_zero() {
+        let (_d, p) = make_test_image(20, 20, ImageFormat::Png);
+        let loader = loader_with(vec![p]);
+        let buf = loader.load_grid_thumb(0).unwrap();
+        assert_eq!(buf.width(), 1);
+        assert_eq!(buf.height(), 1);
     }
 }

@@ -1,12 +1,12 @@
+use crate::image_processing::save_image;
 use crate::AppController;
 use crate::FullViewState;
 use crate::MainWindow;
-use crate::image_processing::save_image;
 use cocotools::coco::object_detection::{
     Annotation, Bbox, Dataset, Image as CocoImage, Rle, Segmentation,
 };
 use log::{debug, error};
-use luminous_plugins::{PluginCapability, manifest::InteractiveCapability};
+use luminous_plugins::{manifest::InteractiveCapability, PluginCapability};
 use slint::{
     ComponentHandle, Image, Model, Rgba8Pixel, SharedPixelBuffer, SharedString,
     StandardListViewItem, VecModel,
@@ -141,7 +141,6 @@ pub fn register(window: &MainWindow, app_controller: Rc<RefCell<AppController>>)
                 }
             });
         });
-        // TODO: Refactor
         let id_clone = interactive_plugin.id.clone();
         let weak_ui_clone = acc.borrow().window_weak.clone();
         let _ = slint::invoke_from_event_loop(move || {

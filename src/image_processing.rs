@@ -5,7 +5,7 @@ use slint::{Rgba8Pixel, SharedPixelBuffer};
 use std::sync::Arc;
 use std::{path::PathBuf, time::Instant};
 
-use crate::ImgFmt; // TODO: Consider rename
+use crate::ImgFmt; // NOTE: Consider rename
 use luminous_plugins::PluginManager;
 
 pub fn save_image(

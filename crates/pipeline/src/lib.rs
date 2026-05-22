@@ -189,8 +189,29 @@ fn apply_noise(img: DynamicImage, intensity: f32) -> DynamicImage {
     }))
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolve_random_angle_is_one_of_three() {
+        for _ in 0..32 {
+            let a = resolve_random_angle();
+            assert!(matches!(
+                a,
+                RotateAngle::R90 | RotateAngle::R180 | RotateAngle::R270
+            ));
+        }
+    }
+
+    #[test]
+    fn step_factory_default_constructs() {
+        let _ = StepFactory::default();
+        let _ = StepFactory::new();
+    }
+}
+
 fn apply_sharpness(img: DynamicImage, amount: f32) -> DynamicImage {
-    // Unsharp mask: result = original + amount * (original − blur(original))
     if amount <= 0.0 {
         return img;
     }

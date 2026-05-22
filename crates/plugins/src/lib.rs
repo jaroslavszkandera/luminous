@@ -14,8 +14,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
-// WARN: Duplicate from crate::fs_scan::ImageFormat;
-// use crate::fs_scan::ImageFormat;
 #[derive(PartialEq, Eq, Hash, Debug, Clone)]
 pub struct ImageFormat {
     pub exts: Vec<String>,
@@ -344,8 +342,6 @@ impl PluginManager {
             .filter(|p| p.manifest.capabilities.contains(&PluginCapability::Search))
     }
 
-    // WARN: tmp, returns the first plugin
-    // TODO: return by some kind of UUID?
     pub fn get_interactive_plugin(&self) -> Option<Arc<Plugin>> {
         self.get_interactive_plugins().next().cloned()
     }
@@ -364,15 +360,10 @@ impl PluginManager {
             .collect()
     }
 
-    // pub fn get_supprted_image_formats(&self) -> Vec<ImageFormats> {
-    //     unimplemented!();
-    // }
-
     pub fn get_plugins_manifests(&self) -> Vec<PluginManifest> {
         self.plugins.iter().map(|p| p.manifest.clone()).collect()
     }
 
-    // pub fn has_decoding(&self, path: &Path) -> bool {
     pub fn has_plugin_for(&self, path: &Path) -> bool {
         let ext = match path.extension().and_then(|e| e.to_str()) {
             Some(e) => e.to_lowercase(),
@@ -527,5 +518,76 @@ impl PluginManager {
             }
         }
         self.plugins.push(plugin.clone());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use image::{DynamicImage, RgbaImage};
+
+    #[test]
+    fn plugin_manager_starts_empty() {
+        let pm = PluginManager::new();
+        assert!(pm.get_all_plugins().is_empty());
+        assert!(pm.get_plugin_by_id("anything").is_none());
+        assert!(pm.get_interactive_plugin().is_none());
+        assert!(pm.get_search_plugin().is_none());
+        assert!(pm.get_plugins_manifests().is_empty());
+        assert!(pm.get_supported_extensions().is_empty());
+    }
+
+    #[test]
+    fn empty_manager_decodes_to_none() {
+        let pm = PluginManager::new();
+        let path = Path::new("/tmp/x.png");
+        assert!(pm.decode(path).is_none());
+        assert!(pm.decode_dynamic(path).is_none());
+        assert!(!pm.has_plugin_for(path));
+        assert!(!pm.has_encoding(path));
+    }
+
+    #[test]
+    fn encode_with_no_extension_returns_false() {
+        let pm = PluginManager::new();
+        let img = DynamicImage::ImageRgba8(RgbaImage::new(2, 2));
+        assert!(!pm.encode(Path::new("/tmp/noext"), &img));
+    }
+
+    #[test]
+    fn has_plugin_for_path_without_extension_is_false() {
+        let pm = PluginManager::new();
+        assert!(!pm.has_plugin_for(Path::new("/tmp/noext")));
+        assert!(!pm.has_encoding(Path::new("/tmp/noext")));
+    }
+
+    #[test]
+    fn image_format_equality() {
+        let a = ImageFormat {
+            exts: vec!["png".into()],
+            decoding_support: true,
+            encoding_support: false,
+        };
+        let b = a.clone();
+        assert_eq!(a, b);
+    }
+
+    struct NoopBackend;
+    impl Backend for NoopBackend {}
+
+    #[test]
+    fn backend_trait_defaults() {
+        let b = NoopBackend;
+        assert!(!b.is_running());
+        assert!(b.decode(Path::new("/tmp/x")).is_none());
+        assert!(!b.encode(
+            Path::new("/tmp/x"),
+            &DynamicImage::ImageRgba8(RgbaImage::new(1, 1)),
+        ));
+        assert!(b.click(0, 0).is_none());
+        assert!(b.rect_select(0, 0, 1, 1).is_none());
+        assert!(b.text_to_mask("hi".into()).is_none());
+        assert!(b.semantic_image_search(&vec![], "q").is_none());
+        assert_eq!(b.get_state(), PluginControl::Enable);
     }
 }

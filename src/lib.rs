@@ -80,7 +80,6 @@ impl AppController {
         let weak_full = window_weak.clone();
         // let pm = Arc::clone(&plugin_manager);
         loader.on_full_ready(move |index, buffer| {
-            // NOTE: Why is it here?
             // TODO: Auto set image in GUI
             // for plugin in pm.get_interactive_plugins() {
             //     let p = Arc::clone(plugin);
@@ -233,7 +232,6 @@ impl AppController {
         }
     }
 
-    // TODO: How to not reload images from disk and keep the cache consistent?
     fn handle_edit_op(&mut self, op: EditOp) {
         let Some(buffer) = self.loader.get_curr_active_buffer() else {
             return;
@@ -777,7 +775,7 @@ impl AppController {
     }
 
     fn handle_sort(&mut self, ascending: bool) {
-        // TODO: collective function for refresh image models
+        // TODO: collective function for refresh image models would be nice
         self.filtered_indices.sort_by(|&a, &b| {
             let path_a = &self.scan.paths[a];
             let path_b = &self.scan.paths[b];

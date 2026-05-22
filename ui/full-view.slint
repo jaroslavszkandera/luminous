@@ -99,9 +99,7 @@ export component FullView inherits TouchArea {
     callback exit-full-view();
     callback open-images();
 
-    // TODO: Not my proudest moments, but it works... revisit
     property <int> interactive-plugins-idx: -1;
-
     property <string> display-coords: "0,0";
     property <int> zoom-scale-percentage: 100;
     property <float> zoom-scale: 1.0;
@@ -478,7 +476,6 @@ export component FullView inherits TouchArea {
                         }
                     }
 
-                    // TODO
                     MenuItem {
                         title: @tr("Save Changes (overwrite)");
                         activated => {
@@ -549,7 +546,6 @@ export component FullView inherits TouchArea {
                             }
                         }
 
-                        // TODO: How do I make mutally exclusive checked buttons?
                         for plugin[i] in FullViewState.interactive-plugins: InteractivePlugin {
                             plugin: FullViewState.interactive-plugins[i];
 

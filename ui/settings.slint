@@ -193,7 +193,7 @@ export component Settings inherits PopupWindow {
 
                             LineEdit {
                                 text: setting.value;
-                                enabled: false; // TODO: make the update settings work and validate
+                                enabled: false;
                                 accepted(val) => {
                                     SettingsState.update-setting(setting.id, val, "binding");
                                 }

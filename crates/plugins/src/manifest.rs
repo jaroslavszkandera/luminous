@@ -263,6 +263,94 @@ mod tests {
         assert!(load_manifest(&manifest_path).is_none());
     }
 
+    fn write_manifest(json: &str) -> (TempDir, std::path::PathBuf) {
+        let dir = TempDir::new().unwrap();
+        let p = dir.path().join("plugin.json");
+        fs::write(&p, json).unwrap();
+        (dir, p)
+    }
+
+    #[test]
+    fn load_manifest_valid_sharedlib_decoder() {
+        let m = PluginManifest {
+            name: "x".into(),
+            version: "1.0.0".into(),
+            backend: BackendKind::SharedLib,
+            extensions: vec!["png".into()],
+            capabilities: vec![PluginCapability::Decoder],
+            daemon_ip: None,
+            daemon_port: None,
+            interpreter: None,
+            entry: None,
+        };
+        let (_d, p) = write_manifest(&serde_json::to_string(&m).unwrap());
+        let loaded = load_manifest(&p).unwrap();
+        assert_eq!(loaded.name, "x");
+        assert_eq!(loaded.backend, BackendKind::SharedLib);
+    }
+
+    #[test]
+    fn load_manifest_valid_daemon() {
+        let m = PluginManifest {
+            name: "d".into(),
+            version: "1.0.0".into(),
+            backend: BackendKind::Daemon,
+            extensions: vec![],
+            capabilities: vec![PluginCapability::Interactive(vec![
+                InteractiveCapability::Click,
+            ])],
+            daemon_ip: None,
+            daemon_port: Some(9000),
+            interpreter: Some("python".into()),
+            entry: Some("main.py".into()),
+        };
+        let (_d, p) = write_manifest(&serde_json::to_string(&m).unwrap());
+        assert!(load_manifest(&p).is_some());
+    }
+
+    #[test]
+    fn load_manifest_file_missing() {
+        assert!(load_manifest(Path::new("/no/such/plugin.json")).is_none());
+    }
+
+    #[test]
+    fn load_manifest_invalid_json() {
+        let (_d, p) = write_manifest("{not json}");
+        assert!(load_manifest(&p).is_none());
+    }
+
+    #[test]
+    fn has_capability_matches_decoder() {
+        let m = PluginManifest {
+            name: "x".into(),
+            version: "1.0.0".into(),
+            backend: BackendKind::SharedLib,
+            extensions: vec!["png".into()],
+            capabilities: vec![PluginCapability::Decoder],
+            daemon_ip: None,
+            daemon_port: None,
+            interpreter: None,
+            entry: None,
+        };
+        assert!(m.has_capability(&PluginCapability::Decoder));
+        assert!(!m.has_capability(&PluginCapability::Encoder));
+        assert!(!m.has_capability(&PluginCapability::Search));
+    }
+
+    #[test]
+    fn unknown_capability_deserializes() {
+        let json = r#"{"name":"x","version":"1.0.0","extensions":["png"],"capabilities":["weird_thing","decoder"]}"#;
+        let (_d, p) = write_manifest(json);
+        let m = load_manifest(&p).unwrap();
+        assert!(m.capabilities.contains(&PluginCapability::Unknown));
+        assert!(m.capabilities.contains(&PluginCapability::Decoder));
+    }
+
+    #[test]
+    fn backend_kind_default_is_sharedlib() {
+        assert_eq!(BackendKind::default(), BackendKind::SharedLib);
+    }
+
     #[test]
     fn load_manifest_missing_extensions() {
         let temp_dir = TempDir::new().unwrap();

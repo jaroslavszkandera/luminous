@@ -70,7 +70,7 @@ export component SelectRect inherits Rectangle {
         self.visible = false;
     }
 
-    public function update-selection(screen-anchor: {x: length, y: length}, screen-opposite: {x: length, y: length}) {
+    public function update-selection(screen-anchor: { x: length, y: length}, screen-opposite: { x: length, y: length}) {
         anchor = screen-to-img(screen-anchor.x,   screen-anchor.y);
         opposite = screen-to-img(screen-opposite.x, screen-opposite.y);
     }
