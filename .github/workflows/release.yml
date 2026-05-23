@@ -1,0 +1,88 @@
+name: release
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: '1'
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    name: build_${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            binary: luminous
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            binary: luminous.exe
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            binary: luminous
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            binary: luminous
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install_rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: setup_Linux
+        if: matrix.os == 'ubuntu-latest'
+
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libxcb-shape0-dev \
+            libxcb-xfixes0-dev \
+            libxkbcommon-dev \
+            libwayland-dev \
+            libegl-dev \
+            libfontconfig1-dev \
+            libdbus-1-dev
+
+      - name: build
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: archive_binary_unix
+        if: matrix.os != 'windows-latest'
+        run: |
+          tar -czf luminous-${{ matrix.target }}.tar.gz \
+            -C target/${{ matrix.target }}/release ${{ matrix.binary }}
+
+      - name: archive_binary_windows
+        if: matrix.os == 'windows-latest'
+        run: |
+          Compress-Archive -Path target/${{ matrix.target }}/release/${{ matrix.binary }} `
+            -DestinationPath luminous-${{ matrix.target }}.zip
+
+      - name: upload_artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: luminous-${{ matrix.target }}
+          path: luminous-${{ matrix.target }}.*
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+
+      - name: create_gitHub_release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: luminous-*
+          generate_release_notes: true
