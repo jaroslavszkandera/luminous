@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [features]
-default = ["gif", "jpeg", "png", "tiff", "webp", "pnm"]
+default = ["gif", "jpeg", "png", "tiff", "webp", "pnm", "avif-native"]
 avif-native = []
 bmp = []
 dds = []
