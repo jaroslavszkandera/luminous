@@ -21,6 +21,7 @@ jobs:
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             binary: luminous.exe
+            features: avif-native
           - os: macos-latest
             target: x86_64-apple-darwin
             binary: luminous
@@ -47,19 +48,14 @@ jobs:
             libwayland-dev \
             libegl-dev \
             libfontconfig1-dev \
-            libdbus-1-dev \
-            libdav1d-dev
-
-      - name: setup_macos
-        if: matrix.os == 'macos-latest'
-        run: brew install dav1d
+            libdbus-1-dev
 
       - name: setup_windows
         if: matrix.os == 'windows-latest'
         run: vcpkg install dav1d:x64-windows
 
       - name: build
-        run: cargo build --release --target ${{ matrix.target }}
+        run: cargo build --release --target ${{ matrix.target }}${{ matrix.features && format(' --features {0}', matrix.features) || '' }}
 
       - name: archive_binary_unix
         if: matrix.os != 'windows-latest'
