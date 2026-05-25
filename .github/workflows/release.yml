@@ -60,8 +60,8 @@ jobs:
         if: matrix.os == 'windows-latest'
         shell: bash
         run: |
+          choco install pkgconfiglite -y --no-progress
           vcpkg install dav1d:x64-windows
-          echo "C:/msys64/usr/bin" >> $GITHUB_PATH
           echo "PKG_CONFIG_PATH=C:/vcpkg/packages/dav1d_x64-windows/lib/pkgconfig" >> $GITHUB_ENV
 
       - name: build
