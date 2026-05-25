@@ -23,10 +23,6 @@ jobs:
             target: x86_64-pc-windows-msvc
             binary: luminous.exe
             features: avif-native
-          - os: macos-13
-            target: x86_64-apple-darwin
-            binary: luminous
-            features: avif-native
           - os: macos-latest
             target: aarch64-apple-darwin
             binary: luminous
@@ -62,7 +58,11 @@ jobs:
 
       - name: setup_windows
         if: matrix.os == 'windows-latest'
-        run: vcpkg install dav1d:x64-windows
+        shell: bash
+        run: |
+          vcpkg install dav1d:x64-windows
+          echo "C:/msys64/usr/bin" >> $GITHUB_PATH
+          echo "PKG_CONFIG_PATH=C:/vcpkg/packages/dav1d_x64-windows/lib/pkgconfig" >> $GITHUB_ENV
 
       - name: build
         run: cargo build --release --target ${{ matrix.target }}${{ matrix.features && format(' --features {0}', matrix.features) || '' }}
