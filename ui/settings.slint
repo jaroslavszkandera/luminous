@@ -6,6 +6,7 @@ import {
     ListView,
     StandardListView,
     LineEdit,
+    ScrollView,
 } from "std-widgets.slint";
 import { Plugin } from "plugins.slint";
 
@@ -77,9 +78,9 @@ export component Settings inherits PopupWindow {
     Rectangle {
         background: Palette.background;
         border-radius: 3px;
+
         VerticalLayout {
             Rectangle {
-                width: 100%;
                 height: 25px;
                 background: Palette.alternate-background;
                 HorizontalLayout {
@@ -101,109 +102,111 @@ export component Settings inherits PopupWindow {
                 }
             }
 
-            VerticalLayout {
-                padding: 15px;
-                spacing: 10px;
+            ScrollView {
+                VerticalLayout {
+                    padding: 15px;
+                    spacing: 10px;
 
-                SettingsSection {
-                    HorizontalLayout {
-                        alignment: space-between;
-                        Text {
-                            text: "Image cache: " + SettingsState.image-cache-count;
-                            vertical-alignment: center;
-                        }
-
-                        Button {
-                            text: "Clear";
-                            width: 80px;
-                            clicked => {
-                                SettingsState.clear-image-cache();
-                            }
-                        }
-                    }
-                }
-
-                SettingsSection {
-                    title: "Plugins";
-                    HorizontalLayout {
-                        spacing: 10px;
-                        Rectangle {
-                            height: 150px;
-                            background: Palette.background;
-                            plugins-list := StandardListView {
-                                model: SettingsState.plugin-names;
-                                current-item-changed(index) => {
-                                    toggle-plugin-enable-btn.checked = SettingsState.plugins[index].state == "Disable";
-                                    toggle-plugin-auto-start-btn.checked = SettingsState.plugins[index].auto-start;
-                                }
-                            }
-                        }
-
-                        Rectangle {
-                            width: 200px;
-                            VerticalLayout {
-                                property <int> idx: plugins-list.current-item;
-                                spacing: 5px;
-                                alignment: start;
-                                toggle-plugin-enable-btn := Button {
-                                    text: {
-                                        idx == -1 ? "Enable" : SettingsState.plugins[idx].state
-                                    };
-                                    checkable: true;
-                                    enabled: idx != -1 && !SettingsState.plugins[idx].is_busy;
-                                    clicked => {
-                                        SettingsState.toggle-plugin-enable(
-                                            SettingsState.plugins[idx].id);
-                                    }
-                                }
-
-                                toggle-plugin-auto-start-btn := Button {
-                                    text: "Auto start";
-                                    checkable: true;
-                                    enabled: idx != -1;
-                                    clicked => {
-                                        SettingsState.toggle-plugin-auto-start(
-                                            SettingsState.plugins[idx].id, idx);
-                                    }
-                                }
-
-                                Button {
-                                    text: "Info";
-                                    enabled: idx != -1;
-                                    clicked => {
-                                        debug("Showing info for: " + SettingsState.plugins[idx].id);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                SettingsSection {
-                    title: "Keybindings";
-                    VerticalLayout {
-                        spacing: 8px;
-                        for setting[idx] in SettingsState.binding-settings: HorizontalLayout {
-                            spacing: 10px;
+                    SettingsSection {
+                        HorizontalLayout {
+                            alignment: space-between;
                             Text {
-                                text: setting.label;
+                                text: "Image cache: " + SettingsState.image-cache-count;
                                 vertical-alignment: center;
-                                width: 120px;
                             }
 
-                            LineEdit {
-                                text: setting.value;
-                                enabled: false;
-                                accepted(val) => {
-                                    SettingsState.update-setting(setting.id, val, "binding");
+                            Button {
+                                text: "Clear";
+                                width: 80px;
+                                clicked => {
+                                    SettingsState.clear-image-cache();
                                 }
                             }
                         }
                     }
-                }
 
-                Rectangle {
-                    vertical-stretch: 1;
+                    SettingsSection {
+                        title: "Plugins";
+                        HorizontalLayout {
+                            spacing: 10px;
+                            Rectangle {
+                                height: 150px;
+                                background: Palette.background;
+                                plugins-list := StandardListView {
+                                    model: SettingsState.plugin-names;
+                                    current-item-changed(index) => {
+                                        toggle-plugin-enable-btn.checked = SettingsState.plugins[index].state == "Disable";
+                                        toggle-plugin-auto-start-btn.checked = SettingsState.plugins[index].auto-start;
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                width: 200px;
+                                VerticalLayout {
+                                    property <int> idx: plugins-list.current-item;
+                                    spacing: 5px;
+                                    alignment: start;
+                                    toggle-plugin-enable-btn := Button {
+                                        text: {
+                                            idx == -1 ? "Enable" : SettingsState.plugins[idx].state
+                                        };
+                                        checkable: true;
+                                        enabled: idx != -1 && !SettingsState.plugins[idx].is_busy;
+                                        clicked => {
+                                            SettingsState.toggle-plugin-enable(
+                                            SettingsState.plugins[idx].id);
+                                        }
+                                    }
+
+                                    toggle-plugin-auto-start-btn := Button {
+                                        text: "Auto start";
+                                        checkable: true;
+                                        enabled: idx != -1;
+                                        clicked => {
+                                            SettingsState.toggle-plugin-auto-start(
+                                            SettingsState.plugins[idx].id, idx);
+                                        }
+                                    }
+
+                                    Button {
+                                        text: "Info";
+                                        enabled: idx != -1;
+                                        clicked => {
+                                            debug("Showing info for: " + SettingsState.plugins[idx].id);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    SettingsSection {
+                        title: "Keybindings";
+                        VerticalLayout {
+                            spacing: 8px;
+                            for setting[idx] in SettingsState.binding-settings: HorizontalLayout {
+                                spacing: 10px;
+                                Text {
+                                    text: setting.label;
+                                    vertical-alignment: center;
+                                    width: 120px;
+                                }
+
+                                LineEdit {
+                                    text: setting.value;
+                                    enabled: false;
+                                    accepted(val) => {
+                                        SettingsState.update-setting(setting.id, val, "binding");
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        vertical-stretch: 1;
+                    }
                 }
             }
         }
