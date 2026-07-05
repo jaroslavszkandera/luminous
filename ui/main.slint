@@ -180,11 +180,15 @@ export component MainWindow inherits Window {
     // Pipeline
     in-out property <[PipelineStep]> pipeline-steps;
     in property <float> pipeline-progress;
+    callback refresh-grid();
     callback pipeline-add-step(PipelineStepKind);
     callback pipeline-remove-step(int);
     callback pipeline-move-step(int, int);
     callback pipeline-update-step(int, PipelineStep);
     callback pipeline-run(string);
+    refresh-grid => {
+        grid-ui.update-visible-rows();
+    }
 
     grid-ui := GridView {
         visible: root.view-mode == ViewMode.grid;
@@ -219,7 +223,6 @@ export component MainWindow inherits Window {
     // ----- Full view -----
     full-ui := FullView {
         visible: root.view-mode == ViewMode.full;
-        timer-running: root.view-mode == ViewMode.full;
         total-images: GridViewState.model.length;
         encoder_extensions: encoder_extensions;
 

@@ -16,7 +16,6 @@ use pipeline::GpuStepFactory;
 use log::{debug, error, info, warn};
 use slint::{Image, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, VecModel};
 use std::cell::RefCell;
-use std::cmp;
 use std::collections::HashSet;
 use std::error::Error;
 use std::rc::Rc;
@@ -108,74 +107,86 @@ impl AppController {
         }
     }
 
-    fn handle_grid_request(&mut self, start: usize, count: usize) {
-        // debug!("handle grid request");
+    fn handle_grid_request(&mut self, first_row: usize, visible_rows: usize, num_cols: usize) {
+        let t_start = std::time::Instant::now();
+        let buffer_rows = visible_rows.max(1);
+        let start_row = first_row.saturating_sub(buffer_rows);
+        let end_row = first_row + visible_rows + buffer_rows;
+
+        let start_idx = start_row * num_cols;
+        let end_idx = (end_row * num_cols).min(self.filtered_indices.len());
+        let focus_idx = (first_row + visible_rows / 2) * num_cols;
+        debug!(
+            "Handle grid req rows: {}-{} idxs: {}-{}-{}",
+            start_row, end_row, start_idx, focus_idx, end_idx
+        );
+
         let Some(ui) = self.window_weak.upgrade() else {
             return;
         };
         let gv = ui.global::<GridViewState>();
-
         let model = gv.get_model();
-        let total = model.row_count();
-        let end = cmp::min(start + count, total);
 
-        const MARGIN: usize = 30;
-        let keep_start = start.saturating_sub(MARGIN);
-        let keep_end = start + count + MARGIN;
-        for row in 0..total {
-            if row < keep_start || row > keep_end {
-                if let Some(mut item) = model.row_data(row) {
+        for i in 0..model.row_count() {
+            if i < start_idx || i > end_idx {
+                if let Some(mut item) = model.row_data(i) {
                     if item.image != Image::default() {
                         item.image = Image::default();
-                        model.set_row_data(row, item);
+                        model.set_row_data(i, item);
                     }
                 }
             }
         }
-        self.loader.prune_grid_thumbs(start, count);
+        let keep: HashSet<usize> = self.filtered_indices
+            [start_idx..end_idx.min(self.filtered_indices.len())]
+            .iter()
+            .copied()
+            .collect();
+        self.loader.retain_grid_thumbs(&keep);
 
-        let visible: Vec<GridItem> = (start..end).filter_map(|i| model.row_data(i)).collect();
+        let visible: Vec<GridItem> = (start_idx..end_idx)
+            .filter_map(|i| model.row_data(i))
+            .collect();
         gv.set_visible_model(ModelRc::from(Rc::from(VecModel::from(visible))));
 
-        let visible_range = keep_start..=keep_end;
         self.active_grid_indices
-            .retain(|&idx| visible_range.contains(&idx));
+            .retain(|&i| (start_idx..end_idx).contains(&i));
+
+        let mut pending: Vec<usize> = (start_idx..end_idx)
+            .filter(|i| !self.active_grid_indices.contains(i))
+            .collect();
+        pending.sort_by_key(|&i| (i as isize - focus_idx as isize).abs());
 
         let mut cached_updates: Vec<(usize, SharedPixelBuffer<Rgba8Pixel>)> = Vec::new();
-
-        for row in start..end {
-            if self.active_grid_indices.contains(&row) {
-                continue;
-            }
-            self.active_grid_indices.insert(row);
-
-            let abs_idx = self.filtered_indices[row];
+        for i in pending {
+            self.active_grid_indices.insert(i);
+            let abs_idx = self.filtered_indices[i];
             if let Some(buf) = self.loader.load_grid_thumb(abs_idx) {
-                self.active_grid_indices.insert(row);
-                cached_updates.push((row, buf));
+                cached_updates.push((i, buf));
             }
         }
 
-        if cached_updates.is_empty() {
-            return;
-        }
         let vm = gv.get_visible_model();
-        for (row, buf) in cached_updates {
+        for (i, buf) in cached_updates {
             let img = Image::from_rgba8(buf);
-            if let Some(mut item) = model.row_data(row) {
+            if let Some(mut item) = model.row_data(i) {
                 item.image = img.clone();
-                model.set_row_data(row, item);
+                model.set_row_data(i, item);
             }
-            for i in 0..vm.row_count() {
+            for j in 0..vm.row_count() {
                 if let Some(mut v) = vm.row_data(i) {
-                    if v.index == row as i32 {
+                    if v.index == i as i32 {
                         v.image = img;
-                        vm.set_row_data(i, v);
+                        vm.set_row_data(j, v);
                         break;
                     }
                 }
             }
         }
+        debug!(
+            "Handle grid req: {:.3}ms",
+            t_start.elapsed().as_secs_f64() * 1000.0
+        );
     }
 
     fn handle_full_view_load(&self, index: usize) {
@@ -285,7 +296,13 @@ impl AppController {
                     let next_abs = self.filtered_indices[next_pos];
                     self.handle_full_view_load(next_abs);
                 }
-                self.handle_grid_request(0, 50);
+
+                let weak_ui = self.window_weak.clone();
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(ui) = weak_ui.upgrade() {
+                        ui.invoke_refresh_grid();
+                    }
+                });
             }
             return;
         }
@@ -564,11 +581,12 @@ impl AppController {
         if let Some(&first) = self.filtered_indices.first() {
             self.handle_full_view_load(first);
         }
-        self.handle_grid_request(0, 50);
+
         let weak_ui = self.window_weak.clone();
         let _ = slint::invoke_from_event_loop(move || {
             if let Some(ui) = weak_ui.upgrade() {
                 ui.invoke_return_focus();
+                ui.invoke_refresh_grid();
             }
         });
         debug!("Search in {}ms", start.elapsed().as_secs_f64() * 1000.0);
@@ -770,7 +788,9 @@ impl AppController {
                 self.handle_full_view_load(scan.start_index);
             }
 
-            self.handle_grid_request(0, 50);
+            if let Some(ui) = self.window_weak.upgrade() {
+                ui.invoke_refresh_grid();
+            }
         }
     }
 
@@ -785,9 +805,7 @@ impl AppController {
                 path_b.cmp(path_a)
             }
         });
-
         self.active_grid_indices.clear();
-        self.loader.clear_thumbs();
 
         let Some(ui) = self.window_weak.upgrade() else {
             return;
@@ -812,7 +830,12 @@ impl AppController {
         if let Some(&first_abs) = self.filtered_indices.first() {
             self.handle_full_view_load(first_abs);
         }
-        self.handle_grid_request(0, 50);
+        let weak_ui = self.window_weak.clone();
+        let _ = slint::invoke_from_event_loop(move || {
+            if let Some(ui) = weak_ui.upgrade() {
+                ui.invoke_refresh_grid();
+            }
+        });
     }
 }
 

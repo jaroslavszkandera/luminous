@@ -11,9 +11,12 @@ use std::rc::Rc;
 pub fn register(window: &MainWindow, app_controller: Rc<RefCell<AppController>>) {
     let acc = app_controller.clone();
     let gv = window.global::<GridViewState>();
-    gv.on_request_grid_data(move |start, count| {
-        acc.borrow_mut()
-            .handle_grid_request(start as usize, count as usize);
+    gv.on_request_grid_data(move |first_row, visible_rows, num_cols| {
+        acc.borrow_mut().handle_grid_request(
+            first_row as usize,
+            visible_rows as usize,
+            num_cols as usize,
+        );
     });
 
     let acc = app_controller.clone();

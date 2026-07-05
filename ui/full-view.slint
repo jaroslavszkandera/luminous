@@ -94,7 +94,6 @@ export component DeleteConfirmPopup inherits Rectangle {
 export component FullView inherits TouchArea {
     in property <[string]> encoder_extensions;
     in property <int> total-images;
-    in property <bool> timer-running: false;
 
     callback exit-full-view();
     callback open-images();
@@ -128,7 +127,7 @@ export component FullView inherits TouchArea {
 
     coords-timer := Timer {
         interval: 60ms;
-        running: root.timer-running;
+        running: root.visible;
         triggered => {
             if (root.mouse-x != root.last-coords-x || root.mouse-y != root.last-coords-y) {
                 root.last-coords-x = root.mouse-x;

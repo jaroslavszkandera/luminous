@@ -17,15 +17,16 @@ export global GridViewState {
     in property <bool> side-panel-visible;
     in property <int> curr-grid-row: -1;
 
-    callback request-grid-data(int, int);
-    callback image-selected(int);
+    callback request-grid-data(int, int, int);
     callback bucket-resolution-changed(int);
     callback search-submitted(string);
-    callback toggle-select-all(bool);
-    callback request-range-select(int, int);
-    callback print-selected-paths();
-    callback toggle-selection(int);
     callback request-sort(bool);
+
+    callback image-selected(int);
+    callback toggle-selection(int);
+    callback request-range-select(int, int);
+    callback toggle-select-all(bool);
+    callback print-selected-paths(); // NOTE: for debug
 }
 
 export component GridView inherits Rectangle {
@@ -86,14 +87,10 @@ export component GridView inherits Rectangle {
 
     public function update-visible-rows() {
         let item-h = grid-container.item-size + grid-container.gap;
-        let cols = grid-container.cols;
         if (item-h > 1px && root.height > 1px) {
-            let start-row = floor(-scroll-area.viewport-y / item-h);
-            let screen-rows = ceil(scroll-area.height / item-h);
-            let buffer-rows = 5;
-            let start-index = Math.max(0, (start-row - buffer-rows) * cols);
-            let total-count = (screen-rows + (buffer-rows * 2)) * cols;
-            GridViewState.request-grid-data(start-index, total-count);
+            let first-visible-row = floor(-scroll-area.viewport-y / item-h);
+            let visible-rows = ceil(scroll-area.height / item-h);
+            GridViewState.request-grid-data(first-visible-row, visible-rows, grid-container.cols);
         }
     }
 
@@ -236,15 +233,20 @@ export component GridView inherits Rectangle {
                     }
                 }
 
-                scrolled => {
-                    root.update-visible-rows();
+                property <length> last-viewport-y: scroll-area.viewport-y;
+                scroll-timer := Timer {
+                    interval: 60ms;
+                    running: root.visible;
+                    triggered => {
+                        if scroll-area.viewport-y != last-viewport-y {
+                            root.update-visible-rows();
+                        }
+                        last-viewport-y = scroll-area.viewport-y;
+                    }
                 }
-                init => {
-                    root.update-visible-rows();
-                }
-                changed height => {
-                    root.update-visible-rows();
-                }
+
+                init => root.update-visible-rows();
+                changed height => root.update-visible-rows();
                 changed width => {
                     sync-bucket-resolution();
                     root.update-visible-rows();

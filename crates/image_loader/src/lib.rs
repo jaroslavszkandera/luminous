@@ -130,10 +130,8 @@ impl ImageLoader {
         self.thumb_epoch.fetch_add(1, Ordering::Relaxed);
     }
 
-    pub fn prune_grid_thumbs(&self, start: usize, count: usize) {
-        const MARGIN: usize = 30;
-        self.thumb_cache
-            .retain(|&idx, _| idx >= start.saturating_sub(MARGIN) && idx <= start + count + MARGIN);
+    pub fn retain_grid_thumbs(&self, keep_abs: &HashSet<usize>) {
+        self.thumb_cache.retain(|idx, _| keep_abs.contains(idx));
     }
 
     pub fn evict_all(&self) {
@@ -695,24 +693,6 @@ mod tests {
         assert!(!loader.full_cache_contains(2));
         assert_eq!(loader.full_cache.get(&0).unwrap().width(), 2);
         assert_eq!(loader.full_cache.get(&1).unwrap().width(), 3);
-    }
-
-    #[test]
-    fn prune_grid_thumbs_keeps_window_plus_margin() {
-        let loader = loader_with(vec![]);
-        for i in 0..200 {
-            loader
-                .thumb_cache
-                .insert(i, SharedPixelBuffer::<Rgba8Pixel>::new(1, 1));
-        }
-        loader.prune_grid_thumbs(100, 10);
-
-        assert!(loader.thumb_cache.contains_key(&100));
-        assert!(loader.thumb_cache.contains_key(&110));
-        assert!(loader.thumb_cache.contains_key(&70));
-        assert!(loader.thumb_cache.contains_key(&140));
-        assert!(!loader.thumb_cache.contains_key(&50));
-        assert!(!loader.thumb_cache.contains_key(&180));
     }
 
     #[test]
