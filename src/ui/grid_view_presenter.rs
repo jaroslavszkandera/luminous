@@ -2,9 +2,8 @@ use crate::AppController;
 use crate::GridViewState;
 use crate::MainWindow;
 use crate::image_processing::batch_save_images;
-use log::{info, warn};
-use slint::ComponentHandle;
-use slint::Model;
+use log::{debug, error, info, trace, warn};
+use slint::{ComponentHandle, Model};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -12,11 +11,15 @@ pub fn register(window: &MainWindow, app_controller: Rc<RefCell<AppController>>)
     let acc = app_controller.clone();
     let gv = window.global::<GridViewState>();
     gv.on_request_grid_data(move |first_row, visible_rows, num_cols| {
-        acc.borrow_mut().handle_grid_request(
-            first_row as usize,
-            visible_rows as usize,
-            num_cols as usize,
+        trace!(
+            "on_request_grid_data, first_row {}, visible_rows {}, num_cols {}",
+            first_row, visible_rows, num_cols
         );
+        if let Ok(mut app) = acc.try_borrow_mut() {
+            app.handle_grid_request(first_row as usize, visible_rows as usize, num_cols as usize);
+        } else {
+            error!("on_request_grid_data borrow not successful");
+        }
     });
 
     let acc = app_controller.clone();
@@ -25,8 +28,25 @@ pub fn register(window: &MainWindow, app_controller: Rc<RefCell<AppController>>)
     });
 
     let acc = app_controller.clone();
-    gv.on_search_submitted(move |query| {
-        acc.borrow_mut().handle_search(query.to_string());
+    gv.on_search_submitted(move |text| {
+        debug!("on_search_submitted {}", text);
+        acc.borrow_mut().set_search_text(&text);
+        acc.borrow_mut().rebuild_view();
+
+        let weak = acc.borrow().window_weak.clone();
+        slint::invoke_from_event_loop(move || {
+            if let Some(ui) = weak.upgrade() {
+                ui.invoke_return_focus();
+            }
+        })
+        .unwrap();
+    });
+
+    let acc = app_controller.clone();
+    gv.on_request_sort(move |ascending| {
+        debug!("on_request_sort {}", ascending);
+        acc.borrow_mut().set_sort_asceding(ascending);
+        acc.borrow_mut().rebuild_view();
     });
 
     let acc = app_controller.clone();
@@ -35,10 +55,8 @@ pub fn register(window: &MainWindow, app_controller: Rc<RefCell<AppController>>)
         let Some(ui) = acc.borrow().window_weak.upgrade() else {
             return;
         };
-        if let Some(&abs) = c_ref.filtered_indices.get(index as usize) {
-            ui.set_view_mode(crate::ViewMode::Full);
-            c_ref.handle_full_view_load(abs);
-        }
+        ui.set_view_mode(crate::ViewMode::Full);
+        c_ref.handle_full_view_load(index.try_into().unwrap());
     });
 
     let acc = app_controller.clone();
@@ -46,70 +64,47 @@ pub fn register(window: &MainWindow, app_controller: Rc<RefCell<AppController>>)
         let Some(ui) = acc.borrow().window_weak.upgrade() else {
             return;
         };
+        acc.borrow_mut().toggle_select_all(select);
         let gv = ui.global::<GridViewState>();
-        let model = gv.get_model();
-        let vm = gv.get_visible_model();
-        for i in 0..model.row_count() {
-            if let Some(mut item) = model.row_data(i) {
+        let m = gv.get_visible_model();
+        for i in 0..m.row_count() {
+            if let Some(mut item) = m.row_data(i) {
                 if item.selected != select {
                     item.selected = select;
-                    model.set_row_data(i, item.clone());
-                    for j in 0..vm.row_count() {
-                        if let Some(mut v) = vm.row_data(j) {
-                            if v.index == item.index {
-                                v.selected = select;
-                                vm.set_row_data(j, v);
-                            }
-                        }
-                    }
+                    m.set_row_data(i, item.clone());
                 }
             }
         }
     });
 
-    let acc = app_controller.clone();
-    gv.on_toggle_selection(move |index| {
-        acc.borrow().handle_toggle_selection(index);
-    });
-
+    // TODO: implement better behavior
     let acc = app_controller.clone();
     gv.on_request_range_select(move |start_idx, end_idx| {
         let Some(ui) = acc.borrow().window_weak.upgrade() else {
             return;
         };
+
+        acc.borrow_mut()
+            .toggle_select_range(start_idx as usize, end_idx as usize);
+
+        let c_ref = acc.borrow();
         let gv = ui.global::<GridViewState>();
-        let model = gv.get_model();
         let vm = gv.get_visible_model();
-        let target = model
-            .row_data(start_idx as usize)
-            .map(|i| i.selected)
-            .unwrap_or(true);
-        let (lo, hi) = (
-            (start_idx.min(end_idx)) as usize,
-            (start_idx.max(end_idx)) as usize,
-        );
-        let mut total_selected = 0i32;
-        for i in 0..model.row_count() {
-            if let Some(mut item) = model.row_data(i) {
-                let should = (i >= lo && i <= hi) && target;
+        for i in 0..vm.row_count() {
+            if let Some(mut item) = vm.row_data(i) {
+                let should = c_ref.is_selected(item.abs_index);
                 if item.selected != should {
                     item.selected = should;
-                    model.set_row_data(i, item.clone());
-                }
-                for j in 0..vm.row_count() {
-                    if let Some(mut v) = vm.row_data(j) {
-                        if v.index == item.index {
-                            v.selected = should;
-                            vm.set_row_data(j, v);
-                        }
-                    }
-                }
-                if should {
-                    total_selected += 1;
+                    vm.set_row_data(i, item.clone());
                 }
             }
         }
-        gv.set_selected_count(total_selected);
+        gv.set_selected_count(c_ref.selected.len() as i32);
+    });
+
+    let acc = app_controller.clone();
+    gv.on_toggle_selection(move |index| {
+        acc.borrow_mut().toggle_select_single(index);
     });
 
     let acc = app_controller.clone();
@@ -141,10 +136,5 @@ pub fn register(window: &MainWindow, app_controller: Rc<RefCell<AppController>>)
             }
         })
         .unwrap();
-    });
-
-    let acc = app_controller.clone();
-    gv.on_request_sort(move |ascending| {
-        acc.borrow_mut().handle_sort(ascending);
     });
 }

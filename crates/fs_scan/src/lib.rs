@@ -2,11 +2,24 @@ use log::{debug, error, info};
 use luminous_plugins::ImageFormat;
 use std::collections::HashSet;
 use std::fs;
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 use walkdir::WalkDir;
 
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
+pub struct ImageId(pub u32);
+
+#[derive(Clone, Debug)]
+pub struct ImageEntry {
+    pub id: ImageId,
+    pub path: PathBuf,
+    pub mtime: SystemTime,
+    pub size: u64,
+}
+
 pub struct ScanResult {
-    pub paths: Vec<PathBuf>,
+    pub image_entries: Vec<ImageEntry>,
     pub start_index: usize,
     pub is_dir: bool,
     pub image_formats: ImageFormats,
@@ -124,7 +137,7 @@ pub fn scan(path_str: &str, extra_image_formats: &Vec<ImageFormat>) -> ScanResul
         Err(e) => {
             error!("Failed to get metadata for {}: {}", main_path.display(), e);
             return ScanResult {
-                paths: vec![],
+                image_entries: vec![],
                 start_index: 0,
                 is_dir: false,
                 image_formats,
@@ -134,7 +147,7 @@ pub fn scan(path_str: &str, extra_image_formats: &Vec<ImageFormat>) -> ScanResul
 
     let mut is_dir = false;
 
-    let mut paths: Vec<PathBuf> = Vec::new();
+    let mut image_entries: Vec<ImageEntry> = Vec::new();
     let mut start_index: usize = 0;
     let mut start_img_path: Option<PathBuf> = None;
 
@@ -145,7 +158,7 @@ pub fn scan(path_str: &str, extra_image_formats: &Vec<ImageFormat>) -> ScanResul
                 main_path.display()
             );
             return ScanResult {
-                paths: vec![],
+                image_entries: vec![],
                 start_index: 0,
                 is_dir: false,
                 image_formats,
@@ -161,7 +174,7 @@ pub fn scan(path_str: &str, extra_image_formats: &Vec<ImageFormat>) -> ScanResul
             main_path.display()
         );
         return ScanResult {
-            paths: vec![],
+            image_entries: vec![],
             start_index: 0,
             is_dir: false,
             image_formats,
@@ -177,28 +190,44 @@ pub fn scan(path_str: &str, extra_image_formats: &Vec<ImageFormat>) -> ScanResul
     {
         let path = entry.into_path();
         if path.is_file() && is_image(&path, &decode_extensions) {
+            let i = image_entries.len();
             if let Some(ref curr) = start_img_path {
                 if path == *curr {
-                    start_index = paths.len();
+                    start_index = i;
                     debug!("Starting image set to index: {}", start_index);
                 }
             }
-            paths.push(path);
+
+            let (mtime, size) = path
+                .metadata()
+                .map(|m| (m.modified().unwrap_or(SystemTime::UNIX_EPOCH), m.size()))
+                .unwrap_or((SystemTime::UNIX_EPOCH, 0));
+
+            if path.metadata().is_err() {
+                error!("Error retrieving image metadata, inserting empty metadata.");
+            }
+
+            image_entries.push(ImageEntry {
+                id: ImageId(i as u32),
+                path,
+                mtime,
+                size,
+            });
         }
     }
     if metadata.is_dir() {
-        debug!("Path was a directory, starting index is 0.");
+        debug!("Entry path was a directory, starting index is 0.");
         start_index = 0;
         is_dir = true;
     }
 
     info!(
         "Found {} images. Starting index: {}",
-        paths.len(),
+        image_entries.len(),
         start_index
     );
     ScanResult {
-        paths,
+        image_entries,
         start_index,
         is_dir,
         image_formats,

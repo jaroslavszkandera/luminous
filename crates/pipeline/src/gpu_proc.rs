@@ -45,6 +45,7 @@ impl GpuProcessor {
                 power_preference: wgpu::PowerPreference::HighPerformance,
                 compatible_surface: None,
                 force_fallback_adapter: false,
+                apply_limit_buckets: false,
             })
             .await
             .ok()?;
@@ -513,7 +514,7 @@ fn readback(
     device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
     rx.recv().unwrap().unwrap();
 
-    let raw = slice.get_mapped_range();
+    let raw = slice.get_mapped_range().unwrap();
     let mut pixels = Vec::with_capacity((4 * w * h) as usize);
     for row in 0..h {
         let start = (row * row_pitch) as usize;

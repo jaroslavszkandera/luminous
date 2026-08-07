@@ -15,7 +15,7 @@ slint = { workspace = true, features = ["std", "compat-1-2"] }
 base64 = "0.22.1"
 dlopen2 = "0.8.2"
 shared_memory = "0.12.4"
-sysinfo = "0.38.4"
+sysinfo = "0.39.6"
 
 [dev-dependencies]
 tempfile = { workspace = true }

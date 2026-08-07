@@ -1,5 +1,5 @@
 import { ScrollView, LineEdit, Button, Palette } from "std-widgets.slint";
-import { ImgFmt, GridItem, NoImage } from "common.slint";
+import { ImgFmt, GridItem, NoImage, ViewMode } from "common.slint";
 import {
     SidePanel,
     PipelinePanel,
@@ -10,7 +10,7 @@ import {
 import { Settings, SettingsState } from "settings.slint";
 
 export global GridViewState {
-    in property <[GridItem]> model;
+    // in property <[GridItem]> model;
     in property <[GridItem]> visible-model;
     in-out property <int> grid-cols;
     in-out property <int> selected-count: 0;
@@ -30,6 +30,7 @@ export global GridViewState {
 }
 
 export component GridView inherits Rectangle {
+    in property <int> total-images;
     in-out property <length> side-panel-width: 300px;
     in-out property <[PipelineStep]> pipeline-steps;
     in property <float> pipeline-progress;
@@ -45,8 +46,9 @@ export component GridView inherits Rectangle {
     callback pipeline-move-step(int, int);
     callback pipeline-update-step(int, PipelineStep);
     callback pipeline-run(string);
+    callback view-changed(ViewMode);
 
-    if GridViewState.model.length == 0: NoImage {
+    if total-images == 0: NoImage {
         open-clicked => {
             open-images();
         }
@@ -151,10 +153,10 @@ export component GridView inherits Rectangle {
                 }
 
                 Button {
-                    text: GridViewState.selected-count > 0 ? GridViewState.selected-count + "/" + GridViewState.model.length : GridViewState.model.length;
+                    text: GridViewState.selected-count > 0 ? GridViewState.selected-count + "/" + total-images : total-images;
                     clicked => {
                         GridViewState.toggle-select-all(GridViewState.selected-count == 0);
-                        GridViewState.selected-count = GridViewState.selected-count > 0 ? 0 : GridViewState.model.length;
+                        GridViewState.selected-count = GridViewState.selected-count > 0 ? 0 : total-images;
                     }
                 }
 
@@ -256,7 +258,7 @@ export component GridView inherits Rectangle {
                     property <int> cols: GridViewState.grid-cols;
                     property <length> gap: 0px;
                     property <length> item-size: (parent.width - (cols + 1) * gap) / cols;
-                    property <int> rows: (GridViewState.model.length + cols - 1) / cols;
+                    property <int> rows: (total-images + cols - 1) / cols;
                     height: (rows * item-size) + ((rows + 1) * gap);
 
                     scroll-event(event) => {
@@ -311,6 +313,7 @@ export component GridView inherits Rectangle {
                                 }
                                 double-clicked => {
                                     GridViewState.image-selected(item.index);
+                                    view-changed(ViewMode.full);
                                 }
                             }
                         }

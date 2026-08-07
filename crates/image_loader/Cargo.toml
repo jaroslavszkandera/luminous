@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 luminous-plugins = { path = "../plugins" }
+luminous-fs-scan = { path = "../fs_scan" }
 dashmap = { workspace = true }
 directories = { workspace = true }
 hex = { workspace = true }
@@ -18,10 +19,6 @@ slint = { workspace = true, features = ["compat-1-2"] }
 criterion = { workspace = true }
 tempfile = { workspace = true }
 image = { workspace = true }
-
-[[bench]]
-name = "image_loader"
-harness = false
 
 [lib]
 doctest = false

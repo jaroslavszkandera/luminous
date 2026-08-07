@@ -3,6 +3,7 @@ pub mod types;
 
 use image::{DynamicImage, ImageBuffer, Rgba};
 use log::debug;
+use rand::RngExt;
 use types::*;
 
 pub struct StepFactory;
@@ -167,15 +168,16 @@ fn apply_saturation(img: DynamicImage, factor: f32) -> DynamicImage {
 }
 
 fn apply_noise(img: DynamicImage, intensity: f32) -> DynamicImage {
-    use rand::Rng;
     let rgba = img.to_rgba8();
     if intensity <= 0.0 {
         return DynamicImage::ImageRgba8(rgba);
     }
     let range = (intensity * 255.0) as i32;
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     let count = (rgba.width() * rgba.height() * 3) as usize;
-    let deltas: Vec<i32> = (0..count).map(|_| rng.gen_range(-range..=range)).collect();
+    let deltas: Vec<i32> = (0..count)
+        .map(|_| rng.random_range(-range..=range))
+        .collect();
     let (w, h) = rgba.dimensions();
     DynamicImage::ImageRgba8(ImageBuffer::from_fn(w, h, |x, y| {
         let p = rgba.get_pixel(x, y);

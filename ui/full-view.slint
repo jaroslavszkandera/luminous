@@ -202,7 +202,7 @@ export component FullView inherits TouchArea {
         zoom(zoom-factor, cx, cy);
     }
 
-    function to-image-coords(screen-x: length, screen-y: length) -> { x: int, y: int} {
+    function to-image-coords(screen-x: length, screen-y: length) -> { x: int, y: int } {
         let rel-x = screen-x - img-rect.x;
         let rel-y = screen-y - img-rect.y;
         return {
@@ -315,7 +315,7 @@ export component FullView inherits TouchArea {
         accept
     }
 
-    if FullViewState.curr-image-name.is-empty: NoImage {
+    if total-images == 0: NoImage {
         open-clicked => {
             open-images();
         }

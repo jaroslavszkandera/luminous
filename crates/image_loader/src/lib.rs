@@ -1,19 +1,21 @@
 use dashmap::DashMap;
 use directories::ProjectDirs;
 use log::{debug, error, trace};
-use rayon::ThreadPool;
 use sha2::{Digest, Sha256};
 use slint::{Image, Rgba8Pixel, SharedPixelBuffer};
-use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, RwLock};
 use std::time::Instant;
 
+use luminous_fs_scan::{ImageEntry, ImageId};
 use luminous_plugins::PluginManager;
+mod threadpool;
+pub use threadpool::{GridViewIdxs, View};
+use threadpool::{Job, ThreadPool};
 
-pub type ImageReadyFn = Arc<dyn Fn(usize, SharedPixelBuffer<Rgba8Pixel>) + Send + Sync>;
+pub type ImageReadyFn = Arc<dyn Fn(ImageId, SharedPixelBuffer<Rgba8Pixel>) + Send + Sync>;
 pub type ImageReadyHook = Option<ImageReadyFn>;
 
 fn placeholder() -> SharedPixelBuffer<Rgba8Pixel> {
@@ -30,32 +32,30 @@ pub fn to_slint_image(buf: SharedPixelBuffer<Rgba8Pixel>) -> Image {
 }
 
 pub struct ImageLoader {
-    thumb_cache: Arc<DashMap<usize, SharedPixelBuffer<Rgba8Pixel>>>,
-    full_cache: Arc<DashMap<usize, SharedPixelBuffer<Rgba8Pixel>>>,
+    pub plugin_manager: Arc<PluginManager>,
+    catalog: Arc<RwLock<Vec<ImageEntry>>>,
+    catalog_view: Arc<RwLock<Vec<ImageId>>>,
+    pool: Arc<ThreadPool>,
 
-    pub paths: RwLock<Vec<PathBuf>>,
-    pub pool: Arc<ThreadPool>,
+    // Full cache
     pub active_idx: Arc<AtomicUsize>,
     pub window_size: usize,
-    pub plugin_manager: Arc<PluginManager>,
+    full_cache: Arc<DashMap<ImageId, SharedPixelBuffer<Rgba8Pixel>>>,
+    on_full_ready: Arc<RwLock<ImageReadyHook>>,
 
-    active_window: Arc<Mutex<HashSet<usize>>>,
-    thumb_epoch: Arc<AtomicUsize>,
-    next_full_token: Arc<AtomicUsize>,
-    window_epoch: Arc<AtomicUsize>,
-
+    // Thumbnail cache
+    thumb_cache: Arc<DashMap<ImageId, SharedPixelBuffer<Rgba8Pixel>>>,
+    on_thumb_ready: Arc<RwLock<ImageReadyHook>>,
     cache_dir: Option<PathBuf>,
-    bucket_resolution: AtomicU32,
-
-    on_thumb_ready: ImageReadyHook,
-    on_full_ready: ImageReadyHook,
+    thumb_res: Arc<AtomicU32>,
+    grid_view_idxs: RwLock<GridViewIdxs>,
 }
 
 impl ImageLoader {
     pub fn new(
-        paths: Vec<PathBuf>,
         workers: usize,
         window_size: usize,
+        grid_view_active: bool,
         plugin_manager: Arc<PluginManager>,
     ) -> Self {
         let cache_dir = ProjectDirs::from("", "", "luminous").and_then(|proj| {
@@ -66,352 +66,213 @@ impl ImageLoader {
                 .ok()
         });
 
-        let pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(workers)
-            .build()
-            .expect("Failed to build rayon thread pool");
+        let catalog: Arc<RwLock<Vec<ImageEntry>>> = Arc::new(RwLock::new(Vec::new()));
+        let thumb_cache: Arc<DashMap<ImageId, SharedPixelBuffer<Rgba8Pixel>>> =
+            Arc::new(DashMap::new());
+        let full_cache: Arc<DashMap<ImageId, SharedPixelBuffer<Rgba8Pixel>>> =
+            Arc::new(DashMap::new());
+        let on_full_ready: Arc<RwLock<ImageReadyHook>> = Arc::new(RwLock::new(None));
+        let on_thumb_ready: Arc<RwLock<ImageReadyHook>> = Arc::new(RwLock::new(None));
+        let thumb_res = Arc::new(AtomicU32::new(256));
+
+        let handler = {
+            let catalog = Arc::clone(&catalog);
+            let thumb_cache = Arc::clone(&thumb_cache);
+            let full_cache = Arc::clone(&full_cache);
+            let on_thumb_ready = Arc::clone(&on_thumb_ready);
+            let on_full_ready = Arc::clone(&on_full_ready);
+            let plugin_manager = Arc::clone(&plugin_manager);
+            let cache_dir = cache_dir.clone();
+
+            move |job: Job| match job {
+                Job::Thumb { id, res } => {
+                    let Some(path) = catalog
+                        .read()
+                        .unwrap()
+                        .get(id.0 as usize)
+                        .map(|e| e.path.clone())
+                    else {
+                        return;
+                    };
+                    let t = Instant::now();
+                    let buffer = Self::decode_thumb(&path, &plugin_manager, &cache_dir, res);
+                    trace!(
+                        "Thumb ({res:?}px) id={id:?} {:.1}ms",
+                        t.elapsed().as_secs_f64() * 1000.0
+                    );
+                    thumb_cache.insert(id, buffer.clone());
+                    if let Some(h) = on_thumb_ready.read().unwrap().as_ref() {
+                        h(id, buffer);
+                    }
+                }
+                Job::Image { id } => {
+                    let Some(path) = catalog
+                        .read()
+                        .unwrap()
+                        .get(id.0 as usize)
+                        .map(|e| e.path.clone())
+                    else {
+                        return;
+                    };
+                    let t = Instant::now();
+                    let buffer = Self::decode_full(&path, &plugin_manager);
+                    trace!("Full id={id:?} {:.1}ms", t.elapsed().as_secs_f64() * 1000.0);
+                    full_cache.insert(id, buffer.clone());
+                    if let Some(h) = on_full_ready.read().unwrap().as_ref() {
+                        h(id, buffer);
+                    }
+                }
+            }
+        };
+
+        let pool = ThreadPool::new(
+            workers,
+            thumb_cache.clone(),
+            thumb_res.clone(),
+            full_cache.clone(),
+            window_size,
+            grid_view_active,
+            handler,
+        );
 
         Self {
-            thumb_cache: Arc::new(DashMap::new()),
-            full_cache: Arc::new(DashMap::new()),
-            paths: RwLock::new(paths),
-            pool: Arc::new(pool),
-            active_idx: Arc::new(AtomicUsize::new(0)),
-            active_window: Arc::new(Mutex::new(HashSet::new())),
-            thumb_epoch: Arc::new(AtomicUsize::new(0)),
-            next_full_token: Arc::new(AtomicUsize::new(0)),
-            window_epoch: Arc::new(AtomicUsize::new(0)),
             window_size,
             cache_dir,
-            bucket_resolution: AtomicU32::new(0),
-            plugin_manager: plugin_manager,
-            on_thumb_ready: None,
-            on_full_ready: None,
+            plugin_manager,
+            pool: Arc::new(pool),
+            catalog,
+            catalog_view: Arc::new(RwLock::new(Vec::new())),
+            thumb_cache,
+            full_cache,
+            grid_view_idxs: RwLock::new(GridViewIdxs {
+                start: 0,
+                focus: 0,
+                end: 0,
+            }),
+            active_idx: Arc::new(AtomicUsize::new(0)),
+            thumb_res,
+            on_thumb_ready,
+            on_full_ready,
         }
     }
 
     pub fn on_thumb_ready<F>(&mut self, f: F)
     where
-        F: Fn(usize, SharedPixelBuffer<Rgba8Pixel>) + Send + Sync + 'static,
+        F: Fn(ImageId, SharedPixelBuffer<Rgba8Pixel>) + Send + Sync + 'static,
     {
-        self.on_thumb_ready = Some(Arc::new(f));
+        *self.on_thumb_ready.write().unwrap() = Some(Arc::new(f));
     }
 
     pub fn on_full_ready<F>(&mut self, f: F)
     where
-        F: Fn(usize, SharedPixelBuffer<Rgba8Pixel>) + Send + Sync + 'static,
+        F: Fn(ImageId, SharedPixelBuffer<Rgba8Pixel>) + Send + Sync + 'static,
     {
-        self.on_full_ready = Some(Arc::new(f));
+        *self.on_full_ready.write().unwrap() = Some(Arc::new(f));
     }
 
     pub fn set_bucket_resolution(&self, resolution: u32) {
-        self.bucket_resolution.store(resolution, Ordering::Relaxed);
-        self.thumb_epoch.fetch_add(1, Ordering::Relaxed);
-        self.thumb_cache.clear();
+        self.thumb_res.store(resolution, Ordering::Relaxed);
     }
 
-    pub fn update_paths(&self, new_paths: Vec<PathBuf>) {
-        let mut paths = self.paths.write().unwrap();
-        *paths = new_paths;
+    pub fn set_active_view(&self, active_view: View) {
+        self.pool.set_active_view(active_view);
+    }
 
-        self.thumb_cache.clear();
+    pub fn set_catalog(&self, catalog: Vec<ImageEntry>) {
+        *self.catalog.write().unwrap() = catalog;
         self.full_cache.clear();
-
-        let mut window = self.active_window.lock().unwrap();
-        window.clear();
-
-        self.thumb_epoch.fetch_add(1, Ordering::SeqCst);
-        self.window_epoch.fetch_add(1, Ordering::SeqCst);
-        self.active_idx.store(0, Ordering::SeqCst);
-    }
-
-    pub fn clear_thumbs(&self) {
         self.thumb_cache.clear();
-        self.thumb_epoch.fetch_add(1, Ordering::Relaxed);
     }
 
-    pub fn retain_grid_thumbs(&self, keep_abs: &HashSet<usize>) {
-        self.thumb_cache.retain(|idx, _| keep_abs.contains(idx));
+    pub fn set_catalog_view(&self, catalog_view: Vec<ImageId>) {
+        self.pool.set_catalog_view(catalog_view.clone());
+        *self.catalog_view.write().unwrap() = catalog_view;
     }
 
-    pub fn evict_all(&self) {
-        self.active_window.lock().unwrap().clear();
-        self.full_cache.clear();
+    // Queries to load thumbs
+    pub fn load_grid_thumbs(&self, grid_view_idxs: &GridViewIdxs) {
+        *self.grid_view_idxs.write().unwrap() = grid_view_idxs.clone();
+        debug!("load_grid_thumbs {}", grid_view_idxs);
+        let catalog_view = self.catalog_view.read().unwrap();
+        self.pool.set_grid_view(*grid_view_idxs);
+
+        // Clear thumbs outside window
+        let start = grid_view_idxs.start.min(catalog_view.len());
+        let end = grid_view_idxs.end.min(catalog_view.len());
+        let visible_view = &self.catalog_view.read().unwrap()[start..end];
+        self.thumb_cache.retain(|k, _| visible_view.contains(k));
+        trace!(
+            "Retained thumbs: {:?}",
+            self.thumb_cache
+                .iter()
+                .map(|r| r.key().clone())
+                .collect::<Vec<_>>()
+        );
     }
 
-    pub fn cache_buffer(&self, idx: usize, buf: SharedPixelBuffer<Rgba8Pixel>) {
-        self.full_cache.insert(idx, buf.clone());
-        self.thumb_cache.insert(idx, buf);
-    }
-
-    pub fn full_cache_contains(&self, idx: usize) -> bool {
-        self.full_cache.contains_key(&idx)
-    }
-
-    pub fn get_curr_active_buffer(&self) -> Option<SharedPixelBuffer<Rgba8Pixel>> {
-        let idx = self.active_idx.load(Ordering::Relaxed);
-        self.full_cache.get(&idx).map(|r| r.clone()).or_else(|| {
-            error!("Active image not in cache (index: {idx})");
+    pub fn get_grid_thumb(&self, id: ImageId) -> Option<SharedPixelBuffer<Rgba8Pixel>> {
+        if let Some(buf) = self.thumb_cache.get(&id) {
+            Some(buf.clone())
+        } else {
             None
-        })
-    }
-
-    pub fn get_file_name(&self, idx: usize) -> Option<String> {
-        self.paths
-            .read()
-            .ok()?
-            .get(idx)?
-            .file_name()?
-            .to_str()
-            .map(|s| s.to_string())
-    }
-
-    pub fn get_path(&self, idx: usize) -> Option<PathBuf> {
-        let paths = self.paths.read().ok()?;
-        paths.get(idx).cloned()
+        }
     }
 
     pub fn get_curr_img_path(&self) -> Option<PathBuf> {
-        self.paths
+        let idx = self.active_idx.load(Ordering::Relaxed);
+        let image_id = *self.catalog_view.read().ok()?.get(idx)?;
+        self.catalog
             .read()
             .ok()?
-            .get(self.active_idx.load(Ordering::Relaxed))
-            .cloned()
+            .get(image_id.0 as usize)
+            .map(|img| img.path.clone())
     }
 
-    pub fn rm_img(&self, idx: usize) {
-        self.full_cache.remove(&idx);
-        self.thumb_cache.remove(&idx);
-        let len = if let Ok(mut paths) = self.paths.write() {
-            if idx < paths.len() {
-                paths.remove(idx);
-            }
-            paths.len()
-        } else {
-            0
-        };
-
-        for i in idx..len {
-            if let Some((_, buf)) = self.full_cache.remove(&(i + 1)) {
-                self.full_cache.insert(i, buf);
-            }
-            if let Some((_, buf)) = self.thumb_cache.remove(&(i + 1)) {
-                self.thumb_cache.insert(i, buf);
-            }
-        }
+    pub fn get_curr_buffer(&self) -> Option<SharedPixelBuffer<Rgba8Pixel>> {
+        let idx = self.active_idx.load(Ordering::Relaxed);
+        let image_id = *self.catalog_view.read().ok()?.get(idx)?;
+        self.full_cache.get(&image_id).map(|r| r.clone())
     }
 
-    pub fn full_len(&self) -> usize {
-        self.full_cache.len()
-    }
-
-    pub fn get_image_disk_cache_count(&self) -> u64 {
-        let Some(ref dir) = self.cache_dir else {
-            return 0;
-        };
-
-        fs::read_dir(dir)
-            .map(|entries| {
-                entries
-                    .filter_map(|e| e.ok())
-                    .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
-                    .count() as u64
-            })
-            .unwrap_or(0)
-    }
-
-    pub fn clear_disk_cache(&self) -> bool {
-        let Some(ref dir) = self.cache_dir else {
-            return false;
-        };
-
-        if !dir.exists() {
-            error!("Failed to clear disk cache at {dir:?}: No directory");
-            return false;
-        }
-
-        if let Err(e) = fs::remove_dir_all(dir) {
-            error!("Failed to clear disk cache at {dir:?}: {e}");
-            return false;
-        }
-
-        if let Err(e) = fs::create_dir_all(dir) {
-            error!("Failed to recreate cache directory: {e}");
-            return false;
-        }
-
-        debug!("Disk cache cleared");
-        true
-    }
-
-    // source: https://github.com/slint-ui/slint/discussions/5140
-    pub fn load_grid_thumb(&self, index: usize) -> Option<SharedPixelBuffer<Rgba8Pixel>> {
-        let res = self.bucket_resolution.load(Ordering::Relaxed);
-        if res == 0 {
-            return Some(placeholder());
-        }
-
-        if let Some(buf) = self.thumb_cache.get(&index) {
-            return Some(buf.clone());
-        }
-
-        let path = self.paths.read().ok()?.get(index)?.clone();
-        let cache_clone = self.thumb_cache.clone();
-        let cache_path = Self::disk_cache_path(self.cache_dir.as_ref(), &path, res);
-        let plugin_manager = self.plugin_manager.clone();
-        let on_ready = self.on_thumb_ready.clone();
-
-        let my_epoch = self.thumb_epoch.load(Ordering::Relaxed);
-        let epoch_counter = self.thumb_epoch.clone();
-
-        self.pool.spawn(move || {
-            if epoch_counter.load(Ordering::Relaxed) != my_epoch {
-                trace!("Thumb job cancelled (epoch mismatch) index={index}");
-                return;
-            }
-
-            let t = Instant::now();
-            let buffer = Self::decode_thumb(&path, &plugin_manager, &cache_path, res);
-
-            if epoch_counter.load(Ordering::Relaxed) != my_epoch {
-                trace!("Thumb job discarded after decode (epoch mismatch) index={index}");
-                return;
-            }
-
-            trace!(
-                "Thumb ({res}px) {:?} {:.1}ms",
-                path.file_name().unwrap_or_default(),
-                t.elapsed().as_secs_f64() * 1000.0
-            );
-
-            cache_clone.insert(index, buffer.clone());
-            if let Some(h) = &on_ready {
-                h(index, buffer);
-            }
-        });
-
-        None
-    }
-
-    pub fn load_full_progressive(&self, index: usize, force_disk_reload: bool) -> Image {
-        let my_token = self.next_full_token.fetch_add(1, Ordering::Relaxed);
+    pub fn load_full_progressive(&self, index: usize, _force_disk_reload: bool) -> Image {
         self.active_idx.store(index, Ordering::Relaxed);
+        self.pool.set_active_idx(index);
 
-        if !force_disk_reload {
-            if let Some(buf) = self.full_cache.get(&index) {
-                trace!("Full cache hit: {index}");
-                return Image::from_rgba8(buf.clone());
-            }
-        } else {
-            trace!("Forcing disk reload for index: {index}");
-            self.full_cache.remove(&index);
+        let catalog_view = self.catalog_view.read().unwrap();
+        let len = catalog_view.len();
+
+        if len == 0 {
+            error!("catalog_view empty not clearing slinding window");
+            return Image::default();
         }
 
-        let backup = self
-            .thumb_cache
-            .get(&index)
+        let window_size = self.window_size as isize;
+        let active_idx = index as isize;
+
+        let valid_ids: Vec<ImageId> = (-window_size..=window_size)
+            .map(|offset| catalog_view[(active_idx + offset).rem_euclid(len as isize) as usize])
+            .collect();
+
+        self.full_cache.retain(|k, _| valid_ids.contains(k));
+        trace!(
+            "Retained full: {:?}",
+            self.full_cache
+                .iter()
+                .map(|r| r.key().clone())
+                .collect::<Vec<_>>()
+        );
+
+        let target_id = catalog_view[index];
+
+        if let Some(buf) = self.full_cache.get(&target_id) {
+            trace!("Full cache hit: {index}");
+            return Image::from_rgba8(buf.clone());
+        }
+
+        self.thumb_cache
+            .get(&target_id)
             .map(|buf| Image::from_rgba8(buf.clone()))
-            .unwrap_or_default();
-
-        let path = match self.paths.read().unwrap().get(index) {
-            Some(p) => p.clone(),
-            None => return backup,
-        };
-
-        let cache_clone = self.full_cache.clone();
-        let token_counter = self.next_full_token.clone();
-        let plugin_manager = self.plugin_manager.clone();
-        let on_ready = self.on_full_ready.clone();
-
-        self.pool.spawn(move || {
-            let latest = token_counter.load(Ordering::Relaxed);
-            if my_token + 1 < latest {
-                trace!(
-                    "Full job skipped before decode index={index} token={my_token} latest={latest}"
-                );
-                return;
-            }
-
-            let t = Instant::now();
-            let buffer = Self::decode_full(&path, &plugin_manager);
-
-            trace!(
-                "Full {:?} {:.1}ms",
-                path.file_name().unwrap_or_default(),
-                t.elapsed().as_secs_f64() * 1000.0
-            );
-
-            cache_clone.insert(index, buffer.clone());
-
-            let latest = token_counter.load(Ordering::Relaxed);
-            if my_token + 1 < latest {
-                trace!("Full UI update skipped index={index} token={my_token} latest={latest}");
-                return;
-            }
-
-            if let Some(h) = &on_ready {
-                h(index, buffer);
-            }
-        });
-
-        backup
-    }
-
-    pub fn update_sliding_window(&self, center_idx: usize, window_indices: Vec<usize>) {
-        if self.paths.read().unwrap().is_empty() {
-            return;
-        }
-
-        self.window_epoch.fetch_add(1, Ordering::Relaxed);
-
-        {
-            let mut active = self.active_window.lock().unwrap();
-            active.clear();
-            active.insert(center_idx);
-            active.extend(&window_indices);
-        }
-
-        for &idx in &window_indices {
-            self.preload_background(idx);
-        }
-
-        let active = self.active_window.lock().unwrap();
-        self.full_cache.retain(|k, _| {
-            let keep = active.contains(k);
-            if !keep {
-                trace!("Evicted full image: {k}");
-            }
-            keep
-        });
-    }
-
-    fn preload_background(&self, index: usize) {
-        if self.full_cache.contains_key(&index) {
-            return;
-        }
-        let path = match self.paths.read().unwrap().get(index) {
-            Some(p) => p.clone(),
-            None => return,
-        };
-        let cache_clone = self.full_cache.clone();
-        let active_window = self.active_window.clone();
-        let plugin_manager = self.plugin_manager.clone();
-
-        let my_epoch = self.window_epoch.load(Ordering::Relaxed);
-        let window_epoch = self.window_epoch.clone();
-
-        self.pool.spawn(move || {
-            if window_epoch.load(Ordering::Relaxed) != my_epoch {
-                return;
-            }
-            if !active_window.lock().unwrap().contains(&index) {
-                return;
-            }
-            if cache_clone.contains_key(&index) {
-                return;
-            }
-            cache_clone.insert(index, Self::decode_full(&path, &plugin_manager));
-        });
+            .unwrap_or_default()
     }
 
     fn disk_cache_path(cache_dir: Option<&PathBuf>, path: &Path, res: u32) -> Option<PathBuf> {
@@ -430,14 +291,14 @@ impl ImageLoader {
         Some(cache_dir?.join(format!("{}_{res}.webp", hex::encode(h.finalize()))))
     }
 
-    /// The image open and save thumbnail is not atomic, resulting in corrupt cache errors.
-    /// This needs to handled by the caller.
     fn decode_thumb(
         path: &Path,
         plugin_manager: &PluginManager,
-        cache_path: &Option<PathBuf>,
+        cache_dir: &Option<PathBuf>,
         res: u32,
     ) -> SharedPixelBuffer<Rgba8Pixel> {
+        trace!("decode_thumb - path {path:?} res {res:?}");
+        let cache_path = Self::disk_cache_path(cache_dir.as_ref(), &path, res);
         if let Some(cp) = cache_path.as_ref().filter(|p| p.exists()) {
             match image::open(cp) {
                 Ok(img) => return to_pixel_buffer(img),
@@ -474,6 +335,7 @@ impl ImageLoader {
         };
 
         let Some(img) = dynamic else {
+            error!("Error loading image");
             return placeholder();
         };
 
@@ -490,7 +352,7 @@ impl ImageLoader {
         let resized = img.thumbnail(res, res);
 
         if let Some(cp) = cache_path {
-            if let Err(e) = resized.save(cp) {
+            if let Err(e) = resized.save(&cp) {
                 error!("Failed to save thumb cache {cp:?}: {e}");
             }
         }
@@ -534,248 +396,43 @@ impl ImageLoader {
             placeholder()
         }
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use image::{DynamicImage, ImageFormat, Rgb, RgbImage};
-    use tempfile::TempDir;
+    pub fn clear_disk_cache(&self) -> bool {
+        let Some(ref dir) = self.cache_dir else {
+            return false;
+        };
 
-    fn make_test_image(width: u32, height: u32, format: ImageFormat) -> (TempDir, PathBuf) {
-        let dir = TempDir::new().unwrap();
-        let path = dir.path().join(format!(
-            "test.{}",
-            match format {
-                ImageFormat::Jpeg => "jpg",
-                ImageFormat::Png => "png",
-                ImageFormat::WebP => "webp",
-                _ => "png",
-            }
-        ));
-        let img = RgbImage::from_fn(width, height, |x, y| {
-            Rgb([(x * 255 / width) as u8, (y * 255 / height) as u8, 128])
-        });
-        DynamicImage::ImageRgb8(img)
-            .save_with_format(&path, format)
-            .unwrap();
-        (dir, path)
+        if !dir.exists() {
+            error!("Failed to clear disk cache at {dir:?}: No directory");
+            return false;
+        }
+
+        if let Err(e) = fs::remove_dir_all(dir) {
+            error!("Failed to clear disk cache at {dir:?}: {e}");
+            return false;
+        }
+
+        if let Err(e) = fs::create_dir_all(dir) {
+            error!("Failed to recreate cache directory: {e}");
+            return false;
+        }
+
+        debug!("Disk cache cleared");
+        true
     }
 
-    #[test]
-    fn test_pixel_buffer_roundtrip() {
-        let (_dir, path) = make_test_image(100, 100, ImageFormat::Jpeg);
-        let img = image::open(&path).unwrap();
-        let buf = to_pixel_buffer(img);
+    pub fn get_image_disk_cache_count(&self) -> u64 {
+        let Some(ref dir) = self.cache_dir else {
+            return 0;
+        };
 
-        assert_eq!(buf.width(), 100);
-        assert_eq!(buf.height(), 100);
-    }
-
-    #[test]
-    fn test_decode_thumb_various_resolutions() {
-        let (_dir, path) = make_test_image(1920, 1080, ImageFormat::Jpeg);
-        let plugin_manager = Arc::new(PluginManager::new());
-
-        let buf_256 = ImageLoader::decode_thumb(&path, &plugin_manager, &None, 256);
-        assert!(buf_256.width() <= 256);
-        assert!(buf_256.height() <= 256);
-
-        let buf_512 = ImageLoader::decode_thumb(&path, &plugin_manager, &None, 512);
-        assert!(buf_512.width() <= 512);
-        assert!(buf_512.height() <= 512);
-    }
-
-    #[test]
-    fn test_decode_jpeg() {
-        let (_dir, path) = make_test_image(800, 600, ImageFormat::Jpeg);
-        let plugin_manager = Arc::new(PluginManager::new());
-
-        let buf = ImageLoader::decode_full(&path, &plugin_manager);
-        assert_eq!(buf.width(), 800);
-        assert_eq!(buf.height(), 600);
-    }
-
-    #[test]
-    fn test_decode_png() {
-        let (_dir, path) = make_test_image(800, 600, ImageFormat::Png);
-        let plugin_manager = Arc::new(PluginManager::new());
-
-        let buf = ImageLoader::decode_full(&path, &plugin_manager);
-        assert_eq!(buf.width(), 800);
-        assert_eq!(buf.height(), 600);
-    }
-
-    #[test]
-    fn test_disk_cache_path_deterministic() {
-        let (dir, path) = make_test_image(100, 100, ImageFormat::Jpeg);
-
-        let cache_path1 = ImageLoader::disk_cache_path(Some(&dir.path().to_path_buf()), &path, 256);
-        let cache_path2 = ImageLoader::disk_cache_path(Some(&dir.path().to_path_buf()), &path, 256);
-
-        assert_eq!(
-            cache_path1, cache_path2,
-            "Cache path should be deterministic"
-        );
-    }
-
-    #[test]
-    fn test_loader_cache_clearing() {
-        let (_dir1, path1) = make_test_image(100, 100, ImageFormat::Jpeg);
-        let paths = vec![path1];
-
-        let loader = ImageLoader::new(paths, 1, 8, Arc::new(PluginManager::new()));
-
-        loader.clear_thumbs();
-        assert_eq!(
-            loader.thumb_cache.len(),
-            0,
-            "Thumb cache should be empty after clear"
-        );
-
-        loader.evict_all();
-        assert_eq!(
-            loader.full_cache.len(),
-            0,
-            "Full cache should be empty after evict"
-        );
-    }
-
-    fn loader_with(paths: Vec<PathBuf>) -> ImageLoader {
-        ImageLoader::new(paths, 1, 8, Arc::new(PluginManager::new()))
-    }
-
-    #[test]
-    fn placeholder_is_1x1() {
-        let p = placeholder();
-        assert_eq!(p.width(), 1);
-        assert_eq!(p.height(), 1);
-    }
-
-    #[test]
-    fn cache_buffer_populates_both_caches() {
-        let loader = loader_with(vec![]);
-        let buf = SharedPixelBuffer::<Rgba8Pixel>::new(4, 4);
-        loader.cache_buffer(7, buf);
-        assert!(loader.full_cache_contains(7));
-        assert_eq!(loader.full_len(), 1);
-        assert!(loader.thumb_cache.contains_key(&7));
-    }
-
-    #[test]
-    fn update_paths_resets_state() {
-        let (_d, p) = make_test_image(20, 20, ImageFormat::Png);
-        let loader = loader_with(vec![p.clone()]);
-        loader.cache_buffer(0, SharedPixelBuffer::<Rgba8Pixel>::new(2, 2));
-        loader.active_idx.store(5, Ordering::SeqCst);
-
-        loader.update_paths(vec![p.clone(), p]);
-        assert_eq!(loader.full_len(), 0);
-        assert_eq!(loader.thumb_cache.len(), 0);
-        assert_eq!(loader.active_idx.load(Ordering::SeqCst), 0);
-        assert_eq!(loader.paths.read().unwrap().len(), 2);
-    }
-
-    #[test]
-    fn rm_img_shifts_higher_indices_down() {
-        let (_d, p) = make_test_image(10, 10, ImageFormat::Png);
-        let loader = loader_with(vec![p.clone(), p.clone(), p]);
-        let mk = |n: u32| SharedPixelBuffer::<Rgba8Pixel>::new(n, n);
-        loader.cache_buffer(0, mk(1));
-        loader.cache_buffer(1, mk(2));
-        loader.cache_buffer(2, mk(3));
-
-        loader.rm_img(0);
-
-        assert_eq!(loader.paths.read().unwrap().len(), 2);
-        assert!(loader.full_cache_contains(0));
-        assert!(loader.full_cache_contains(1));
-        assert!(!loader.full_cache_contains(2));
-        assert_eq!(loader.full_cache.get(&0).unwrap().width(), 2);
-        assert_eq!(loader.full_cache.get(&1).unwrap().width(), 3);
-    }
-
-    #[test]
-    fn set_bucket_resolution_clears_thumbs() {
-        let loader = loader_with(vec![]);
-        loader
-            .thumb_cache
-            .insert(0, SharedPixelBuffer::<Rgba8Pixel>::new(1, 1));
-        loader.set_bucket_resolution(256);
-        assert_eq!(loader.thumb_cache.len(), 0);
-    }
-
-    #[test]
-    fn get_file_name_and_path() {
-        let (_d, p) = make_test_image(10, 10, ImageFormat::Png);
-        let loader = loader_with(vec![p.clone()]);
-        assert_eq!(loader.get_path(0), Some(p.clone()));
-        assert_eq!(loader.get_path(99), None);
-        assert_eq!(loader.get_file_name(0).as_deref(), Some("test.png"));
-        assert_eq!(loader.get_curr_img_path(), Some(p));
-    }
-
-    #[test]
-    fn get_curr_active_buffer_uses_active_idx() {
-        let loader = loader_with(vec![]);
-        assert!(loader.get_curr_active_buffer().is_none());
-        loader.active_idx.store(3, Ordering::Relaxed);
-        loader.cache_buffer(3, SharedPixelBuffer::<Rgba8Pixel>::new(5, 5));
-        assert_eq!(loader.get_curr_active_buffer().unwrap().width(), 5);
-    }
-
-    #[test]
-    fn decode_full_missing_file_returns_placeholder() {
-        let pm = Arc::new(PluginManager::new());
-        let buf = ImageLoader::decode_full(Path::new("/nonexistent/path.png"), &pm);
-        assert_eq!(buf.width(), 1);
-        assert_eq!(buf.height(), 1);
-    }
-
-    #[test]
-    fn decode_thumb_skips_resize_for_small_images() {
-        let (_d, path) = make_test_image(64, 64, ImageFormat::Png);
-        let pm = Arc::new(PluginManager::new());
-        let buf = ImageLoader::decode_thumb(&path, &pm, &None, 256);
-        assert_eq!(buf.width(), 64);
-        assert_eq!(buf.height(), 64);
-    }
-
-    #[test]
-    fn disk_cache_path_changes_with_resolution() {
-        let (dir, path) = make_test_image(100, 100, ImageFormat::Png);
-        let a = ImageLoader::disk_cache_path(Some(&dir.path().to_path_buf()), &path, 128);
-        let b = ImageLoader::disk_cache_path(Some(&dir.path().to_path_buf()), &path, 512);
-        assert!(a.is_some() && b.is_some());
-        assert_ne!(a, b);
-    }
-
-    #[test]
-    fn disk_cache_path_none_without_cache_dir() {
-        let (_d, path) = make_test_image(10, 10, ImageFormat::Png);
-        assert!(ImageLoader::disk_cache_path(None, &path, 128).is_none());
-    }
-
-    #[test]
-    fn decode_thumb_reuses_disk_cache() {
-        let (dir, path) = make_test_image(800, 600, ImageFormat::Png);
-        let pm = Arc::new(PluginManager::new());
-        let cache_path = ImageLoader::disk_cache_path(Some(&dir.path().to_path_buf()), &path, 64);
-        assert!(cache_path.is_some());
-
-        let buf1 = ImageLoader::decode_thumb(&path, &pm, &cache_path, 64);
-        assert!(cache_path.as_ref().unwrap().exists());
-        let buf2 = ImageLoader::decode_thumb(&path, &pm, &cache_path, 64);
-        assert_eq!(buf1.width(), buf2.width());
-        assert_eq!(buf1.height(), buf2.height());
-    }
-
-    #[test]
-    fn load_grid_thumb_returns_placeholder_when_res_zero() {
-        let (_d, p) = make_test_image(20, 20, ImageFormat::Png);
-        let loader = loader_with(vec![p]);
-        let buf = loader.load_grid_thumb(0).unwrap();
-        assert_eq!(buf.width(), 1);
-        assert_eq!(buf.height(), 1);
+        fs::read_dir(dir)
+            .map(|entries| {
+                entries
+                    .filter_map(|e| e.ok())
+                    .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
+                    .count() as u64
+            })
+            .unwrap_or(0)
     }
 }

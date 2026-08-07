@@ -4,10 +4,10 @@ import { Palette } from "std-widgets.slint";
 import { ImgFmt, EditOp, EditOpKind, GridItem, ViewMode } from "common.slint";
 import { PipelineStep, PipelineStepKind, RotateAngle } from "side-panel.slint";
 
-export { GridItem, ViewMode } from "common.slint";
-export { FullViewState } from "full-view.slint";
-export { GridViewState } from "grid-view.slint";
-export { SettingsState } from "settings.slint";
+export { GridItem, ViewMode }from "common.slint";
+export { FullViewState }from "full-view.slint";
+export { GridViewState }from "grid-view.slint";
+export { SettingsState }from "settings.slint";
 
 
 export component MainWindow inherits Window {
@@ -26,11 +26,13 @@ export component MainWindow inherits Window {
     // App Callbacks
     callback quit-app();
     callback open-images();
+    callback view-changed(ViewMode);
 
     // App State
     in property <color> app-background: Palette.background;
     in-out property <ViewMode> view-mode: ViewMode.grid;
     in property <[string]> encoder_extensions;
+    in property <int> total-images;
 
     // Bindings
     in property <string> bind-quit;
@@ -85,6 +87,7 @@ export component MainWindow inherits Window {
                     root.view-mode = ViewMode.full;
                 }
                 full-ui.reset-zoom();
+                view-changed(root.view-mode);
                 return accept;
             }
             if (root.view-mode == ViewMode.full) {
@@ -196,6 +199,7 @@ export component MainWindow inherits Window {
         pipeline-steps <=> root.pipeline-steps;
         pipeline-progress <=> root.pipeline-progress;
         encoder_extensions: encoder_extensions;
+        total-images: total-images;
 
         batch-save-with-format(fmt) => {
             root.batch-save-with-format(fmt);
@@ -218,17 +222,19 @@ export component MainWindow inherits Window {
         open-images => {
             open-images();
         }
+        view-changed(mode) => root.view_changed(mode);
     }
 
     // ----- Full view -----
     full-ui := FullView {
         visible: root.view-mode == ViewMode.full;
-        total-images: GridViewState.model.length;
+        total-images: total-images;
         encoder_extensions: encoder_extensions;
 
         exit-full-view => {
             grid-ui.scroll-to-image(GridViewState.curr-grid-row);
             root.view-mode = ViewMode.grid;
+            view-changed(root.view-mode);
         }
         open-images => {
             open-images();

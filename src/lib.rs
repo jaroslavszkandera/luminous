@@ -7,14 +7,13 @@ pub mod pipeline;
 mod ui;
 
 use config::Config;
-use luminous_fs_scan::ScanResult;
-use luminous_image_loader::ImageLoader;
+use luminous_fs_scan::{ImageEntry, ImageId, ScanResult};
+use luminous_image_loader::{GridViewIdxs, ImageLoader, View};
 use luminous_plugins::PluginManager;
 use pipeline::GpuStepFactory;
 
-#[allow(unused_imports)]
-use log::{debug, error, info, warn};
-use slint::{Image, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, VecModel};
+use log::{debug, error, info, trace, warn};
+use slint::{Image, Model, VecModel};
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::error::Error;
@@ -24,165 +23,239 @@ use std::sync::atomic::Ordering;
 
 pub(crate) struct AppController {
     pub(crate) loader: Arc<ImageLoader>,
-    pub(crate) scan: Arc<ScanResult>,
-    pub(crate) active_grid_indices: HashSet<usize>,
-    pub(crate) filtered_indices: Vec<usize>,
+    pub(crate) catalog: Vec<ImageEntry>,
+    pub(crate) catalog_view: Vec<ImageId>,
+    pub(crate) grid_view_idxs: Option<GridViewIdxs>,
+    pub(crate) selected: HashSet<ImageId>,
+    pub(crate) visible_model: Rc<VecModel<GridItem>>,
+    pub(crate) query: Query,
     pub(crate) window_weak: slint::Weak<MainWindow>,
+}
+
+pub enum SortType {
+    Name,
+    Modified,
+    Size,
+    // Format,
+}
+
+pub struct Query {
+    pub text: String,
+    pub sort: SortType,
+    pub asc: bool,
 }
 
 impl AppController {
     fn new(
         plugin_manager: PluginManager,
-        scan: Arc<ScanResult>,
+        scan: &ScanResult,
         config: &Config,
         window: &MainWindow,
     ) -> Self {
         let window_weak = window.as_weak();
         let plugin_manager = Arc::new(plugin_manager);
         let mut loader = ImageLoader::new(
-            scan.paths.clone(),
             config.threads,
             config.window_size,
+            scan.is_dir,
             Arc::clone(&plugin_manager),
         );
 
         let weak_thumb = window_weak.clone();
         loader.on_thumb_ready(move |index, buffer| {
+            let t_start = std::time::Instant::now();
             let _ = weak_thumb.upgrade_in_event_loop(move |ui| {
                 let gv = ui.global::<GridViewState>();
                 let img = Image::from_rgba8(buffer);
-                let m = gv.get_model();
+                let m = gv.get_visible_model();
 
                 for row in 0..m.row_count() {
                     if let Some(mut item) = m.row_data(row) {
-                        if item.abs_index == index as i32 {
+                        if item.abs_index == index.0 as i32 {
                             item.image = img.clone();
                             m.set_row_data(row, item);
                             break; // Found it
                         }
                     }
                 }
-
-                let vm = gv.get_visible_model();
-                for i in 0..vm.row_count() {
-                    if let Some(mut v) = vm.row_data(i) {
-                        if v.abs_index == index as i32 {
-                            v.image = img;
-                            vm.set_row_data(i, v);
-                            break;
-                        }
-                    }
-                }
+                debug!(
+                    "on_thumb_ready (id: {:?}): {:.3}ms",
+                    index,
+                    t_start.elapsed().as_secs_f64() * 1000.0
+                );
             });
         });
 
         let weak_full = window_weak.clone();
         // let pm = Arc::clone(&plugin_manager);
-        loader.on_full_ready(move |index, buffer| {
-            // TODO: Auto set image in GUI
-            // for plugin in pm.get_interactive_plugins() {
-            //     let p = Arc::clone(plugin);
-            //     let buf = buffer.clone();
-            //     std::thread::spawn(move || {
-            //         p.set_interactive_image(&buf);
-            //     });
-            // }
+        loader.on_full_ready(move |id, buf| {
             let _ = weak_full.upgrade_in_event_loop(move |ui| {
-                let img = Image::from_rgba8(buffer);
                 let fv = ui.global::<FullViewState>();
-                if index == fv.get_curr_image_index() as usize {
-                    fv.set_curr_image(img);
+                if id.0 == fv.get_curr_image_index() as u32 {
+                    fv.set_curr_image(Image::from_rgba8(buf));
                     fv.set_mask_overlay(Image::default());
+
+                    // TODO: Auto set image in GUI
+                    // for plugin in pm.get_interactive_plugins() {
+                    //     let p = Arc::clone(plugin);
+                    //     let buf = buffer.clone();
+                    //     std::thread::spawn(move || {
+                    //         p.set_interactive_image(&buf);
+                    //     });
+                    // }
                 }
             });
         });
 
-        let total = scan.paths.len();
+        let catalog = scan.image_entries.clone();
         Self {
             loader: Arc::new(loader),
-            scan,
-            active_grid_indices: HashSet::new(),
-            filtered_indices: (0..total).collect(),
-            window_weak: window.as_weak(),
+            catalog_view: catalog.iter().map(|c| c.id).collect(),
+            catalog,
+            grid_view_idxs: None,
+            selected: HashSet::new(),
+            visible_model: Rc::new(VecModel::default()),
+            query: Query {
+                text: String::new(),
+                sort: SortType::Name,
+                asc: false,
+            },
+            window_weak: window.as_weak(), // Why weak?
         }
+    }
+
+    fn rebuild_view(&mut self) {
+        debug!("rebuid_view");
+        let q = self.query.text.to_lowercase();
+
+        let mut ids: Vec<ImageId> = self
+            .catalog
+            .iter()
+            .filter(|e| {
+                q.is_empty()
+                    || e.path
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .map(|s| s.to_lowercase().contains(&q))
+                        .unwrap_or(false)
+            })
+            .map(|e| e.id)
+            .collect();
+
+        // TODO: plugin search next...
+
+        let image_entries = |id: ImageId| &self.catalog[id.0 as usize];
+        match self.query.sort {
+            SortType::Name => {
+                ids.sort_by(|&a, &b| image_entries(a).path.cmp(&image_entries(b).path))
+            }
+            SortType::Modified => ids.sort_by_key(|&id| image_entries(id).mtime),
+            SortType::Size => ids.sort_by_key(|&id| image_entries(id).size),
+        }
+        if !self.query.asc {
+            ids.reverse();
+        }
+
+        self.catalog_view = ids.clone();
+        self.loader.set_catalog_view(ids);
+        if let Some(grid_view_idxs) = self.grid_view_idxs {
+            // FIX: catalog and grid_view_idxs must be updated before load, otherwise
+            // race condition
+            self.loader.load_grid_thumbs(&GridViewIdxs {
+                start: 0,
+                focus: 0,
+                end: (grid_view_idxs.end - grid_view_idxs.start).min(self.catalog_view.len() - 1),
+            });
+            self.grid_view_idxs = None;
+        }
+
+        let weak_ui = self.window_weak.clone();
+        let selected_count = self.selected.len() as i32;
+        let total_images = self.catalog_view.len().try_into().unwrap();
+        let _ = slint::invoke_from_event_loop(move || {
+            if let Some(ui) = weak_ui.upgrade() {
+                let gv = ui.global::<GridViewState>();
+                gv.set_selected_count(selected_count);
+                ui.set_total_images(total_images);
+                ui.invoke_refresh_grid();
+            }
+        });
+
+        if !self.catalog_view.is_empty() {
+            self.handle_full_view_load(0);
+        }
+    }
+
+    // tmp
+    fn set_sort_asceding(&mut self, ascending: bool) {
+        self.query.asc = ascending;
+    }
+
+    fn set_search_text(&mut self, text: &str) {
+        self.query.text = text.to_string();
     }
 
     fn handle_grid_request(&mut self, first_row: usize, visible_rows: usize, num_cols: usize) {
         let t_start = std::time::Instant::now();
+
         let buffer_rows = visible_rows.max(1);
         let start_row = first_row.saturating_sub(buffer_rows);
         let end_row = first_row + visible_rows + buffer_rows;
 
-        let start_idx = start_row * num_cols;
-        let end_idx = (end_row * num_cols).min(self.filtered_indices.len());
-        let focus_idx = (first_row + visible_rows / 2) * num_cols;
-        debug!(
-            "Handle grid req rows: {}-{} idxs: {}-{}-{}",
-            start_row, end_row, start_idx, focus_idx, end_idx
-        );
+        let total = self.catalog_view.len();
+        if self.catalog_view.is_empty() {
+            return;
+        }
+        let gv_idxs = GridViewIdxs {
+            start: (start_row * num_cols).min(total),
+            focus: ((first_row + visible_rows / 2) * num_cols).min(total - 1),
+            end: (end_row * num_cols).min(total),
+        };
+        if self.grid_view_idxs == Some(gv_idxs) {
+            return;
+        } else {
+            self.grid_view_idxs = Some(gv_idxs);
+            debug!(
+                "Handle grid rows (st-en): {}-{} idxs {}",
+                start_row, end_row, gv_idxs
+            );
+        }
+
+        // only queries thumbs for load
+        self.loader.load_grid_thumbs(&gv_idxs);
+
+        let grid_vec: Vec<GridItem> = self.catalog_view[gv_idxs.start..gv_idxs.end]
+            .iter()
+            .enumerate()
+            .map(|(i, &id)| GridItem {
+                // TODO: rename the idxs to make sense
+                abs_index: id.0 as i32,
+                index: (gv_idxs.start + i) as i32,
+                image: self
+                    .loader
+                    .get_grid_thumb(id)
+                    .map(Image::from_rgba8)
+                    .unwrap_or_default(),
+                selected: self.selected.contains(&id),
+            })
+            .collect();
+        self.visible_model.set_vec(grid_vec);
 
         let Some(ui) = self.window_weak.upgrade() else {
             return;
         };
         let gv = ui.global::<GridViewState>();
-        let model = gv.get_model();
+        gv.set_visible_model(self.visible_model.clone().into());
 
-        for i in 0..model.row_count() {
-            if i < start_idx || i > end_idx {
-                if let Some(mut item) = model.row_data(i) {
-                    if item.image != Image::default() {
-                        item.image = Image::default();
-                        model.set_row_data(i, item);
-                    }
-                }
-            }
-        }
-        let keep: HashSet<usize> = self.filtered_indices
-            [start_idx..end_idx.min(self.filtered_indices.len())]
-            .iter()
-            .copied()
-            .collect();
-        self.loader.retain_grid_thumbs(&keep);
+        trace!(
+            "visible_model: {:?} catalog_view: {:?}",
+            self.visible_model
+                .iter()
+                .map(|id| id.abs_index)
+                .collect::<Vec<i32>>(),
+            self.catalog_view
+        );
 
-        let visible: Vec<GridItem> = (start_idx..end_idx)
-            .filter_map(|i| model.row_data(i))
-            .collect();
-        gv.set_visible_model(ModelRc::from(Rc::from(VecModel::from(visible))));
-
-        self.active_grid_indices
-            .retain(|&i| (start_idx..end_idx).contains(&i));
-
-        let mut pending: Vec<usize> = (start_idx..end_idx)
-            .filter(|i| !self.active_grid_indices.contains(i))
-            .collect();
-        pending.sort_by_key(|&i| (i as isize - focus_idx as isize).abs());
-
-        let mut cached_updates: Vec<(usize, SharedPixelBuffer<Rgba8Pixel>)> = Vec::new();
-        for i in pending {
-            self.active_grid_indices.insert(i);
-            let abs_idx = self.filtered_indices[i];
-            if let Some(buf) = self.loader.load_grid_thumb(abs_idx) {
-                cached_updates.push((i, buf));
-            }
-        }
-
-        let vm = gv.get_visible_model();
-        for (i, buf) in cached_updates {
-            let img = Image::from_rgba8(buf);
-            if let Some(mut item) = model.row_data(i) {
-                item.image = img.clone();
-                model.set_row_data(i, item);
-            }
-            for j in 0..vm.row_count() {
-                if let Some(mut v) = vm.row_data(i) {
-                    if v.index == i as i32 {
-                        v.image = img;
-                        vm.set_row_data(j, v);
-                        break;
-                    }
-                }
-            }
-        }
         debug!(
             "Handle grid req: {:.3}ms",
             t_start.elapsed().as_secs_f64() * 1000.0
@@ -192,7 +265,6 @@ impl AppController {
     fn handle_full_view_load(&self, index: usize) {
         let weak = self.window_weak.clone();
         let loader = self.loader.clone();
-        let pm = self.loader.plugin_manager.clone();
 
         let display_img = loader.load_full_progressive(index, false);
 
@@ -201,423 +273,42 @@ impl AppController {
             fv.set_curr_image(display_img);
             fv.set_mask_overlay(Image::default());
             fv.set_curr_image_index(index as i32);
-            if let Some(name) = loader.get_file_name(index) {
-                fv.set_curr_image_name(name.into());
-            }
-            let row = self
-                .filtered_indices
-                .iter()
-                .position(|&i| i == index)
-                .unwrap_or(0);
-            ui.global::<GridViewState>().set_curr_grid_row(row as i32);
-            if loader.full_cache_contains(index) {
-                for plugin in pm.get_interactive_plugins() {
-                    // TODO: auto send image in GUI
-                    Self::notify_interactive_plugin(plugin.id.clone(), &loader);
-                }
-            }
+            // TODO:
+            // if let Some(name) = self.catalog.get(index).unwrap().path {
+            //     fv.set_curr_image_name(name.into());
+            // }
+            // let row = self
+            //     .filtered_indices
+            //     .iter()
+            //     .position(|&i| i == index)
+            //     .unwrap_or(0);
+            // ui.global::<GridViewState>().set_curr_grid_row(row as i32);
         }
-
-        let window_indices = self.build_window_indices(index);
-        loader.update_sliding_window(index, window_indices);
     }
 
+    // NOTE: serves next and prev images
     fn handle_navigate(&self, delta: isize) {
         let ui = match self.window_weak.upgrade() {
             Some(ui) => ui,
             None => return,
         };
-        let total = self.filtered_indices.len();
+
+        let total = self.catalog_view.len();
         if total == 0 {
             return;
         }
+
         let curr = ui.global::<FullViewState>().get_curr_image_index() as usize;
-        let curr_pos = self
-            .filtered_indices
-            .iter()
-            .position(|&i| i == curr)
-            .unwrap_or(0);
-        let next_pos = (curr_pos as isize + delta).rem_euclid(total as isize) as usize;
-        if let Some(&next_abs) = self.filtered_indices.get(next_pos) {
-            self.handle_full_view_load(next_abs);
-        }
+        let next_pos = (curr as isize + delta).rem_euclid(total as isize) as usize;
+        self.handle_full_view_load(next_pos);
     }
 
-    fn handle_edit_op(&mut self, op: EditOp) {
-        let Some(buffer) = self.loader.get_curr_active_buffer() else {
-            return;
-        };
-
-        let loader = self.loader.clone();
-        let before_idx = loader.active_idx.load(Ordering::Relaxed);
-        if let EditOpKind::Delete = op.kind {
-            if let Some(p) = loader.get_path(before_idx) {
-                let _ = trash::delete(&p);
-            }
-            loader.rm_img(before_idx);
-
-            let pos = self.filtered_indices.iter().position(|&i| i == before_idx);
-            if let Some(p) = pos {
-                self.filtered_indices.remove(p);
-            }
-            self.filtered_indices.iter_mut().for_each(|idx| {
-                if *idx > before_idx {
-                    *idx -= 1;
-                }
-            });
-
-            self.active_grid_indices.clear();
-            loader.clear_thumbs();
-
-            if let Some(ui) = self.window_weak.upgrade() {
-                let filtered_items: Vec<GridItem> = self
-                    .filtered_indices
-                    .iter()
-                    .enumerate()
-                    .map(|(r, &idx)| GridItem {
-                        image: Image::default(),
-                        index: r as i32,
-                        abs_index: idx as i32,
-                        selected: false,
-                    })
-                    .collect();
-
-                let gv = ui.global::<GridViewState>();
-                gv.set_model(Rc::new(VecModel::from(filtered_items)).into());
-
-                if self.filtered_indices.is_empty() {
-                    let fv = ui.global::<FullViewState>();
-                    fv.set_curr_image(Image::default());
-                    fv.set_curr_image_name("No images".into());
-                } else {
-                    let next_pos = pos
-                        .unwrap_or(0)
-                        .min(self.filtered_indices.len().saturating_sub(1));
-                    let next_abs = self.filtered_indices[next_pos];
-                    self.handle_full_view_load(next_abs);
-                }
-
-                let weak_ui = self.window_weak.clone();
-                let _ = slint::invoke_from_event_loop(move || {
-                    if let Some(ui) = weak_ui.upgrade() {
-                        ui.invoke_refresh_grid();
-                    }
-                });
-            }
-            return;
-        }
-
-        let weak = self.window_weak.clone();
-        let selection = weak
-            .upgrade()
-            .map(|window| window.global::<FullViewState>().get_selection())
-            .unwrap_or_default();
-
-        self.loader.pool.spawn(move || {
-            let bytes: &[u8] = bytemuck::cast_slice(buffer.as_slice());
-            let Some(rgba) =
-                image::RgbaImage::from_raw(buffer.width(), buffer.height(), bytes.to_vec())
-            else {
-                return;
-            };
-
-            let img = image::DynamicImage::ImageRgba8(rgba);
-
-            let mut save_to_cache = false;
-            let result = match op.kind {
-                EditOpKind::RotateCW => {
-                    save_to_cache = true;
-                    image::DynamicImage::ImageRgba8(image::imageops::rotate90(&img.to_rgba8()))
-                }
-                EditOpKind::RotateCCW => {
-                    save_to_cache = true;
-                    image::DynamicImage::ImageRgba8(image::imageops::rotate270(&img.to_rgba8()))
-                }
-                EditOpKind::FlipH => {
-                    save_to_cache = true;
-                    image::DynamicImage::ImageRgba8(image::imageops::flip_horizontal(
-                        &img.to_rgba8(),
-                    ))
-                }
-                EditOpKind::FlipV => {
-                    save_to_cache = true;
-                    image::DynamicImage::ImageRgba8(image::imageops::flip_vertical(&img.to_rgba8()))
-                }
-                EditOpKind::Brighten => img.brighten(op.int_val),
-                EditOpKind::Contrast => img.adjust_contrast(op.float_val),
-                EditOpKind::Crop => {
-                    save_to_cache = true;
-                    img.crop_imm(
-                        selection.x as u32,
-                        selection.y as u32,
-                        selection.w as u32,
-                        selection.h as u32,
-                    )
-                }
-                EditOpKind::ColorSpace => match op.string_val.as_str() {
-                    "RGB" => {
-                        loader.load_full_progressive(before_idx, true);
-                        return;
-                    }
-                    "HSV" => {
-                        let rgba = img.to_rgba8();
-                        let hsv_img =
-                            image::ImageBuffer::from_fn(rgba.width(), rgba.height(), |x, y| {
-                                let p = rgba.get_pixel(x, y);
-                                let srgb = palette::Srgb::new(
-                                    p[0] as f32 / 255.0,
-                                    p[1] as f32 / 255.0,
-                                    p[2] as f32 / 255.0,
-                                );
-                                let hsv: palette::Hsv = palette::IntoColor::into_color(srgb);
-
-                                let h = hsv.hue.into_positive_degrees();
-                                let h_u8 = if h.is_nan() {
-                                    0
-                                } else {
-                                    (h / 360.0 * 255.0).round() as u8
-                                };
-                                let s_u8 = (hsv.saturation * 255.0).round() as u8;
-                                let v_u8 = (hsv.value * 255.0).round() as u8;
-
-                                image::Rgba([h_u8, s_u8, v_u8, p[3]])
-                            });
-                        image::DynamicImage::ImageRgba8(hsv_img)
-                    }
-                    "Gray" => image::DynamicImage::ImageLumaA8(img.to_luma_alpha8()),
-                    "Red" | "Green" | "Blue" => {
-                        let rgba = img.to_rgba8();
-                        let channel_idx = match op.string_val.as_str() {
-                            "Red" => 0,
-                            "Green" => 1,
-                            "Blue" => 2,
-                            _ => 0,
-                        };
-                        let luma_a =
-                            image::ImageBuffer::from_fn(rgba.width(), rgba.height(), |x, y| {
-                                let p = rgba.get_pixel(x, y);
-                                image::LumaA([p[channel_idx], p[3]])
-                            });
-                        image::DynamicImage::ImageLumaA8(luma_a)
-                    }
-                    "Hue" | "Saturation" | "Value" => {
-                        let rgba = img.to_rgba8();
-                        let mode = op.string_val.clone();
-                        let luma_a =
-                            image::ImageBuffer::from_fn(rgba.width(), rgba.height(), |x, y| {
-                                let p = rgba.get_pixel(x, y);
-                                let srgb = palette::Srgb::new(
-                                    p[0] as f32 / 255.0,
-                                    p[1] as f32 / 255.0,
-                                    p[2] as f32 / 255.0,
-                                );
-                                let hsv: palette::Hsv = palette::IntoColor::into_color(srgb);
-                                let val = match mode.as_str() {
-                                    "Hue" => {
-                                        let h = hsv.hue.into_positive_degrees();
-                                        if h.is_nan() {
-                                            0
-                                        } else {
-                                            (h / 360.0 * 255.0).round() as u8
-                                        }
-                                    }
-                                    "Saturation" => (hsv.saturation * 255.0).round() as u8,
-                                    "Value" => (hsv.value * 255.0).round() as u8,
-                                    _ => 0,
-                                };
-                                image::LumaA([val, p[3]])
-                            });
-                        image::DynamicImage::ImageLumaA8(luma_a)
-                    }
-                    _ => img,
-                },
-                EditOpKind::Reset => {
-                    loader.load_full_progressive(before_idx, true);
-                    return;
-                }
-                EditOpKind::Copy => {
-                    match arboard::Clipboard::new() {
-                        Ok(mut clipboard) => {
-                            let image_data = arboard::ImageData {
-                                width: buffer.width() as usize,
-                                height: buffer.height() as usize,
-                                bytes: std::borrow::Cow::Borrowed(bytemuck::cast_slice(
-                                    buffer.as_slice(),
-                                )),
-                            };
-                            if let Err(e) = clipboard.set_image(image_data) {
-                                error!("Clipboard copy failed: {e}");
-                            } else {
-                                debug!(
-                                    "Clipboard copy of {:?} successful",
-                                    loader.get_file_name(before_idx)
-                                );
-                            }
-                        }
-                        Err(e) => error!("Could not initialize clipboard: {e}"),
-                    }
-                    return;
-                }
-                EditOpKind::Delete => {
-                    unreachable!("Delete should have been handled already");
-                }
-                // TODO: Some edit are not saved, implement a proper save
-                EditOpKind::Save => {
-                    if let Some(path) = loader.get_path(before_idx) {
-                        let e = img.save(&path);
-                        match e {
-                            Ok(_) => debug!("Saved changes to {path:?}"),
-                            Err(e) => error!("Error saving image: {e}"),
-                        }
-                    }
-                    return;
-                }
-            };
-
-            let new_buf = SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
-                result.to_rgba8().as_raw(),
-                result.width(),
-                result.height(),
-            );
-
-            let active_idx = loader.active_idx.load(Ordering::Relaxed);
-            if before_idx == active_idx {
-                if save_to_cache {
-                    loader.cache_buffer(active_idx, new_buf.clone());
-                }
-
-                let _ = weak.upgrade_in_event_loop(move |ui| {
-                    ui.global::<FullViewState>()
-                        .set_curr_image(Image::from_rgba8(new_buf));
-                    ui.invoke_return_focus();
-                });
-            }
-        });
+    fn handle_edit_op(&mut self, _op: EditOp) {
+        todo!();
     }
 
     fn handle_bucket_resolution(&mut self, resolution: u32) {
         self.loader.set_bucket_resolution(resolution);
-        self.active_grid_indices.clear();
-    }
-
-    fn handle_search(&mut self, query: String) {
-        let start = std::time::Instant::now();
-        let query = query.to_lowercase();
-
-        // First pass by file name
-        self.filtered_indices = self
-            .scan
-            .paths
-            .iter()
-            .enumerate()
-            .filter(|(_, path)| {
-                query.is_empty()
-                    || path
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .map(|s| s.to_lowercase().contains(&query))
-                        .unwrap_or(false)
-            })
-            .map(|(idx, _)| idx)
-            .collect();
-
-        // Second pass with plugins
-        if !query.is_empty() {
-            // TODO: set deadline for plugin(s) search
-            for search_plugin in self.loader.plugin_manager.get_search_plugins() {
-                debug!("Available search plugin: {}", search_plugin.id);
-                if !search_plugin.is_running() {
-                    warn!(
-                        "Search plugin {} is registered but not running.",
-                        search_plugin.id
-                    );
-                } else {
-                    if let Some(semantic_search_paths) =
-                        search_plugin.semantic_image_search(&self.scan.paths, &query)
-                    {
-                        debug!("semantic image search paths: {:?}", semantic_search_paths);
-                        let semantic_indices: Vec<usize> = semantic_search_paths
-                            .iter()
-                            .filter_map(|p| self.scan.paths.iter().position(|sp| sp == p))
-                            .collect();
-
-                        let mut combined = self.filtered_indices.clone();
-                        for idx in semantic_indices {
-                            if !combined.contains(&idx) {
-                                combined.push(idx);
-                            }
-                        }
-                        self.filtered_indices = combined;
-                    }
-                }
-            }
-        }
-
-        self.active_grid_indices.clear();
-        self.loader.clear_thumbs();
-
-        debug!("query=\"{query}\" filtered={}", self.filtered_indices.len());
-
-        let Some(ui) = self.window_weak.upgrade() else {
-            return;
-        };
-
-        let filtered_items: Vec<GridItem> = self
-            .filtered_indices
-            .iter()
-            .enumerate()
-            .map(|(row, _)| GridItem {
-                image: Image::default(),
-                index: row as i32,
-                abs_index: self.filtered_indices[row] as i32,
-                selected: false,
-            })
-            .collect();
-
-        let gv = ui.global::<GridViewState>();
-        gv.set_selected_count(0);
-        gv.set_model(Rc::new(VecModel::from(filtered_items)).into());
-
-        if let Some(&first) = self.filtered_indices.first() {
-            self.handle_full_view_load(first);
-        }
-
-        let weak_ui = self.window_weak.clone();
-        let _ = slint::invoke_from_event_loop(move || {
-            if let Some(ui) = weak_ui.upgrade() {
-                ui.invoke_return_focus();
-                ui.invoke_refresh_grid();
-            }
-        });
-        debug!("Search in {}ms", start.elapsed().as_secs_f64() * 1000.0);
-    }
-
-    fn handle_toggle_selection(&self, index: i32) {
-        let Some(ui) = self.window_weak.upgrade() else {
-            return;
-        };
-        let gv = ui.global::<GridViewState>();
-        let model = gv.get_model();
-        let row = index as usize;
-
-        let Some(mut item) = model.row_data(row) else {
-            return;
-        };
-        item.selected = !item.selected;
-        model.set_row_data(row, item.clone());
-
-        gv.set_selected_count(gv.get_selected_count() + if item.selected { 1 } else { -1 });
-
-        let vm = gv.get_visible_model();
-        for i in 0..vm.row_count() {
-            if let Some(mut v) = vm.row_data(i) {
-                if v.index == item.index {
-                    v.selected = item.selected;
-                    vm.set_row_data(i, v);
-                    break;
-                }
-            }
-        }
     }
 
     fn handle_segmentation(
@@ -682,61 +373,101 @@ impl AppController {
             .expect("Failed to spawn segmentation thread");
     }
 
-    fn build_window_indices(&self, center: usize) -> Vec<usize> {
-        let len = self.filtered_indices.len();
-        if len == 0 {
-            return Vec::new();
-        }
-        let pos = self
-            .filtered_indices
-            .iter()
-            .position(|&x| x == center)
-            .unwrap_or(0);
+    // fn notify_interactive_plugin(plugin_id: String, loader: &Arc<ImageLoader>) {
+    //     let loader = loader.clone();
+    //     let plugin_manager = loader.plugin_manager.clone();
+    //     let curr_active_path = loader.get_curr_img_path();
+    //     let curr_active_buffer = loader.get_curr_active_buffer();
+    //     loader.pool.spawn(move || {
+    //         if let Some(plugin) = plugin_manager.get_plugin_by_id(&plugin_id) {
+    //             if let Some(buf) = curr_active_buffer
+    //                 && let Some(path) = curr_active_path
+    //             {
+    //                 plugin.set_interactive_image(&buf, &path);
+    //             }
+    //         }
+    //     });
+    // }
 
-        (1..=self.loader.window_size)
-            .flat_map(|i| {
-                let prev = (pos as isize - i as isize).rem_euclid(len as isize) as usize;
-                let next = (pos + i).rem_euclid(len);
-                [self.filtered_indices[prev], self.filtered_indices[next]]
-            })
-            .collect()
+    fn toggle_select_all(&mut self, select: bool) {
+        if select {
+            self.catalog.iter().enumerate().for_each(|(i, _)| {
+                self.selected.insert(ImageId(i.try_into().unwrap()));
+            });
+        } else {
+            self.selected.clear();
+        }
     }
 
-    fn notify_interactive_plugin(plugin_id: String, loader: &Arc<ImageLoader>) {
-        let loader = loader.clone();
-        let plugin_manager = loader.plugin_manager.clone();
-        let curr_active_path = loader.get_curr_img_path();
-        let curr_active_buffer = loader.get_curr_active_buffer();
-        loader.pool.spawn(move || {
-            if let Some(plugin) = plugin_manager.get_plugin_by_id(&plugin_id) {
-                if let Some(buf) = curr_active_buffer
-                    && let Some(path) = curr_active_path
-                {
-                    plugin.set_interactive_image(&buf, &path);
+    fn toggle_select_range(&mut self, start_idx: usize, end_idx: usize) {
+        let lo = start_idx.min(end_idx);
+        let hi = start_idx.max(end_idx);
+        let target = self.selected.contains(&self.catalog_view[start_idx]);
+
+        for row in lo..=hi {
+            let id = self.catalog_view[row];
+            if target {
+                self.selected.insert(id);
+            } else {
+                self.selected.remove(&id);
+            }
+        }
+    }
+
+    fn toggle_select_single(&mut self, index: i32) {
+        debug!("handle_toggle_selection {}", index);
+        let Some(ui) = self.window_weak.upgrade() else {
+            return;
+        };
+        let gv = ui.global::<GridViewState>();
+        let model = gv.get_visible_model();
+
+        let mut found = false;
+        let mut is_selected = false;
+
+        for i in 0..model.row_count() {
+            if let Some(mut item) = model.row_data(i) {
+                if item.index == index {
+                    item.selected = !item.selected;
+                    is_selected = item.selected;
+                    model.set_row_data(i, item.clone());
+                    found = true;
+                    break;
                 }
             }
-        });
+        }
+
+        if !found {
+            error!("handle_toggle_selection item not present");
+            return;
+        }
+
+        let id = self.catalog_view[index as usize];
+        if is_selected {
+            self.selected.insert(id);
+        } else {
+            self.selected.remove(&id);
+        }
+        gv.set_selected_count(self.selected.len() as i32);
     }
 
-    pub(crate) fn collect_selected_paths(&self) -> Vec<std::path::PathBuf> {
-        let Some(ui) = self.window_weak.upgrade() else {
-            return Vec::new();
-        };
-        let model = ui.global::<GridViewState>().get_model();
-        (0..model.row_count())
-            .filter_map(|i| {
-                let item = model.row_data(i)?;
-                if !item.selected {
-                    return None;
-                }
-                let abs = *self.filtered_indices.get(item.index as usize)?;
-                self.scan.paths.get(abs).cloned()
+    fn is_selected(&self, abs_index: i32) -> bool {
+        self.selected.contains(&ImageId(abs_index as u32))
+    }
+
+    fn collect_selected_paths(&self) -> Vec<std::path::PathBuf> {
+        self.selected
+            .iter()
+            .filter_map(|&image_id| {
+                self.catalog
+                    .get(image_id.0 as usize)
+                    .map(|item| item.path.clone())
             })
             .collect()
     }
 
-    fn handle_open_images(controller_rc: Rc<RefCell<Self>>) {
-        let extra_exts = controller_rc
+    fn handle_open_images(app_controller: Rc<RefCell<Self>>) {
+        let extra_exts = app_controller
             .borrow()
             .loader
             .plugin_manager
@@ -746,96 +477,42 @@ impl AppController {
             .pick_folder()
             .and_then(|p| p.to_str().map(|s| s.to_string()))
         {
-            let scan = Arc::new(luminous_fs_scan::scan(&path, &extra_exts));
-            if scan.paths.is_empty() {
+            let scan = luminous_fs_scan::scan(&path, &extra_exts);
+            if scan.image_entries.is_empty() {
                 return;
             }
 
-            controller_rc.borrow_mut().replace_scan(scan);
+            app_controller.borrow_mut().set_scan(scan, &app_controller);
         }
     }
 
-    fn replace_scan(&mut self, scan: Arc<ScanResult>) {
-        self.scan = scan.clone();
-        self.loader.update_paths(scan.paths.clone());
-        self.filtered_indices = (0..scan.paths.len()).collect();
-        self.active_grid_indices.clear();
+    fn set_scan(&mut self, scan: ScanResult, _app_controller: &Rc<RefCell<AppController>>) {
+        let scan_len = scan.image_entries.len().try_into().unwrap_or(0);
+        self.catalog = scan.image_entries.clone();
+        self.catalog_view = vec![];
+        self.loader.set_catalog(scan.image_entries);
+        self.loader.set_catalog_view(vec![]);
+        self.rebuild_view();
+
+        // FIX: borrow_mut already borrowed
+        // ui::full_view_presenter::set_exif(app_controller);
 
         if let Some(ui) = self.window_weak.upgrade() {
-            let grid_data: Vec<GridItem> = scan
-                .paths
-                .iter()
-                .enumerate()
-                .map(|(i, _)| GridItem {
-                    image: Image::default(),
-                    index: i as i32,
-                    abs_index: i as i32,
-                    selected: false,
-                })
-                .collect();
-
             let gv = ui.global::<GridViewState>();
-            gv.set_model(Rc::new(VecModel::from(grid_data)).into());
             gv.set_selected_count(0);
-
+            self.selected.clear();
             ui.set_view_mode(if scan.is_dir {
                 ViewMode::Grid
             } else {
                 ViewMode::Full
             });
+            ui.set_total_images(scan_len);
 
-            if !scan.paths.is_empty() {
-                self.handle_full_view_load(scan.start_index);
-            }
-
-            if let Some(ui) = self.window_weak.upgrade() {
-                ui.invoke_refresh_grid();
-            }
+            // TODO: how?
+            // app_controller
+            //     .borrow()
+            //     .handle_full_view_load(scan_start_idx);
         }
-    }
-
-    fn handle_sort(&mut self, ascending: bool) {
-        // TODO: collective function for refresh image models would be nice
-        self.filtered_indices.sort_by(|&a, &b| {
-            let path_a = &self.scan.paths[a];
-            let path_b = &self.scan.paths[b];
-            if ascending {
-                path_a.cmp(path_b)
-            } else {
-                path_b.cmp(path_a)
-            }
-        });
-        self.active_grid_indices.clear();
-
-        let Some(ui) = self.window_weak.upgrade() else {
-            return;
-        };
-
-        let filtered_items: Vec<GridItem> = self
-            .filtered_indices
-            .iter()
-            .enumerate()
-            .map(|(row, &abs_idx)| GridItem {
-                image: Image::default(),
-                index: row as i32,
-                abs_index: abs_idx as i32,
-                selected: false,
-            })
-            .collect();
-
-        let gv = ui.global::<GridViewState>();
-        gv.set_selected_count(0);
-        gv.set_model(Rc::new(VecModel::from(filtered_items)).into());
-
-        if let Some(&first_abs) = self.filtered_indices.first() {
-            self.handle_full_view_load(first_abs);
-        }
-        let weak_ui = self.window_weak.clone();
-        let _ = slint::invoke_from_event_loop(move || {
-            if let Some(ui) = weak_ui.upgrade() {
-                ui.invoke_refresh_grid();
-            }
-        });
     }
 }
 
@@ -889,25 +566,10 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
         gv.set_grid_cols(cached_state.grid_view_cols as i32);
     }
 
-    let grid_data: Vec<GridItem> = scan
-        .paths
-        .iter()
-        .enumerate()
-        .map(|(i, _)| GridItem {
-            image: Image::default(),
-            index: i as i32,
-            abs_index: i as i32,
-            selected: false,
-        })
-        .collect();
-    main_window
-        .global::<GridViewState>()
-        .set_model(Rc::new(VecModel::from(grid_data)).into());
-
-    let scan = Arc::new(scan);
+    let is_scan_empty = scan.image_entries.is_empty();
     let app_controller = Rc::new(RefCell::new(AppController::new(
         plugin_manager,
-        scan.clone(),
+        &scan,
         &config,
         &main_window,
     )));
@@ -934,18 +596,15 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
     });
 
     main_window.set_app_background(config.background);
-    main_window.set_view_mode(if scan.is_dir {
-        ViewMode::Grid
-    } else {
-        ViewMode::Full
-    });
 
-    if !scan.paths.is_empty() {
-        app_controller
-            .borrow()
-            .handle_full_view_load(scan.start_index);
-        ui::full_view_presenter::set_exif(app_controller);
-    }
+    let acc = app_controller.clone();
+    main_window.on_view_changed(move |mode| {
+        let active_view = match mode {
+            ViewMode::Grid => View::Grid,
+            ViewMode::Full => View::Full,
+        };
+        acc.borrow().loader.set_active_view(active_view);
+    });
 
     let encoder_extensions = scan.image_formats.get_all_encoding_exts();
     let mut sorted_exts: Vec<slint::SharedString> = encoder_extensions
@@ -955,6 +614,10 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
     sorted_exts.sort();
     let exts_model = std::rc::Rc::new(slint::VecModel::from(sorted_exts));
     main_window.set_encoder_extensions(exts_model.into());
+
+    if !is_scan_empty {
+        app_controller.borrow_mut().set_scan(scan, &app_controller);
+    }
 
     debug!(
         "Init in {:.1} ms",
