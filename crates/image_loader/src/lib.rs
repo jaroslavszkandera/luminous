@@ -3,6 +3,7 @@ use directories::ProjectDirs;
 use log::{debug, error, trace};
 use sha2::{Digest, Sha256};
 use slint::{Image, Rgba8Pixel, SharedPixelBuffer};
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -199,8 +200,8 @@ impl ImageLoader {
         // Clear thumbs outside window
         let start = grid_view_idxs.start.min(catalog_view.len());
         let end = grid_view_idxs.end.min(catalog_view.len());
-        let visible_view = &self.catalog_view.read().unwrap()[start..end];
-        self.thumb_cache.retain(|k, _| visible_view.contains(k));
+        let visible_ids: HashSet<ImageId> = catalog_view[start..end].iter().copied().collect();
+        self.thumb_cache.retain(|k, _| visible_ids.contains(k));
         trace!(
             "Retained thumbs: {:?}",
             self.thumb_cache
@@ -300,7 +301,7 @@ impl ImageLoader {
         let window_size = self.window_size as isize;
         let active_idx = index as isize;
 
-        let valid_ids: Vec<ImageId> = (-window_size..=window_size)
+        let valid_ids: HashSet<ImageId> = (-window_size..=window_size)
             .map(|offset| catalog_view[(active_idx + offset).rem_euclid(len as isize) as usize])
             .collect();
 
@@ -358,12 +359,15 @@ impl ImageLoader {
         }
 
         let t = Instant::now();
-        let mut buf = [0; 256];
-        let known_format = std::fs::File::open(path)
-            .and_then(|mut f| std::io::Read::read(&mut f, &mut buf))
-            .ok()
-            .and_then(|_| image::guess_format(&buf).ok());
+        let bytes = match std::fs::read(path) {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                error!("Failed to read {path:?}: {e}");
+                return placeholder();
+            }
+        };
 
+        let known_format = image::guess_format(&bytes).ok();
         trace!(
             "Detected format for {:?} in {:.3}ms: {:?}",
             path,
@@ -371,18 +375,11 @@ impl ImageLoader {
             known_format,
         );
 
-        let dynamic = if let Some(fmt) = known_format {
-            match std::fs::File::open(path) {
-                Ok(f) => image::load(std::io::BufReader::new(f), fmt)
-                    .map_err(|e| error!("Load failed {path:?}: {e}"))
-                    .ok(),
-                Err(e) => {
-                    error!("Load failed {path:?}: {e}");
-                    None
-                }
-            }
-        } else {
-            plugin_manager.decode_dynamic(path)
+        let dynamic = match known_format {
+            Some(_) => image::load_from_memory(&bytes)
+                .map_err(|e| error!("Load failed {path:?}: {e}"))
+                .ok(),
+            None => plugin_manager.decode_dynamic(path),
         };
 
         let Some(img) = dynamic else {
@@ -413,12 +410,15 @@ impl ImageLoader {
 
     fn decode_full(path: &Path, plugin_manager: &PluginManager) -> SharedPixelBuffer<Rgba8Pixel> {
         let t = Instant::now();
-        let mut buf = [0; 256];
-        let known_format = std::fs::File::open(path)
-            .and_then(|mut f| std::io::Read::read(&mut f, &mut buf))
-            .ok()
-            .and_then(|_| image::guess_format(&buf).ok());
+        let bytes = match std::fs::read(path) {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                error!("Failed to read {path:?}: {e}");
+                return placeholder();
+            }
+        };
 
+        let known_format = image::guess_format(&bytes).ok();
         trace!(
             "Detected format for {:?} in {:.3}ms: {:?}",
             path,
@@ -426,25 +426,15 @@ impl ImageLoader {
             known_format
         );
 
-        if let Some(fmt) = known_format {
-            match std::fs::File::open(path) {
-                Ok(f) => match image::load(std::io::BufReader::new(f), fmt) {
-                    Ok(img) => to_pixel_buffer(img),
-                    Err(e) => {
-                        error!("Image load failed {path:?}: {e}");
-                        placeholder()
-                    }
-                },
-                Err(e) => {
-                    error!("Image load failed {path:?}: {e}");
-                    placeholder()
-                }
-            }
-        } else if let Some(buf) = plugin_manager.decode(path) {
-            buf
-        } else {
-            error!("Image load failed {path:?}: Unknown format");
-            placeholder()
+        match known_format {
+            Some(_) => image::load_from_memory(&bytes)
+                .map(to_pixel_buffer)
+                .map_err(|e| error!("Image load failed {path:?}: {e}"))
+                .unwrap_or_else(|_| placeholder()),
+            None => plugin_manager.decode(path).unwrap_or_else(|| {
+                error!("Image load failed {path:?}: Unknown format");
+                placeholder()
+            }),
         }
     }
 

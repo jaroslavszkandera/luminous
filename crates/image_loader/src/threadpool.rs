@@ -1,6 +1,7 @@
 use dashmap::DashMap;
+use log::error;
 use slint::{Rgba8Pixel, SharedPixelBuffer};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::{
     sync::{
@@ -77,7 +78,7 @@ struct ThreadPoolState {
 
     // Grid view
     grid_idxs: RwLock<GridViewIdxs>,
-    thumb_loading: Mutex<HashSet<(ImageId, ThumbRes)>>,
+    thumb_loading: Mutex<HashMap<ImageId, ThumbRes>>,
     thumb_cache: Arc<DashMap<ImageId, (ThumbRes, SharedPixelBuffer<Rgba8Pixel>)>>,
     thumb_res: Arc<RwLock<ThumbRes>>,
 
@@ -126,7 +127,7 @@ impl ThreadPoolState {
             if full_loading.insert(id) {
                 return Some(Job::Image { id });
             } else {
-                log::error!("ID: {id:?} next best job alredy taken");
+                error!("ID: {id:?} next best job alredy taken");
                 None
             }
         } else {
@@ -144,8 +145,8 @@ impl ThreadPoolState {
             .filter(|&i| {
                 let id = &catalog_view[i];
                 let loading = thumb_loading
-                    .iter()
-                    .any(|(loading_id, res)| *loading_id == *id && curr_thumb_res <= *res);
+                    .get(id)
+                    .is_some_and(|&res| curr_thumb_res <= res);
                 let cached = match self.thumb_cache.get(id) {
                     Some(thumb) => thumb.0 >= curr_thumb_res,
                     None => false,
@@ -156,11 +157,15 @@ impl ThreadPoolState {
         if let Some(i) = next_to_load {
             let id = catalog_view[i];
             let res = curr_thumb_res;
-            if thumb_loading.insert((id, res)) {
-                return Some(Job::Thumb { id, res });
-            } else {
-                log::error!("ID: {id:?} next best job alredy taken");
-                None
+            match thumb_loading.get(&id) {
+                Some(&existing) if existing >= res => {
+                    error!("ID: {id:?} next best job already taken");
+                    None
+                }
+                _ => {
+                    thumb_loading.insert(id, res);
+                    Some(Job::Thumb { id, res })
+                }
             }
         } else {
             None
@@ -170,12 +175,27 @@ impl ThreadPoolState {
     fn mark_done(&self, job: &Job) {
         match *job {
             Job::Thumb { id, res } => {
-                self.thumb_loading.lock().unwrap().remove(&(id, res));
+                let mut thumb_loading = self.thumb_loading.lock().unwrap();
+                // Only drop the entry if no higher-res decode replaced it.
+                if thumb_loading.get(&id) == Some(&res) {
+                    thumb_loading.remove(&id);
+                }
             }
             Job::Image { id } => {
                 self.full_loading.lock().unwrap().remove(&id);
             }
         }
+    }
+}
+
+struct JobDone<'a> {
+    state: &'a ThreadPoolState,
+    job: Job,
+}
+
+impl Drop for JobDone<'_> {
+    fn drop(&mut self) {
+        self.state.mark_done(&self.job);
     }
 }
 
@@ -209,7 +229,7 @@ impl ThreadPool {
             catalog_view: RwLock::new(Vec::new()),
 
             grid_idxs: RwLock::new(GridViewIdxs::default()),
-            thumb_loading: Mutex::new(HashSet::new()),
+            thumb_loading: Mutex::new(HashMap::new()),
             thumb_cache,
             thumb_res,
 
@@ -233,22 +253,38 @@ impl ThreadPool {
 
                 thread::spawn({
                     let handler = Arc::clone(&handler);
-                    move || {
-                        loop {
-                            if shutdown.load(Ordering::Relaxed) {
-                                break;
-                            }
-                            match state.get_next_best_job() {
-                                Some(job) => {
-                                    handler(job.clone());
-                                    state.mark_done(&job);
-                                }
-                                None => {
-                                    let guard = lock.lock().unwrap();
-                                    let _guard = cv.wait(guard);
-                                }
-                            }
+                    move || loop {
+                        if shutdown.load(Ordering::Relaxed) {
+                            break;
                         }
+
+                        let job = {
+                            let mut job = state.get_next_best_job();
+                            if job.is_none() {
+                                let mut guard = lock.lock().unwrap();
+                                job = state.get_next_best_job();
+                                while job.is_none() && !shutdown.load(Ordering::Relaxed) {
+                                    guard = cv.wait(guard).unwrap_or_else(|e| e.into_inner());
+                                    job = state.get_next_best_job();
+                                }
+                            }
+                            job
+                        };
+
+                        let Some(job) = job else {
+                            continue;
+                        };
+
+                        let done = JobDone {
+                            state: &state,
+                            job: job.clone(),
+                        };
+                        if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handler(job)))
+                            .is_err()
+                        {
+                            error!("Image loader worker panicked");
+                        }
+                        drop(done);
                     }
                 })
             })
