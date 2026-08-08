@@ -219,14 +219,20 @@ pub fn scan(path_str: &str, extra_image_formats: &Vec<ImageFormat>) -> ScanResul
                 }
             }
 
-            let (mtime, size) = path
-                .metadata()
-                .map(|m| (m.modified().unwrap_or(SystemTime::UNIX_EPOCH), m.size()))
-                .unwrap_or((SystemTime::UNIX_EPOCH, 0));
-
-            if path.metadata().is_err() {
-                error!("Error retrieving image metadata, inserting empty metadata.");
-            }
+            let (mtime, size) = match path.metadata() {
+                Ok(meta) => (
+                    meta.modified().unwrap_or(SystemTime::UNIX_EPOCH),
+                    meta.size(),
+                ),
+                Err(e) => {
+                    error!(
+                        "Error retrieving image metadata for {}: {}",
+                        path.display(),
+                        e
+                    );
+                    (SystemTime::UNIX_EPOCH, 0)
+                }
+            };
 
             image_entries.push(ImageEntry {
                 id: ImageId(i),

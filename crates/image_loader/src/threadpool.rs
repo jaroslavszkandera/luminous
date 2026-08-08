@@ -201,7 +201,7 @@ impl ThreadPool {
     where
         H: Fn(Job) + Send + Sync + 'static,
     {
-        log::info!("Starting image loader with {workers_cnt} threads");
+        log::info!("Starting image loader threadpool with {workers_cnt} threads");
         let lock = Arc::new(Mutex::new(()));
         let shutdown = Arc::new(AtomicBool::new(false));
         let cv = Arc::new(Condvar::new());

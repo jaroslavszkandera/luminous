@@ -521,34 +521,43 @@ impl AppController {
 }
 
 pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
-    info!("Starting Luminous");
+    info!("Starting Luminous v{}", env!("CARGO_PKG_VERSION"));
     let init_start = std::time::Instant::now();
     let mut plugin_manager = luminous_plugins::PluginManager::new();
-
     let mut settings = ui::settings_presenter::read_settings()
         .unwrap_or_else(|| ui::settings_presenter::Settings { plugins: vec![] });
 
-    if config.safe_mode {
-        info!("Starting in safe mode");
-    } else {
-        let auto_start_ids: Vec<String> = settings
-            .plugins
-            .iter()
-            .filter(|p| p.auto_start)
-            .map(|p| p.id.clone())
-            .collect();
-        let discovered_ids = plugin_manager.discover(&auto_start_ids);
-        settings.sync_plugins(discovered_ids);
-        if let Err(e) = ui::settings_presenter::write_settings(&settings) {
-            error!("Failed to save plugins settings: {}", e);
-        }
-    }
-
-    let extra_exts = plugin_manager.get_supported_extensions();
-    let scan = luminous_fs_scan::scan(&config.path, &extra_exts);
-    let encoder_extensions = scan.image_formats.get_all_encoding_exts();
+    let cfg = config.clone();
+    let prep_thread = std::thread::Builder::new()
+        .name("scan".to_string())
+        .spawn(move || {
+            if cfg.safe_mode {
+                info!("Starting in safe mode");
+            } else {
+                let auto_start_ids: Vec<String> = settings
+                    .plugins
+                    .iter()
+                    .filter(|p| p.auto_start)
+                    .map(|p| p.id.clone())
+                    .collect();
+                let discovered_ids = plugin_manager.discover(&auto_start_ids);
+                settings.sync_plugins(discovered_ids);
+                if let Err(e) = ui::settings_presenter::write_settings(&settings) {
+                    error!("Failed to save plugins settings: {}", e);
+                }
+            }
+            let extra_exts = plugin_manager.get_supported_extensions();
+            let scan = luminous_fs_scan::scan(&cfg.path, &extra_exts);
+            (plugin_manager, scan)
+        })
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
 
     let main_window = MainWindow::new()?;
+
+    let (plugin_manager, scan) = prep_thread
+        .join()
+        .map_err(|_| std::io::Error::other("startup-scan thread panicked"))?;
+    let encoder_extensions = scan.image_formats.get_all_encoding_exts();
 
     let cached_state = app_state_cache::load_app_state();
     {
@@ -622,9 +631,8 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
     if !is_scan_empty {
         AppController::set_scan(&app_controller, scan);
     }
-
-    debug!(
-        "Init in {:.1} ms",
+    info!(
+        "Startup in {:.0} ms",
         init_start.elapsed().as_secs_f64() * 1000.0
     );
     main_window.run()?;
