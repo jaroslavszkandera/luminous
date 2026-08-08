@@ -244,7 +244,48 @@ impl ImageLoader {
         self.full_cache.get(&image_id).map(|r| r.clone())
     }
 
-    pub fn load_full_progressive(&self, index: usize, _force_disk_reload: bool) -> Image {
+    pub fn get_curr_idx(&self) -> usize {
+        self.active_idx.load(Ordering::Relaxed)
+    }
+
+    /// Resolve the ImageId of the image at position view_idx
+    fn resolve_view_id(&self, view_idx: usize) -> Option<ImageId> {
+        self.catalog_view.read().ok()?.get(view_idx).copied()
+    }
+
+    /// Path of the image at position view_idx
+    pub fn get_path(&self, view_idx: usize) -> Option<PathBuf> {
+        let id = self.resolve_view_id(view_idx)?;
+        self.catalog
+            .read()
+            .ok()?
+            .get(id.0)
+            .map(|entry| entry.path.clone())
+    }
+
+    /// File name of the image at position view_idx
+    pub fn get_file_name(&self, view_idx: usize) -> Option<String> {
+        self.get_path(view_idx).and_then(|path| {
+            path.file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+        })
+    }
+
+    /// Store an edited full-resolution buffer for the image at view_idx
+    pub fn cache_buffer(&self, view_idx: usize, buffer: SharedPixelBuffer<Rgba8Pixel>) {
+        if let Some(id) = self.resolve_view_id(view_idx) {
+            self.full_cache.insert(id, buffer);
+        }
+    }
+
+    /// Drop the cached full-resolution buffer for view_idx
+    pub fn invalidate_buffer(&self, view_idx: usize) {
+        if let Some(id) = self.resolve_view_id(view_idx) {
+            self.full_cache.remove(&id);
+        }
+    }
+
+    pub fn load_full_progressive(&self, index: usize) -> Image {
         self.active_idx.store(index, Ordering::Relaxed);
         self.pool.set_active_idx(index);
 

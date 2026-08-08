@@ -13,7 +13,7 @@ use luminous_plugins::PluginManager;
 use pipeline::GpuStepFactory;
 
 use log::{debug, error, info, trace, warn};
-use slint::{Image, Model, VecModel};
+use slint::{Image, Model, Rgba8Pixel, SharedPixelBuffer, VecModel};
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::error::Error;
@@ -110,7 +110,7 @@ impl AppController {
         Self {
             loader: Arc::new(loader),
             scan,
-            catalog_view: vec![], //scan.image_entries.iter().map(|c| c.id).collect(),
+            catalog_view: vec![],
             grid_view_idxs: None,
             selected: HashSet::new(),
             visible_model: Rc::new(VecModel::default()),
@@ -268,27 +268,21 @@ impl AppController {
         let weak = self.window_weak.clone();
         let loader = self.loader.clone();
 
-        let display_img = loader.load_full_progressive(index, false);
+        let display_img = loader.load_full_progressive(index);
 
         if let Some(ui) = weak.upgrade() {
             let fv = ui.global::<FullViewState>();
             fv.set_curr_image(display_img);
             fv.set_mask_overlay(Image::default());
             fv.set_curr_image_index(index as i32);
-            // TODO:
-            // if let Some(name) = self.scan.image_entries.get(index).unwrap().path {
-            //     fv.set_curr_image_name(name.into());
-            // }
-            // let row = self
-            //     .filtered_indices
-            //     .iter()
-            //     .position(|&i| i == index)
-            //     .unwrap_or(0);
-            // ui.global::<GridViewState>().set_curr_grid_row(row as i32);
+            if let Some(img_name) = loader.get_file_name(index) {
+                fv.set_curr_image_name(img_name.into());
+            }
+            ui.global::<GridViewState>().set_curr_grid_row(index as i32);
         }
     }
 
-    // NOTE: serves next and prev images
+    /// Handles next and prev navigation in full view
     fn handle_navigate(&self, delta: isize) {
         let ui = match self.window_weak.upgrade() {
             Some(ui) => ui,
@@ -305,8 +299,250 @@ impl AppController {
         self.handle_full_view_load(next_pos);
     }
 
-    fn handle_edit_op(&mut self, _op: EditOp) {
-        todo!();
+    // TODO: Do better edit with history, undo and so on...
+    fn handle_edit_op(&mut self, op: EditOp) {
+        let loader = self.loader.clone();
+        let before_idx = loader.get_curr_idx();
+
+        if let EditOpKind::Delete = op.kind {
+            if let Some(p) = loader.get_path(before_idx) {
+                let _ = trash::delete(&p);
+            }
+
+            if before_idx < self.catalog_view.len() {
+                let deleted_id = self.catalog_view.remove(before_idx).0;
+                self.scan.image_entries.remove(deleted_id);
+                self.scan.start_index = before_idx.saturating_sub(1);
+                for id in &mut self.catalog_view {
+                    if id.0 > deleted_id {
+                        id.0 -= 1;
+                    }
+                }
+                for entry in &mut self.scan.image_entries {
+                    if entry.id.0 > deleted_id {
+                        entry.id.0 -= 1;
+                    }
+                }
+                self.selected.remove(&ImageId(deleted_id));
+                self.selected = self
+                    .selected
+                    .iter()
+                    .map(|&id| {
+                        if id.0 > deleted_id {
+                            ImageId(id.0 - 1)
+                        } else {
+                            id
+                        }
+                    })
+                    .collect();
+            }
+
+            loader.set_catalog(self.scan.image_entries.clone());
+            self.grid_view_idxs = None;
+            self.rebuild_view();
+            return;
+        }
+
+        let Some(buffer) = loader.get_curr_buffer() else {
+            return;
+        };
+
+        let weak = self.window_weak.clone();
+        let selection = weak
+            .upgrade()
+            .map(|window| window.global::<FullViewState>().get_selection())
+            .unwrap_or_default();
+
+        let _ = std::thread::Builder::new()
+            .name("edit".to_string())
+            .spawn(move || {
+                let bytes: &[u8] = bytemuck::cast_slice(buffer.as_slice());
+                let Some(rgba) =
+                    image::RgbaImage::from_raw(buffer.width(), buffer.height(), bytes.to_vec())
+                else {
+                    return;
+                };
+
+                let img = image::DynamicImage::ImageRgba8(rgba);
+
+                let mut save_to_cache = false;
+                let result = match op.kind {
+                    EditOpKind::RotateCW => {
+                        save_to_cache = true;
+                        image::DynamicImage::ImageRgba8(image::imageops::rotate90(&img.to_rgba8()))
+                    }
+                    EditOpKind::RotateCCW => {
+                        save_to_cache = true;
+                        image::DynamicImage::ImageRgba8(image::imageops::rotate270(&img.to_rgba8()))
+                    }
+                    EditOpKind::FlipH => {
+                        save_to_cache = true;
+                        image::DynamicImage::ImageRgba8(image::imageops::flip_horizontal(
+                            &img.to_rgba8(),
+                        ))
+                    }
+                    EditOpKind::FlipV => {
+                        save_to_cache = true;
+                        image::DynamicImage::ImageRgba8(image::imageops::flip_vertical(
+                            &img.to_rgba8(),
+                        ))
+                    }
+                    EditOpKind::Brighten => img.brighten(op.int_val),
+                    EditOpKind::Contrast => img.adjust_contrast(op.float_val),
+                    EditOpKind::Crop => {
+                        save_to_cache = true;
+                        img.crop_imm(
+                            selection.x as u32,
+                            selection.y as u32,
+                            selection.w as u32,
+                            selection.h as u32,
+                        )
+                    }
+                    EditOpKind::ColorSpace => match op.string_val.as_str() {
+                        "RGB" => {
+                            if loader.get_curr_idx() == before_idx {
+                                loader.invalidate_buffer(before_idx);
+                                loader.load_full_progressive(before_idx);
+                            }
+                            return;
+                        }
+                        "HSV" => {
+                            let rgba = img.to_rgba8();
+                            let hsv_img =
+                                image::ImageBuffer::from_fn(rgba.width(), rgba.height(), |x, y| {
+                                    let p = rgba.get_pixel(x, y);
+                                    let srgb = palette::Srgb::new(
+                                        p[0] as f32 / 255.0,
+                                        p[1] as f32 / 255.0,
+                                        p[2] as f32 / 255.0,
+                                    );
+                                    let hsv: palette::Hsv = palette::IntoColor::into_color(srgb);
+
+                                    let h = hsv.hue.into_positive_degrees();
+                                    let h_u8 = if h.is_nan() {
+                                        0
+                                    } else {
+                                        (h / 360.0 * 255.0).round() as u8
+                                    };
+                                    let s_u8 = (hsv.saturation * 255.0).round() as u8;
+                                    let v_u8 = (hsv.value * 255.0).round() as u8;
+
+                                    image::Rgba([h_u8, s_u8, v_u8, p[3]])
+                                });
+                            image::DynamicImage::ImageRgba8(hsv_img)
+                        }
+                        "Gray" => image::DynamicImage::ImageLumaA8(img.to_luma_alpha8()),
+                        "Red" | "Green" | "Blue" => {
+                            let rgba = img.to_rgba8();
+                            let channel_idx = match op.string_val.as_str() {
+                                "Red" => 0,
+                                "Green" => 1,
+                                "Blue" => 2,
+                                _ => 0,
+                            };
+                            let luma_a =
+                                image::ImageBuffer::from_fn(rgba.width(), rgba.height(), |x, y| {
+                                    let p = rgba.get_pixel(x, y);
+                                    image::LumaA([p[channel_idx], p[3]])
+                                });
+                            image::DynamicImage::ImageLumaA8(luma_a)
+                        }
+                        "Hue" | "Saturation" | "Value" => {
+                            let rgba = img.to_rgba8();
+                            let mode = op.string_val.clone();
+                            let luma_a =
+                                image::ImageBuffer::from_fn(rgba.width(), rgba.height(), |x, y| {
+                                    let p = rgba.get_pixel(x, y);
+                                    let srgb = palette::Srgb::new(
+                                        p[0] as f32 / 255.0,
+                                        p[1] as f32 / 255.0,
+                                        p[2] as f32 / 255.0,
+                                    );
+                                    let hsv: palette::Hsv = palette::IntoColor::into_color(srgb);
+                                    let val = match mode.as_str() {
+                                        "Hue" => {
+                                            let h = hsv.hue.into_positive_degrees();
+                                            if h.is_nan() {
+                                                0
+                                            } else {
+                                                (h / 360.0 * 255.0).round() as u8
+                                            }
+                                        }
+                                        "Saturation" => (hsv.saturation * 255.0).round() as u8,
+                                        "Value" => (hsv.value * 255.0).round() as u8,
+                                        _ => 0,
+                                    };
+                                    image::LumaA([val, p[3]])
+                                });
+                            image::DynamicImage::ImageLumaA8(luma_a)
+                        }
+                        _ => img,
+                    },
+                    EditOpKind::Reset => {
+                        if loader.get_curr_idx() == before_idx {
+                            loader.invalidate_buffer(before_idx);
+                            loader.load_full_progressive(before_idx);
+                        }
+                        return;
+                    }
+                    EditOpKind::Copy => {
+                        match arboard::Clipboard::new() {
+                            Ok(mut clipboard) => {
+                                let image_data = arboard::ImageData {
+                                    width: buffer.width() as usize,
+                                    height: buffer.height() as usize,
+                                    bytes: std::borrow::Cow::Borrowed(bytemuck::cast_slice(
+                                        buffer.as_slice(),
+                                    )),
+                                };
+                                if let Err(e) = clipboard.set_image(image_data) {
+                                    error!("Clipboard copy failed: {e}");
+                                } else {
+                                    debug!(
+                                        "Clipboard copy of {:?} successful",
+                                        loader.get_file_name(before_idx)
+                                    );
+                                }
+                            }
+                            Err(e) => error!("Could not initialize clipboard: {e}"),
+                        }
+                        return;
+                    }
+                    EditOpKind::Delete => {
+                        unreachable!("Delete should have been handled already");
+                    }
+                    // TODO: Some edit are not saved, implement a proper save
+                    EditOpKind::Save => {
+                        if let Some(path) = loader.get_path(before_idx) {
+                            let e = img.save(&path);
+                            match e {
+                                Ok(_) => debug!("Saved changes to {path:?}"),
+                                Err(e) => error!("Error saving image: {e}"),
+                            }
+                        }
+                        return;
+                    }
+                };
+
+                let new_buf = SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
+                    result.to_rgba8().as_raw(),
+                    result.width(),
+                    result.height(),
+                );
+
+                let active_idx = loader.active_idx.load(Ordering::Relaxed);
+                if before_idx == active_idx {
+                    if save_to_cache {
+                        loader.cache_buffer(active_idx, new_buf.clone());
+                    }
+
+                    let _ = weak.upgrade_in_event_loop(move |ui| {
+                        ui.global::<FullViewState>()
+                            .set_curr_image(Image::from_rgba8(new_buf));
+                        ui.invoke_return_focus();
+                    });
+                }
+            });
     }
 
     fn handle_bucket_resolution(&mut self, resolution: u32) {
