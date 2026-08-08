@@ -14,6 +14,7 @@ export global GridViewState {
     in property <[GridItem]> visible-model;
     in-out property <int> grid-cols;
     in-out property <int> selected-count: 0;
+    in-out property <bool> sort-asc;
     in property <bool> side-panel-visible;
     in property <int> curr-grid-row: -1;
 
@@ -161,12 +162,10 @@ export component GridView inherits Rectangle {
                 }
 
                 Button {
-                    property <bool> asc: true;
                     icon: @image-url("icons/import-export-arrows.svg");
                     colorize-icon: true;
                     clicked => {
-                        self.asc = !self.asc;
-                        GridViewState.request-sort(self.asc);
+                        GridViewState.request-sort(!GridViewState.sort-asc);
                     }
                 }
 

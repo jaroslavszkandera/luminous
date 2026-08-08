@@ -7,7 +7,7 @@ pub mod pipeline;
 mod ui;
 
 use config::Config;
-use luminous_fs_scan::{ImageEntry, ImageId, ScanResult};
+use luminous_fs_scan::{ImageId, ScanResult};
 use luminous_image_loader::{GridViewIdxs, ImageLoader, View};
 use luminous_plugins::PluginManager;
 use pipeline::GpuStepFactory;
@@ -23,7 +23,7 @@ use std::sync::atomic::Ordering;
 
 pub(crate) struct AppController {
     pub(crate) loader: Arc<ImageLoader>,
-    pub(crate) catalog: Vec<ImageEntry>,
+    pub(crate) scan: ScanResult,
     pub(crate) catalog_view: Vec<ImageId>,
     pub(crate) grid_view_idxs: Option<GridViewIdxs>,
     pub(crate) selected: HashSet<ImageId>,
@@ -48,7 +48,7 @@ pub struct Query {
 impl AppController {
     fn new(
         plugin_manager: PluginManager,
-        scan: &ScanResult,
+        scan: ScanResult,
         config: &Config,
         window: &MainWindow,
     ) -> Self {
@@ -78,7 +78,7 @@ impl AppController {
                         }
                     }
                 }
-                debug!(
+                trace!(
                     "on_thumb_ready (id: {:?}): {:.3}ms",
                     index,
                     t_start.elapsed().as_secs_f64() * 1000.0
@@ -91,7 +91,7 @@ impl AppController {
         loader.on_full_ready(move |id, buf| {
             let _ = weak_full.upgrade_in_event_loop(move |ui| {
                 let fv = ui.global::<FullViewState>();
-                if id.0 == fv.get_curr_image_index() as u32 {
+                if id.0 == fv.get_curr_image_index() as usize {
                     fv.set_curr_image(Image::from_rgba8(buf));
                     fv.set_mask_overlay(Image::default());
 
@@ -107,18 +107,17 @@ impl AppController {
             });
         });
 
-        let catalog = scan.image_entries.clone();
         Self {
             loader: Arc::new(loader),
-            catalog_view: catalog.iter().map(|c| c.id).collect(),
-            catalog,
+            scan,
+            catalog_view: vec![], //scan.image_entries.iter().map(|c| c.id).collect(),
             grid_view_idxs: None,
             selected: HashSet::new(),
             visible_model: Rc::new(VecModel::default()),
             query: Query {
                 text: String::new(),
                 sort: SortType::Name,
-                asc: false,
+                asc: true,
             },
             window_weak: window.as_weak(), // Why weak?
         }
@@ -129,7 +128,8 @@ impl AppController {
         let q = self.query.text.to_lowercase();
 
         let mut ids: Vec<ImageId> = self
-            .catalog
+            .scan
+            .image_entries
             .iter()
             .filter(|e| {
                 q.is_empty()
@@ -144,7 +144,7 @@ impl AppController {
 
         // TODO: plugin search next...
 
-        let image_entries = |id: ImageId| &self.catalog[id.0 as usize];
+        let image_entries = |id: ImageId| &self.scan.image_entries[id.0 as usize];
         match self.query.sort {
             SortType::Name => {
                 ids.sort_by(|&a, &b| image_entries(a).path.cmp(&image_entries(b).path))
@@ -171,18 +171,20 @@ impl AppController {
 
         let weak_ui = self.window_weak.clone();
         let selected_count = self.selected.len() as i32;
-        let total_images = self.catalog_view.len().try_into().unwrap();
+        let total_images = self.catalog_view.len() as i32;
+        let sort_asc = self.query.asc;
         let _ = slint::invoke_from_event_loop(move || {
             if let Some(ui) = weak_ui.upgrade() {
                 let gv = ui.global::<GridViewState>();
                 gv.set_selected_count(selected_count);
+                gv.set_sort_asc(sort_asc);
                 ui.set_total_images(total_images);
                 ui.invoke_refresh_grid();
             }
         });
 
         if !self.catalog_view.is_empty() {
-            self.handle_full_view_load(0);
+            self.handle_full_view_load(self.scan.start_index);
         }
     }
 
@@ -274,7 +276,7 @@ impl AppController {
             fv.set_mask_overlay(Image::default());
             fv.set_curr_image_index(index as i32);
             // TODO:
-            // if let Some(name) = self.catalog.get(index).unwrap().path {
+            // if let Some(name) = self.scan.image_entries.get(index).unwrap().path {
             //     fv.set_curr_image_name(name.into());
             // }
             // let row = self
@@ -391,9 +393,13 @@ impl AppController {
 
     fn toggle_select_all(&mut self, select: bool) {
         if select {
-            self.catalog.iter().enumerate().for_each(|(i, _)| {
-                self.selected.insert(ImageId(i.try_into().unwrap()));
-            });
+            self.scan
+                .image_entries
+                .iter()
+                .enumerate()
+                .for_each(|(i, _)| {
+                    self.selected.insert(ImageId(i));
+                });
         } else {
             self.selected.clear();
         }
@@ -452,14 +458,15 @@ impl AppController {
     }
 
     fn is_selected(&self, abs_index: i32) -> bool {
-        self.selected.contains(&ImageId(abs_index as u32))
+        self.selected.contains(&ImageId(abs_index as usize))
     }
 
     fn collect_selected_paths(&self) -> Vec<std::path::PathBuf> {
         self.selected
             .iter()
             .filter_map(|&image_id| {
-                self.catalog
+                self.scan
+                    .image_entries
                     .get(image_id.0 as usize)
                     .map(|item| item.path.clone())
             })
@@ -482,37 +489,34 @@ impl AppController {
                 return;
             }
 
-            app_controller.borrow_mut().set_scan(scan, &app_controller);
+            AppController::set_scan(&app_controller, scan);
         }
     }
 
-    fn set_scan(&mut self, scan: ScanResult, _app_controller: &Rc<RefCell<AppController>>) {
+    fn set_scan(app_controller: &Rc<RefCell<AppController>>, scan: ScanResult) {
+        let mut acc = app_controller.borrow_mut();
         let scan_len = scan.image_entries.len().try_into().unwrap_or(0);
-        self.catalog = scan.image_entries.clone();
-        self.catalog_view = vec![];
-        self.loader.set_catalog(scan.image_entries);
-        self.loader.set_catalog_view(vec![]);
-        self.rebuild_view();
+        let is_dir = scan.is_dir;
+        acc.scan = scan.clone();
+        acc.catalog_view = vec![];
+        acc.loader.set_catalog(scan.image_entries);
+        acc.loader.set_catalog_view(vec![]);
+        acc.rebuild_view();
 
-        // FIX: borrow_mut already borrowed
-        // ui::full_view_presenter::set_exif(app_controller);
-
-        if let Some(ui) = self.window_weak.upgrade() {
+        if let Some(ui) = acc.window_weak.upgrade() {
             let gv = ui.global::<GridViewState>();
             gv.set_selected_count(0);
-            self.selected.clear();
-            ui.set_view_mode(if scan.is_dir {
+            acc.selected.clear();
+            ui.set_view_mode(if is_dir {
                 ViewMode::Grid
             } else {
                 ViewMode::Full
             });
             ui.set_total_images(scan_len);
-
-            // TODO: how?
-            // app_controller
-            //     .borrow()
-            //     .handle_full_view_load(scan_start_idx);
         }
+
+        drop(acc); // set exif borrows a ref
+        ui::full_view_presenter::set_exif(app_controller);
     }
 }
 
@@ -542,6 +546,7 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
 
     let extra_exts = plugin_manager.get_supported_extensions();
     let scan = luminous_fs_scan::scan(&config.path, &extra_exts);
+    let encoder_extensions = scan.image_formats.get_all_encoding_exts();
 
     let main_window = MainWindow::new()?;
 
@@ -569,7 +574,7 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
     let is_scan_empty = scan.image_entries.is_empty();
     let app_controller = Rc::new(RefCell::new(AppController::new(
         plugin_manager,
-        &scan,
+        scan.clone(), // TODO: refactor, delete
         &config,
         &main_window,
     )));
@@ -606,7 +611,6 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
         acc.borrow().loader.set_active_view(active_view);
     });
 
-    let encoder_extensions = scan.image_formats.get_all_encoding_exts();
     let mut sorted_exts: Vec<slint::SharedString> = encoder_extensions
         .into_iter()
         .map(slint::SharedString::from)
@@ -616,7 +620,7 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
     main_window.set_encoder_extensions(exts_model.into());
 
     if !is_scan_empty {
-        app_controller.borrow_mut().set_scan(scan, &app_controller);
+        AppController::set_scan(&app_controller, scan);
     }
 
     debug!(

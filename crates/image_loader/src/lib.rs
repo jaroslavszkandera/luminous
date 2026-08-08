@@ -5,7 +5,7 @@ use sha2::{Digest, Sha256};
 use slint::{Image, Rgba8Pixel, SharedPixelBuffer};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::Instant;
 
@@ -13,7 +13,7 @@ use luminous_fs_scan::{ImageEntry, ImageId};
 use luminous_plugins::PluginManager;
 mod threadpool;
 pub use threadpool::{GridViewIdxs, View};
-use threadpool::{Job, ThreadPool};
+use threadpool::{Job, ThreadPool, ThumbRes};
 
 pub type ImageReadyFn = Arc<dyn Fn(ImageId, SharedPixelBuffer<Rgba8Pixel>) + Send + Sync>;
 pub type ImageReadyHook = Option<ImageReadyFn>;
@@ -44,10 +44,10 @@ pub struct ImageLoader {
     on_full_ready: Arc<RwLock<ImageReadyHook>>,
 
     // Thumbnail cache
-    thumb_cache: Arc<DashMap<ImageId, SharedPixelBuffer<Rgba8Pixel>>>,
+    thumb_cache: Arc<DashMap<ImageId, (ThumbRes, SharedPixelBuffer<Rgba8Pixel>)>>,
     on_thumb_ready: Arc<RwLock<ImageReadyHook>>,
     cache_dir: Option<PathBuf>,
-    thumb_res: Arc<AtomicU32>,
+    thumb_res: Arc<RwLock<ThumbRes>>,
     grid_view_idxs: RwLock<GridViewIdxs>,
 }
 
@@ -67,13 +67,13 @@ impl ImageLoader {
         });
 
         let catalog: Arc<RwLock<Vec<ImageEntry>>> = Arc::new(RwLock::new(Vec::new()));
-        let thumb_cache: Arc<DashMap<ImageId, SharedPixelBuffer<Rgba8Pixel>>> =
+        let thumb_cache: Arc<DashMap<ImageId, (ThumbRes, SharedPixelBuffer<Rgba8Pixel>)>> =
             Arc::new(DashMap::new());
         let full_cache: Arc<DashMap<ImageId, SharedPixelBuffer<Rgba8Pixel>>> =
             Arc::new(DashMap::new());
         let on_full_ready: Arc<RwLock<ImageReadyHook>> = Arc::new(RwLock::new(None));
         let on_thumb_ready: Arc<RwLock<ImageReadyHook>> = Arc::new(RwLock::new(None));
-        let thumb_res = Arc::new(AtomicU32::new(256));
+        let thumb_res: Arc<RwLock<ThumbRes>> = Arc::new(RwLock::new(ThumbRes::Small));
 
         let handler = {
             let catalog = Arc::clone(&catalog);
@@ -100,7 +100,7 @@ impl ImageLoader {
                         "Thumb ({res:?}px) id={id:?} {:.1}ms",
                         t.elapsed().as_secs_f64() * 1000.0
                     );
-                    thumb_cache.insert(id, buffer.clone());
+                    thumb_cache.insert(id, (TryFrom::try_from(res).unwrap(), buffer.clone()));
                     if let Some(h) = on_thumb_ready.read().unwrap().as_ref() {
                         h(id, buffer);
                     }
@@ -171,7 +171,7 @@ impl ImageLoader {
     }
 
     pub fn set_bucket_resolution(&self, resolution: u32) {
-        self.thumb_res.store(resolution, Ordering::Relaxed);
+        *self.thumb_res.write().unwrap() = ThumbRes::try_from(resolution).unwrap();
     }
 
     pub fn set_active_view(&self, active_view: View) {
@@ -211,8 +211,8 @@ impl ImageLoader {
     }
 
     pub fn get_grid_thumb(&self, id: ImageId) -> Option<SharedPixelBuffer<Rgba8Pixel>> {
-        if let Some(buf) = self.thumb_cache.get(&id) {
-            Some(buf.clone())
+        if let Some(thumb) = self.thumb_cache.get(&id) {
+            Some(thumb.1.clone())
         } else {
             None
         }
@@ -221,11 +221,21 @@ impl ImageLoader {
     pub fn get_curr_img_path(&self) -> Option<PathBuf> {
         let idx = self.active_idx.load(Ordering::Relaxed);
         let image_id = *self.catalog_view.read().ok()?.get(idx)?;
-        self.catalog
+        if let Some(path) = self
+            .catalog
             .read()
             .ok()?
             .get(image_id.0 as usize)
             .map(|img| img.path.clone())
+        {
+            Some(path)
+        } else {
+            error!(
+                "No path for curr img idx {}",
+                self.active_idx.load(Ordering::Relaxed)
+            );
+            None
+        }
     }
 
     pub fn get_curr_buffer(&self) -> Option<SharedPixelBuffer<Rgba8Pixel>> {
@@ -271,11 +281,11 @@ impl ImageLoader {
 
         self.thumb_cache
             .get(&target_id)
-            .map(|buf| Image::from_rgba8(buf.clone()))
+            .map(|buf| Image::from_rgba8(buf.1.clone()))
             .unwrap_or_default()
     }
 
-    fn disk_cache_path(cache_dir: Option<&PathBuf>, path: &Path, res: u32) -> Option<PathBuf> {
+    fn disk_cache_path(cache_dir: Option<&PathBuf>, path: &Path, res: ThumbRes) -> Option<PathBuf> {
         let meta = fs::metadata(path).ok()?;
         let mtime = meta
             .modified()
@@ -288,16 +298,16 @@ impl ImageLoader {
         h.update(path.to_string_lossy().as_bytes());
         h.update(mtime.to_be_bytes());
 
-        Some(cache_dir?.join(format!("{}_{res}.webp", hex::encode(h.finalize()))))
+        Some(cache_dir?.join(format!("{}_{}.webp", res as u32, hex::encode(h.finalize()))))
     }
 
     fn decode_thumb(
         path: &Path,
         plugin_manager: &PluginManager,
         cache_dir: &Option<PathBuf>,
-        res: u32,
+        res: ThumbRes,
     ) -> SharedPixelBuffer<Rgba8Pixel> {
-        trace!("decode_thumb - path {path:?} res {res:?}");
+        trace!("decode_thumb - path {path:?} res {res}");
         let cache_path = Self::disk_cache_path(cache_dir.as_ref(), &path, res);
         if let Some(cp) = cache_path.as_ref().filter(|p| p.exists()) {
             match image::open(cp) {
@@ -339,7 +349,7 @@ impl ImageLoader {
             return placeholder();
         };
 
-        if res >= img.width() || res >= img.height() {
+        if res as u32 >= img.width() || res as u32 >= img.height() {
             trace!(
                 "Not saving thumb {:?}, smaller than bucket res (res={res}, w={}, h={})",
                 path.file_name(),
@@ -349,7 +359,7 @@ impl ImageLoader {
             return to_pixel_buffer(img);
         }
 
-        let resized = img.thumbnail(res, res);
+        let resized = img.thumbnail(res as u32, res as u32);
 
         if let Some(cp) = cache_path {
             if let Err(e) = resized.save(&cp) {

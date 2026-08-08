@@ -336,7 +336,6 @@ pub fn set_exif(app_controller: &Rc<RefCell<AppController>>) {
         match c_ref.loader.get_curr_img_path() {
             Some(p) => p,
             None => {
-                error!("No image path for curr idx");
                 return set_exif_rows(&app_controller, set_empty_exif());
             }
         }

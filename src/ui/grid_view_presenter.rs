@@ -56,7 +56,7 @@ pub fn register(window: &MainWindow, app_controller: Rc<RefCell<AppController>>)
             return;
         };
         ui.set_view_mode(crate::ViewMode::Full);
-        c_ref.handle_full_view_load(index.try_into().unwrap());
+        c_ref.handle_full_view_load(index as usize);
     });
 
     let acc = app_controller.clone();

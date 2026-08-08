@@ -29,12 +29,22 @@ impl fmt::Display for GridViewIdxs {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Hash)]
 pub enum ThumbRes {
     Small = 256,
     Medium = 512,
     Large = 1024,
-    NotResized,
+}
+
+impl fmt::Display for ThumbRes {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let val = match self {
+            ThumbRes::Small => "256",
+            ThumbRes::Medium => "512",
+            ThumbRes::Large => "1024",
+        };
+        write!(f, "{}", val)
+    }
 }
 
 impl TryFrom<u32> for ThumbRes {
@@ -45,7 +55,6 @@ impl TryFrom<u32> for ThumbRes {
             256 => Ok(ThumbRes::Small),
             512 => Ok(ThumbRes::Medium),
             1024 => Ok(ThumbRes::Large),
-            u32::MAX => Ok(ThumbRes::NotResized),
             _ => Err(()),
         }
     }
@@ -59,7 +68,7 @@ pub enum View {
 
 #[derive(Debug, Clone)]
 pub enum Job {
-    Thumb { id: ImageId, res: u32 },
+    Thumb { id: ImageId, res: ThumbRes },
     Image { id: ImageId }, // Full
 }
 
@@ -68,9 +77,9 @@ struct ThreadPoolState {
 
     // Grid view
     grid_idxs: RwLock<GridViewIdxs>,
-    thumb_loading: Mutex<HashSet<(ImageId, u32)>>,
-    thumb_cache: Arc<DashMap<ImageId, SharedPixelBuffer<Rgba8Pixel>>>,
-    thumb_res: Arc<AtomicU32>,
+    thumb_loading: Mutex<HashSet<(ImageId, ThumbRes)>>,
+    thumb_cache: Arc<DashMap<ImageId, (ThumbRes, SharedPixelBuffer<Rgba8Pixel>)>>,
+    thumb_res: Arc<RwLock<ThumbRes>>,
 
     // Full view
     full_cache: Arc<DashMap<ImageId, SharedPixelBuffer<Rgba8Pixel>>>,
@@ -128,7 +137,7 @@ impl ThreadPoolState {
     fn get_next_thumb_job(&self, catalog_view: &[ImageId]) -> Option<Job> {
         let grid_idxs = self.grid_idxs.read().unwrap();
         let mut thumb_loading = self.thumb_loading.lock().unwrap();
-        let curr_thumb_res = self.thumb_res.load(Ordering::Relaxed);
+        let curr_thumb_res = *self.thumb_res.read().unwrap();
 
         let next_to_load = (grid_idxs.start..grid_idxs.end)
             // .filter(|&i| i < catalog_view.len())
@@ -138,11 +147,7 @@ impl ThreadPoolState {
                     .iter()
                     .any(|(loading_id, res)| *loading_id == *id && curr_thumb_res <= *res);
                 let cached = match self.thumb_cache.get(id) {
-                    Some(buf) => match ThumbRes::try_from(curr_thumb_res) {
-                        Ok(ThumbRes::NotResized) => true,
-                        Ok(_) => buf.width().max(buf.height()) >= curr_thumb_res,
-                        Err(_) => buf.width().max(buf.height()) >= curr_thumb_res,
-                    },
+                    Some(thumb) => thumb.0 >= curr_thumb_res,
                     None => false,
                 };
                 !loading && !cached
@@ -186,8 +191,8 @@ pub struct ThreadPool {
 impl ThreadPool {
     pub fn new<H>(
         workers_cnt: usize,
-        thumb_cache: Arc<DashMap<ImageId, SharedPixelBuffer<Rgba8Pixel>>>,
-        thumb_res: Arc<AtomicU32>,
+        thumb_cache: Arc<DashMap<ImageId, (ThumbRes, SharedPixelBuffer<Rgba8Pixel>)>>,
+        thumb_res: Arc<RwLock<ThumbRes>>,
         full_cache: Arc<DashMap<ImageId, SharedPixelBuffer<Rgba8Pixel>>>,
         window_size: usize,
         grid_view_active: bool,

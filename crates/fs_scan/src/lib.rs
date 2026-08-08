@@ -1,6 +1,7 @@
 use log::{debug, error, info};
 use luminous_plugins::ImageFormat;
 use std::collections::HashSet;
+use std::fmt;
 use std::fs;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
@@ -8,9 +9,27 @@ use std::time::SystemTime;
 use walkdir::WalkDir;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
-pub struct ImageId(pub u32);
+pub struct ImageId(pub usize);
 
-#[derive(Clone, Debug)]
+impl From<usize> for ImageId {
+    fn from(id: usize) -> Self {
+        Self(id)
+    }
+}
+
+impl From<ImageId> for usize {
+    fn from(id: ImageId) -> Self {
+        id.0
+    }
+}
+
+impl fmt::Display for ImageId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct ImageEntry {
     pub id: ImageId,
     pub path: PathBuf,
@@ -18,6 +37,7 @@ pub struct ImageEntry {
     pub size: u64,
 }
 
+#[derive(Clone)]
 pub struct ScanResult {
     pub image_entries: Vec<ImageEntry>,
     pub start_index: usize,
@@ -25,6 +45,7 @@ pub struct ScanResult {
     pub image_formats: ImageFormats,
 }
 
+#[derive(Clone)]
 pub struct ImageFormats {
     pub image_formats: HashSet<ImageFormat>,
 }
@@ -208,7 +229,7 @@ pub fn scan(path_str: &str, extra_image_formats: &Vec<ImageFormat>) -> ScanResul
             }
 
             image_entries.push(ImageEntry {
-                id: ImageId(i as u32),
+                id: ImageId(i),
                 path,
                 mtime,
                 size,
