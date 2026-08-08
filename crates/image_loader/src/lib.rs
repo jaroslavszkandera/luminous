@@ -156,14 +156,14 @@ impl ImageLoader {
         }
     }
 
-    pub fn on_thumb_ready<F>(&mut self, f: F)
+    pub fn on_thumb_ready<F>(&self, f: F)
     where
         F: Fn(ImageId, SharedPixelBuffer<Rgba8Pixel>) + Send + Sync + 'static,
     {
         *self.on_thumb_ready.write().unwrap() = Some(Arc::new(f));
     }
 
-    pub fn on_full_ready<F>(&mut self, f: F)
+    pub fn on_full_ready<F>(&self, f: F)
     where
         F: Fn(ImageId, SharedPixelBuffer<Rgba8Pixel>) + Send + Sync + 'static,
     {
@@ -249,7 +249,7 @@ impl ImageLoader {
     }
 
     /// Resolve the ImageId of the image at position view_idx
-    fn resolve_view_id(&self, view_idx: usize) -> Option<ImageId> {
+    pub fn resolve_view_id(&self, view_idx: usize) -> Option<ImageId> {
         self.catalog_view.read().ok()?.get(view_idx).copied()
     }
 

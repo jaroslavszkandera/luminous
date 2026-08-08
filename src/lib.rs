@@ -54,12 +54,12 @@ impl AppController {
     ) -> Self {
         let window_weak = window.as_weak();
         let plugin_manager = Arc::new(plugin_manager);
-        let mut loader = ImageLoader::new(
+        let loader = Arc::new(ImageLoader::new(
             config.threads,
             config.window_size,
             scan.is_dir,
             Arc::clone(&plugin_manager),
-        );
+        ));
 
         let weak_thumb = window_weak.clone();
         loader.on_thumb_ready(move |index, buffer| {
@@ -87,11 +87,13 @@ impl AppController {
         });
 
         let weak_full = window_weak.clone();
-        // let pm = Arc::clone(&plugin_manager);
+        let loader_full = Arc::clone(&loader);
         loader.on_full_ready(move |id, buf| {
+            let loader_full = loader_full.clone();
             let _ = weak_full.upgrade_in_event_loop(move |ui| {
                 let fv = ui.global::<FullViewState>();
-                if id.0 == fv.get_curr_image_index() as usize {
+                let pos = fv.get_curr_image_index() as usize;
+                if loader_full.resolve_view_id(pos) == Some(id) {
                     fv.set_curr_image(Image::from_rgba8(buf));
                     fv.set_mask_overlay(Image::default());
 
@@ -108,7 +110,7 @@ impl AppController {
         });
 
         Self {
-            loader: Arc::new(loader),
+            loader,
             scan,
             catalog_view: vec![],
             grid_view_idxs: None,
