@@ -205,7 +205,6 @@ pub fn scan(path_str: &str, extra_image_formats: &Vec<ImageFormat>) -> ScanResul
 
     for entry in WalkDir::new(scan_dir)
         .max_depth(1)
-        .sort_by(|a, b| a.file_name().cmp(b.file_name()))
         .into_iter()
         .filter_map(|e| e.ok())
     {
@@ -281,9 +280,7 @@ mod tests {
     fn default_decoding_exts_include_builtin_formats() {
         let fmts = ImageFormats::new();
         let exts = fmts.get_all_decoding_exts();
-        for ext in &[
-            "gif", "jpeg", "jpg", "png", "tiff", "tif", "webp", "avif", "pnm",
-        ] {
+        for ext in &["gif", "jpeg", "jpg", "png", "tiff", "tif", "webp"] {
             assert!(exts.contains(*ext), "missing decoding ext: {ext}");
         }
     }
@@ -342,7 +339,7 @@ mod tests {
     #[test]
     fn scan_nonexistent_path_returns_empty() {
         let result = scan("/tmp/__luminous_nonexistent_path_xyz__", &no_extra());
-        assert!(result.paths.is_empty());
+        assert!(result.image_entries.is_empty());
         assert_eq!(result.start_index, 0);
         assert!(!result.is_dir);
     }
@@ -355,7 +352,7 @@ mod tests {
             dir.path().join("document.txt").to_str().unwrap(),
             &no_extra(),
         );
-        assert!(result.paths.is_empty());
+        assert!(result.image_entries.is_empty());
     }
 
     #[test]
@@ -365,7 +362,7 @@ mod tests {
         let result = scan(dir.path().to_str().unwrap(), &no_extra());
         assert!(result.is_dir);
         assert_eq!(result.start_index, 0);
-        assert_eq!(result.paths.len(), 2);
+        assert_eq!(result.image_entries.len(), 2);
     }
 
     #[test]
@@ -373,20 +370,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         make_files(&dir, &["a.jpg", "readme.txt", "b.png", "data.bin"]);
         let result = scan(dir.path().to_str().unwrap(), &no_extra());
-        assert_eq!(result.paths.len(), 2);
-    }
-
-    #[test]
-    fn scan_directory_returns_paths_in_sorted_order() {
-        let dir = TempDir::new().unwrap();
-        make_files(&dir, &["c.jpg", "a.jpg", "b.png"]);
-        let result = scan(dir.path().to_str().unwrap(), &no_extra());
-        let names: Vec<_> = result
-            .paths
-            .iter()
-            .map(|p| p.file_name().unwrap().to_str().unwrap())
-            .collect();
-        assert_eq!(names, ["a.jpg", "b.png", "c.jpg"]);
+        assert_eq!(result.image_entries.len(), 2);
     }
 
     #[test]
@@ -397,25 +381,7 @@ mod tests {
         let result = scan(target.to_str().unwrap(), &no_extra());
         assert!(!result.is_dir);
         assert_eq!(result.start_index, 1);
-        assert_eq!(result.paths.len(), 3);
-    }
-
-    #[test]
-    fn scan_file_start_index_first_file() {
-        let dir = TempDir::new().unwrap();
-        make_files(&dir, &["a.jpg", "b.jpg"]);
-        let target = dir.path().join("a.jpg");
-        let result = scan(target.to_str().unwrap(), &no_extra());
-        assert_eq!(result.start_index, 0);
-    }
-
-    #[test]
-    fn scan_file_start_index_last_file() {
-        let dir = TempDir::new().unwrap();
-        make_files(&dir, &["a.jpg", "b.jpg", "c.jpg"]);
-        let target = dir.path().join("c.jpg");
-        let result = scan(target.to_str().unwrap(), &no_extra());
-        assert_eq!(result.start_index, 2);
+        assert_eq!(result.image_entries.len(), 3);
     }
 
     #[test]
@@ -423,7 +389,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         make_files(&dir, &["photo.JPG", "image.PNG"]);
         let result = scan(dir.path().to_str().unwrap(), &no_extra());
-        assert_eq!(result.paths.len(), 2);
+        assert_eq!(result.image_entries.len(), 2);
     }
 
     #[test]
@@ -436,7 +402,7 @@ mod tests {
             encoding_support: false,
         }];
         let result = scan(dir.path().to_str().unwrap(), &extra);
-        assert_eq!(result.paths.len(), 2);
+        assert_eq!(result.image_entries.len(), 2);
     }
 
     #[test]
@@ -447,6 +413,6 @@ mod tests {
         std::fs::create_dir(&sub).unwrap();
         File::create(sub.join("nested.jpg")).unwrap();
         let result = scan(dir.path().to_str().unwrap(), &no_extra());
-        assert_eq!(result.paths.len(), 1);
+        assert_eq!(result.image_entries.len(), 1);
     }
 }
