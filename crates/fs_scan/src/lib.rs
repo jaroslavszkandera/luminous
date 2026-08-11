@@ -3,7 +3,6 @@ use luminous_plugins::ImageFormat;
 use std::collections::HashSet;
 use std::fmt;
 use std::fs;
-use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 use walkdir::WalkDir;
@@ -221,7 +220,7 @@ pub fn scan(path_str: &str, extra_image_formats: &Vec<ImageFormat>) -> ScanResul
             let (mtime, size) = match path.metadata() {
                 Ok(meta) => (
                     meta.modified().unwrap_or(SystemTime::UNIX_EPOCH),
-                    meta.size(),
+                    meta.len(),
                 ),
                 Err(e) => {
                     error!(
