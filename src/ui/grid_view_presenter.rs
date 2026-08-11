@@ -66,7 +66,7 @@ pub fn register(window: &MainWindow, app_controller: Rc<RefCell<AppController>>)
         };
         acc.borrow_mut().toggle_select_all(select);
         let gv = ui.global::<GridViewState>();
-        let m = gv.get_visible_model();
+        let m = gv.get_model();
         for i in 0..m.row_count() {
             if let Some(mut item) = m.row_data(i) {
                 if item.selected != select {
@@ -77,29 +77,10 @@ pub fn register(window: &MainWindow, app_controller: Rc<RefCell<AppController>>)
         }
     });
 
-    // TODO: implement better behavior
     let acc = app_controller.clone();
     gv.on_request_range_select(move |start_idx, end_idx| {
-        let Some(ui) = acc.borrow().window_weak.upgrade() else {
-            return;
-        };
-
         acc.borrow_mut()
             .toggle_select_range(start_idx as usize, end_idx as usize);
-
-        let c_ref = acc.borrow();
-        let gv = ui.global::<GridViewState>();
-        let vm = gv.get_visible_model();
-        for i in 0..vm.row_count() {
-            if let Some(mut item) = vm.row_data(i) {
-                let should = c_ref.is_selected(item.abs_index);
-                if item.selected != should {
-                    item.selected = should;
-                    vm.set_row_data(i, item.clone());
-                }
-            }
-        }
-        gv.set_selected_count(c_ref.selected.len() as i32);
     });
 
     let acc = app_controller.clone();

@@ -1,4 +1,5 @@
 import { Button, Palette } from "std-widgets.slint";
+
 export enum ViewMode {
     full,
     grid,
@@ -44,8 +45,8 @@ export struct EditOp {
 
 export struct GridItem {
     image: image,
-    index: int,
-    abs_index: int,
+    grid-id: int, // Position/Layout id
+    img-id: int,  // ImageId
     selected: bool,
 }
 

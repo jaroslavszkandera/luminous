@@ -87,6 +87,7 @@ pub fn register(window: &MainWindow, app_controller: Rc<RefCell<AppController>>)
         });
     });
 
+    // TODO
     // let window_weak = window.as_weak();
     // let acc = app_controller.clone();
     // fv.on_save_curr_mask_overlay(move || {
@@ -199,6 +200,7 @@ fn refresh_interactive_plugins(app_controller: &Rc<RefCell<AppController>>) {
     }
 }
 
+// TODO
 // fn save_mask(mask_buffer: SharedPixelBuffer<Rgba8Pixel>, path: &Path, file_name: &str) -> bool {
 //     let width = mask_buffer.width() as usize;
 //     let height = mask_buffer.height() as usize;

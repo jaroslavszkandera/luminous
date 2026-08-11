@@ -10,8 +10,7 @@ import {
 import { Settings, SettingsState } from "settings.slint";
 
 export global GridViewState {
-    // in property <[GridItem]> model;
-    in property <[GridItem]> visible-model;
+    in property <[GridItem]> model;
     in-out property <int> grid-cols;
     in-out property <int> selected-count: 0;
     in-out property <bool> sort-asc;
@@ -277,11 +276,11 @@ export component GridView inherits Rectangle {
                         property <int> cols: grid-touch.cols;
                         property <int> curr-bucket-res: 0;
 
-                        for item in GridViewState.visible-model: Rectangle {
+                        for item in GridViewState.model: Rectangle {
                             width: parent.item-size;
                             height: parent.item-size;
-                            x: (Math.mod(item.index, parent.cols) * (parent.item-size + parent.gap)) + parent.gap;
-                            y: (floor(item.index / parent.cols) * (parent.item-size + parent.gap)) + parent.gap;
+                            x: (Math.mod(item.grid-id, parent.cols) * (parent.item-size + parent.gap)) + parent.gap;
+                            y: (floor(item.grid-id / parent.cols) * (parent.item-size + parent.gap)) + parent.gap;
                             clip: true;
                             border-width: item.selected ? 3px : 0px;
                             border-color: item.selected ? Palette.accent-background : transparent;
@@ -303,15 +302,15 @@ export component GridView inherits Rectangle {
                                 pointer-event(event) => {
                                     if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
                                         if (event.modifiers.control) {
-                                            GridViewState.toggle-selection(item.index);
-                                            root.last-clicked-index = item.index;
+                                            GridViewState.toggle-selection(item.grid-id);
+                                            root.last-clicked-index = item.grid-id;
                                         } else if (event.modifiers.shift && root.last-clicked-index != -1) {
-                                            GridViewState.request-range-select(root.last-clicked-index, item.index);
+                                            GridViewState.request-range-select(root.last-clicked-index, item.grid-id);
                                         }
                                     }
                                 }
                                 double-clicked => {
-                                    GridViewState.image-selected(item.index);
+                                    GridViewState.image-selected(item.grid-id);
                                     view-changed(ViewMode.full);
                                 }
                             }

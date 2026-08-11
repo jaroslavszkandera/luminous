@@ -20,7 +20,7 @@ export global FullViewState {
     in property <[Plugin]> interactive-plugins;
     in property <image> mask-overlay;
     callback clear-curr-mask-overlay();
-    callback save-curr-mask-overlay();
+    // callback save-curr-mask-overlay();
     callback request-segmentation(string, int, int, int, int, string);
 
     in property <[string]> encoder_extensions;
@@ -537,12 +537,13 @@ export component FullView inherits TouchArea {
                                 }
                             }
 
-                            Button {
-                                text: "Save mask";
-                                clicked => {
-                                    FullViewState.save-curr-mask-overlay();
-                                }
-                            }
+                            // TODO
+                            // Button {
+                            //     text: "Save mask";
+                            //     clicked => {
+                            //         FullViewState.save-curr-mask-overlay();
+                            //     }
+                            // }
                         }
 
                         for plugin[i] in FullViewState.interactive-plugins: InteractivePlugin {

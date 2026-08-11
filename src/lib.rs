@@ -27,7 +27,7 @@ pub(crate) struct AppController {
     pub(crate) catalog_view: Vec<ImageId>,
     pub(crate) grid_view_idxs: Option<GridViewIdxs>,
     pub(crate) selected: HashSet<ImageId>,
-    pub(crate) visible_model: Rc<VecModel<GridItem>>,
+    pub(crate) grid_model: Rc<VecModel<GridItem>>,
     pub(crate) query: Query,
     pub(crate) window_weak: slint::Weak<MainWindow>,
 }
@@ -62,25 +62,24 @@ impl AppController {
         ));
 
         let weak_thumb = window_weak.clone();
-        loader.on_thumb_ready(move |index, buffer| {
-            let t_start = std::time::Instant::now();
+        loader.on_thumb_ready(move |img_id, buffer| {
             let _ = weak_thumb.upgrade_in_event_loop(move |ui| {
+                let t_start = std::time::Instant::now();
                 let gv = ui.global::<GridViewState>();
-                let img = Image::from_rgba8(buffer);
-                let m = gv.get_visible_model();
+                let m = gv.get_model();
 
                 for row in 0..m.row_count() {
                     if let Some(mut item) = m.row_data(row) {
-                        if item.abs_index == index.0 as i32 {
-                            item.image = img.clone();
+                        if item.img_id == img_id.0 as i32 {
+                            item.image = Image::from_rgba8(buffer);
                             m.set_row_data(row, item);
                             break; // Found it
                         }
                     }
                 }
-                trace!(
-                    "on_thumb_ready (id: {:?}): {:.3}ms",
-                    index,
+                debug!(
+                    "on_thumb_ready (img_id: {:?}): {:.3}ms",
+                    img_id,
                     t_start.elapsed().as_secs_f64() * 1000.0
                 );
             });
@@ -88,23 +87,27 @@ impl AppController {
 
         let weak_full = window_weak.clone();
         let loader_full = Arc::clone(&loader);
-        loader.on_full_ready(move |id, buf| {
+        loader.on_full_ready(move |img_id, buf| {
             let loader_full = loader_full.clone();
+            let pm = plugin_manager.clone();
             let _ = weak_full.upgrade_in_event_loop(move |ui| {
                 let fv = ui.global::<FullViewState>();
                 let pos = fv.get_curr_image_index() as usize;
-                if loader_full.resolve_view_id(pos) == Some(id) {
-                    fv.set_curr_image(Image::from_rgba8(buf));
+                if loader_full.resolve_view_id(pos) == Some(img_id) {
+                    fv.set_curr_image(Image::from_rgba8(buf.clone()));
                     fv.set_mask_overlay(Image::default());
-
-                    // TODO: Auto set image in GUI
-                    // for plugin in pm.get_interactive_plugins() {
-                    //     let p = Arc::clone(plugin);
-                    //     let buf = buffer.clone();
-                    //     std::thread::spawn(move || {
-                    //         p.set_interactive_image(&buf);
-                    //     });
-                    // }
+                    let plugins_auto_set = false; // TODO
+                    if plugins_auto_set {
+                        for plugin in pm.get_interactive_plugins() {
+                            if plugins_auto_set && let Some(path) = loader_full.get_path(pos) {
+                                let p = Arc::clone(plugin);
+                                let b = buf.clone();
+                                std::thread::spawn(move || {
+                                    p.set_interactive_image(&b, &path);
+                                });
+                            }
+                        }
+                    }
                 }
             });
         });
@@ -115,7 +118,7 @@ impl AppController {
             catalog_view: vec![],
             grid_view_idxs: None,
             selected: HashSet::new(),
-            visible_model: Rc::new(VecModel::default()),
+            grid_model: Rc::new(VecModel::default()),
             query: Query {
                 text: String::new(),
                 sort: SortType::Name,
@@ -146,7 +149,7 @@ impl AppController {
 
         // TODO: plugin search next...
 
-        let image_entries = |id: ImageId| &self.scan.image_entries[id.0 as usize];
+        let image_entries = |img_id: ImageId| &self.scan.image_entries[img_id.0 as usize];
         match self.query.sort {
             SortType::Name => {
                 ids.sort_by(|&a, &b| image_entries(a).path.cmp(&image_entries(b).path))
@@ -231,31 +234,30 @@ impl AppController {
         let grid_vec: Vec<GridItem> = self.catalog_view[gv_idxs.start..gv_idxs.end]
             .iter()
             .enumerate()
-            .map(|(i, &id)| GridItem {
-                // TODO: rename the idxs to make sense
-                abs_index: id.0 as i32,
-                index: (gv_idxs.start + i) as i32,
+            .map(|(i, &img_id)| GridItem {
+                img_id: img_id.0 as i32,
+                grid_id: (gv_idxs.start + i) as i32,
                 image: self
                     .loader
-                    .get_grid_thumb(id)
+                    .get_grid_thumb(img_id)
                     .map(Image::from_rgba8)
                     .unwrap_or_default(),
-                selected: self.selected.contains(&id),
+                selected: self.selected.contains(&img_id),
             })
             .collect();
-        self.visible_model.set_vec(grid_vec);
+        self.grid_model.set_vec(grid_vec);
 
         let Some(ui) = self.window_weak.upgrade() else {
             return;
         };
         let gv = ui.global::<GridViewState>();
-        gv.set_visible_model(self.visible_model.clone().into());
+        gv.set_model(self.grid_model.clone().into());
 
         trace!(
-            "visible_model: {:?} catalog_view: {:?}",
-            self.visible_model
+            "grid_model: {:?} catalog_view: {:?}",
+            self.grid_model
                 .iter()
-                .map(|id| id.abs_index)
+                .map(|grid_item| grid_item.img_id)
                 .collect::<Vec<i32>>(),
             self.catalog_view
         );
@@ -613,22 +615,6 @@ impl AppController {
             .expect("Failed to spawn segmentation thread");
     }
 
-    // fn notify_interactive_plugin(plugin_id: String, loader: &Arc<ImageLoader>) {
-    //     let loader = loader.clone();
-    //     let plugin_manager = loader.plugin_manager.clone();
-    //     let curr_active_path = loader.get_curr_img_path();
-    //     let curr_active_buffer = loader.get_curr_active_buffer();
-    //     loader.pool.spawn(move || {
-    //         if let Some(plugin) = plugin_manager.get_plugin_by_id(&plugin_id) {
-    //             if let Some(buf) = curr_active_buffer
-    //                 && let Some(path) = curr_active_path
-    //             {
-    //                 plugin.set_interactive_image(&buf, &path);
-    //             }
-    //         }
-    //     });
-    // }
-
     fn toggle_select_all(&mut self, select: bool) {
         if select {
             self.scan
@@ -646,38 +632,48 @@ impl AppController {
     fn toggle_select_range(&mut self, start_idx: usize, end_idx: usize) {
         let lo = start_idx.min(end_idx);
         let hi = start_idx.max(end_idx);
-        let target = self.selected.contains(&self.catalog_view[start_idx]);
 
-        for row in lo..=hi {
-            let id = self.catalog_view[row];
-            if target {
-                self.selected.insert(id);
-            } else {
-                self.selected.remove(&id);
-            }
+        self.selected.clear();
+        for idx in lo..=hi {
+            let img_id = self.catalog_view[idx];
+            self.selected.insert(img_id);
         }
+
+        self.grid_view_idxs = None;
+        let weak_ui = self.window_weak.clone();
+        let selected_count = self.selected.len();
+        let _ = slint::invoke_from_event_loop(move || {
+            if let Some(ui) = weak_ui.upgrade() {
+                let gv = ui.global::<GridViewState>();
+                gv.set_selected_count(selected_count as i32);
+                ui.invoke_refresh_grid();
+            }
+        });
     }
 
-    fn toggle_select_single(&mut self, index: i32) {
-        debug!("handle_toggle_selection {}", index);
+    fn toggle_select_single(&mut self, grid_id: i32) {
+        debug!("handle_toggle_selection {}", grid_id);
         let Some(ui) = self.window_weak.upgrade() else {
             return;
         };
+        let Some(grid_view_idxs) = self.grid_view_idxs else {
+            return;
+        };
         let gv = ui.global::<GridViewState>();
-        let model = gv.get_visible_model();
+        let model = gv.get_model();
 
         let mut found = false;
         let mut is_selected = false;
+        let grid_model_id = grid_id as usize - grid_view_idxs.start;
 
-        for i in 0..model.row_count() {
-            if let Some(mut item) = model.row_data(i) {
-                if item.index == index {
-                    item.selected = !item.selected;
-                    is_selected = item.selected;
-                    model.set_row_data(i, item.clone());
-                    found = true;
-                    break;
-                }
+        if let Some(mut item) = model.row_data(grid_model_id) {
+            if item.grid_id == grid_id {
+                item.selected = !item.selected;
+                is_selected = item.selected;
+                model.set_row_data(grid_model_id, item.clone());
+                found = true;
+            } else {
+                error!("handle_toggle_selection wrong grid model id conversion");
             }
         }
 
@@ -686,17 +682,13 @@ impl AppController {
             return;
         }
 
-        let id = self.catalog_view[index as usize];
+        let img_id = self.catalog_view[grid_id as usize];
         if is_selected {
-            self.selected.insert(id);
+            self.selected.insert(img_id);
         } else {
-            self.selected.remove(&id);
+            self.selected.remove(&img_id);
         }
         gv.set_selected_count(self.selected.len() as i32);
-    }
-
-    fn is_selected(&self, abs_index: i32) -> bool {
-        self.selected.contains(&ImageId(abs_index as usize))
     }
 
     fn collect_selected_paths(&self) -> Vec<std::path::PathBuf> {
