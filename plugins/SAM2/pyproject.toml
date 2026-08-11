@@ -1,6 +1,6 @@
 [project]
 name = "SAM_2"
-version = "0.1.0"
+version = "0.1.1"
 description = "Segment Anything Model 2 (SAM 2) for Interactive Segmentation"
 readme = "README.md"
 requires-python = ">=3.12"

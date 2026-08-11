@@ -77,7 +77,7 @@ impl AppController {
                         }
                     }
                 }
-                debug!(
+                trace!(
                     "on_thumb_ready (img_id: {:?}): {:.3}ms",
                     img_id,
                     t_start.elapsed().as_secs_f64() * 1000.0

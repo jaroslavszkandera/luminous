@@ -1,6 +1,6 @@
 {
   "name": "Segment Anything Model 2 (SAM2) for Interactive Segmentation",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "backend": "daemon",
   "interpreter": "uv run",
   "capabilities": [{ "interactive": ["click", "select"] }],

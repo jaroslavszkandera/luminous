@@ -45,7 +45,7 @@ See [ProjectDirs::data_dir](https://docs.rs/directories/latest/directories/struc
 | CLIP        | Semantic image search               |
 | HDF5        | Hierarchical Data Format v5 support |
 | HEIC        | HEIC format decoding                |
-| ARC         | Sony Alpha Raw decoding             |
+| ARW         | Sony Alpha Raw decoding             |
 | SAM2        | Interactive segmentation            |
 | SAM3        | Multimodal interactive segmentation |
 | WDS         | WebDataset encoding support         |
